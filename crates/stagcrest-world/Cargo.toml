@@ -1,0 +1,12 @@
+[package]
+name = "stagcrest-world"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+stagcrest-protocol.workspace = true
+glam.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]

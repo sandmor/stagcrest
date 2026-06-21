@@ -1,0 +1,13 @@
+[package]
+name = "stagcrest-core"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+stagcrest-mod-sdk = { path = "../../crates/stagcrest-mod-sdk" }
+
+[features]
+default = []

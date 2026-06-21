@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stagcrest</title>
+    <link data-trunk rel="rust" href="crates/stagcrest-app/Cargo.toml" data-bin="stagcrest" />
+    <link data-trunk rel="copy-dir" href="mods" />
+    <link data-trunk rel="copy-dir" href="assets" />
+    <link data-trunk rel="copy-dir" href="resourcepacks" />
+    <link data-trunk rel="copy-file" href="public/_headers" />
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #0a0a0f;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #error-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        font-family: system-ui, sans-serif;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="error-overlay">
+      <div>
+        <h1>WebGPU Required</h1>
+        <p>Stagcrest needs a browser with WebGPU support.</p>
+      </div>
+    </div>
+    <script>
+      if (!navigator.gpu) {
+        document.getElementById("error-overlay").style.display = "flex";
+      }
+    </script>
+  </body>
+</html>

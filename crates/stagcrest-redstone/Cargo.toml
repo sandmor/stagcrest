@@ -1,0 +1,9 @@
+[package]
+name = "stagcrest-redstone"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+stagcrest-protocol.workspace = true
+stagcrest-world.workspace = true
+stagcrest-mod-host = { path = "../stagcrest-mod-host" }

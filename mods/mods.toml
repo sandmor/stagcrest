@@ -1,0 +1,6 @@
+[[mods]]
+id = "stagcrest-core"
+name = "Stagcrest Core"
+version = "0.1.0"
+wasm = "stagcrest-core.wasm"
+assets = "assets"

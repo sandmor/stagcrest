@@ -1,0 +1,6 @@
+# Example manifest for a slim web deploy pack (see scripts/prepare-web-resourcepack.sh).
+
+[[packs]]
+id = "web"
+path = "web"
+enabled = true

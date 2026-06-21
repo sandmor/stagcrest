@@ -1,0 +1,38 @@
+[package]
+name = "stagcrest-app"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "stagcrest_app"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "stagcrest"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true, features = ["dynamic_linking"] }
+stagcrest-protocol.workspace = true
+stagcrest-world.workspace = true
+stagcrest-mesh.workspace = true
+stagcrest-redstone.workspace = true
+stagcrest-mod-host.workspace = true
+stagcrest-render.workspace = true
+glam.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+futures-lite = "2.6"
+
+[features]
+default = ["native"]
+native = ["stagcrest-mesh/parallel", "tracing-subscriber"]
+wasm = []
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+stagcrest-mesh = { workspace = true, features = ["parallel"] }

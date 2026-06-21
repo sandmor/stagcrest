@@ -1,0 +1,7 @@
+# Copy to resourcepacks.toml and place a Minecraft-format pack folder in this directory.
+# See README "Resource packs (optional)".
+
+[[packs]]
+id = "my-pack"
+path = "My Pack"
+enabled = true

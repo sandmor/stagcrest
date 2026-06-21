@@ -1,0 +1,19 @@
+[package]
+name = "stagcrest-mesh"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+stagcrest-protocol.workspace = true
+stagcrest-world.workspace = true
+stagcrest-mod-host = { path = "../stagcrest-mod-host" }
+glam.workspace = true
+bytemuck.workspace = true
+
+[features]
+default = []
+parallel = ["rayon"]
+
+[dependencies.rayon]
+workspace = true
+optional = true

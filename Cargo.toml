@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/stagcrest-protocol",
+    "crates/stagcrest-world",
+    "crates/stagcrest-mesh",
+    "crates/stagcrest-redstone",
+    "crates/stagcrest-mod-sdk",
+    "crates/stagcrest-mod-host",
+    "crates/stagcrest-render",
+    "crates/stagcrest-app",
+    "mods/stagcrest-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+bevy = { version = "0.16", default-features = false, features = [
+    "bevy_asset",
+    "bevy_state",
+    "bevy_ui",
+    "bevy_ui_picking_backend",
+    "bevy_winit",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_text",
+    "bevy_sprite",
+    "default_font",
+    "multi_threaded",
+    "tonemapping_luts",
+    "x11",
+    "wayland",
+    "webgl2",
+    "webgpu",
+] }
+glam = { version = "0.29", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+tracing = "0.1"
+wasmi = "0.32"
+gloo-net = "0.6"
+rayon = "1.10"
+image = { version = "0.25", default-features = false, features = ["png"] }
+noise = "0.9"
+bytemuck = { version = "1", features = ["derive"] }
+
+stagcrest-protocol = { path = "crates/stagcrest-protocol" }
+stagcrest-world = { path = "crates/stagcrest-world" }
+stagcrest-mesh = { path = "crates/stagcrest-mesh" }
+stagcrest-redstone = { path = "crates/stagcrest-redstone" }
+stagcrest-mod-sdk = { path = "crates/stagcrest-mod-sdk" }
+stagcrest-mod-host = { path = "crates/stagcrest-mod-host" }
+stagcrest-render = { path = "crates/stagcrest-render" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "z"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

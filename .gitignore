@@ -1,0 +1,11 @@
+/target/
+/dist/
+**/*.rs.bk
+.DS_Store
+mods/**/*.wasm
+
+# Local Minecraft-format resource packs (not shipped in the repo).
+/resourcepacks/*
+!/resourcepacks/.gitkeep
+!/resourcepacks/resourcepacks.toml.example
+!/resourcepacks/resourcepacks.web.toml.example

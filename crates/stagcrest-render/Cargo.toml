@@ -1,0 +1,16 @@
+[package]
+name = "stagcrest-render"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy.workspace = true
+stagcrest-protocol.workspace = true
+stagcrest-mesh.workspace = true
+stagcrest-mod-host.workspace = true
+stagcrest-world.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+
+[features]
+default = []
