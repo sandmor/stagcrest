@@ -4,7 +4,9 @@ use crate::registry::BlockRegistry;
 use crate::resourcepack::{ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES};
 use crate::runtime::{load_mod, ModLoadContext};
 use stagcrest_mod_sdk::RegisterBlockRequest;
-use stagcrest_protocol::{BlockDef, BlockFaceTextures, BlockId, ModManifest, ModsManifest, RedstoneDef};
+use stagcrest_protocol::{
+    BlockDef, BlockFaceTextures, BlockGeometry, BlockId, ModManifest, ModsManifest, RedstoneDef,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -134,6 +136,12 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         face_textures,
         redstone,
         placeable: json.placeable,
+        geometry: json
+            .geometry
+            .as_deref()
+            .or(json.shape.as_deref())
+            .map(BlockGeometry::from_str)
+            .unwrap_or_default(),
     });
 }
 

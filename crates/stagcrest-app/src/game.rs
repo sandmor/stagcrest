@@ -1,6 +1,6 @@
 use crate::player;
 use bevy::prelude::*;
-use stagcrest_mod_host::{BlockRegistry, ModHost, TextureAtlas, WorldGenState};
+use stagcrest_mod_host::{BlockRegistry, ModHost, ModelRegistry, TextureAtlas, WorldGenState};
 use stagcrest_protocol::ChunkPos;
 use stagcrest_redstone::RedstoneWorld;
 use stagcrest_render::{BlockAtlasResource, MeshCacheResource, VoxelCamera, VoxelRenderPlugin};
@@ -20,6 +20,7 @@ pub struct ModContext {
     pub host: ModHost,
     pub atlas: TextureAtlas,
     pub registry: BlockRegistry,
+    pub models: ModelRegistry,
 }
 
 #[derive(Resource)]
@@ -94,6 +95,7 @@ fn cleanup_game_session(
     commands.remove_resource::<TerrainGen>();
     commands.remove_resource::<RedstoneResource>();
     commands.remove_resource::<BlockAtlasResource>();
+    commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<LastStreamCenter>();
     // MeshCacheResource is re-inited by VoxelRenderPlugin; reset it for the next session.
     commands.insert_resource(MeshCacheResource::default());
@@ -168,6 +170,7 @@ fn chunk_streaming(
 
 fn rebuild_meshes(
     mod_ctx: Option<Res<ModContext>>,
+    redstone: Option<Res<RedstoneResource>>,
     mut world: ResMut<StagcrestWorldResource>,
     mut cache: ResMut<MeshCacheResource>,
 ) {
@@ -176,7 +179,10 @@ fn rebuild_meshes(
     if dirty.is_empty() {
         return;
     }
-    cache.0.rebuild_dirty(&world.0, &ctx.registry, dirty);
+    let power = redstone
+        .as_ref()
+        .map(|r| &r.0 as &dyn stagcrest_mod_host::RedstonePowerLookup);
+    cache.0.rebuild_dirty(&world.0, &ctx.registry, &ctx.models, power, dirty);
 }
 
 fn update_voxel_camera(

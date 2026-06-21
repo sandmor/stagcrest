@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use stagcrest_mesh::MeshCache;
-use stagcrest_mod_host::{ColormapSet, ModHost, WorldGenState};
+use stagcrest_mod_host::{ColormapSet, ModHost, ModelRegistry, WorldGenState};
 use stagcrest_protocol::ChunkPos;
 use stagcrest_render::BlockAtlasResource;
 
@@ -96,12 +96,13 @@ fn apply_loaded_content(
     let all_chunks: Vec<_> = world.0.loaded_chunk_positions().collect();
     world.0.dirty_chunks.extend(all_chunks);
     let dirty = world.0.take_dirty_chunks();
-    cache.rebuild_dirty(&world.0, &registry, dirty);
+    cache.rebuild_dirty(&world.0, &registry, &ModelRegistry::new(), None, dirty);
 
     commands.insert_resource(ModContext {
         host,
         atlas: atlas.clone(),
         registry,
+        models: ModelRegistry::new(),
     });
     commands.insert_resource(world);
     commands.insert_resource(TerrainGen(terrain));

@@ -11,7 +11,7 @@ Mod-first voxel engine in Rust: **Bevy** for UI and app shell, **wgpu** (via Bev
 
 ## Features
 
-- Creative mode: fly, place/break blocks, hotbar
+- Creative mode: fly, place/break blocks, hotbar with block previews, creative block picker
 - Greedy mesh chunk rendering with texture atlas from mod PNGs
 - Basic redstone (dust, torch, block, lever, button, repeater)
 - Main menu → mod loading → in-game flow (Bevy UI)
@@ -136,6 +136,8 @@ resourcepacks/         — local MC-format packs (gitignored; see example manife
 | LMB                  | Break block                       |
 | RMB                  | Place / toggle redstone component |
 | 1–9                  | Hotbar slot                       |
+| Scroll wheel         | Cycle hotbar slot                 |
+| E                    | Creative block picker             |
 | Escape               | Release cursor / pause            |
 
 ## Mod API

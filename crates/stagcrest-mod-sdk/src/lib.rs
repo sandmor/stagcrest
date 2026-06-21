@@ -12,6 +12,11 @@ pub struct RegisterBlockRequest {
     pub bottom_texture: String,
     pub sides_texture: String,
     pub placeable: bool,
+    #[serde(default)]
+    pub geometry: Option<String>,
+    /// Deprecated: use `geometry` instead.
+    #[serde(default)]
+    pub shape: Option<String>,
     pub redstone: Option<RegisterRedstoneRequest>,
 }
 

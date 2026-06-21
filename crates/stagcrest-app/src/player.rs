@@ -120,9 +120,13 @@ pub fn block_interaction(
         {
             return;
         }
+        let break_pos = hit.block;
         world
             .0
-            .set_block(hit.block, air, stagcrest_protocol::BlockState(0));
+            .set_block(break_pos, air, stagcrest_protocol::BlockState(0));
+        redstone
+            .0
+            .notify_block_changed(break_pos, &world.0, &ctx.registry);
     } else if mouse.just_pressed(MouseButton::Right) {
         let (hit_id, _) = world.0.get_block(hit.block);
         if ctx
@@ -131,7 +135,9 @@ pub fn block_interaction(
             .and_then(|d| d.redstone)
             .is_some()
         {
-            redstone.0.toggle_block(hit.block, &world.0, &ctx.registry);
+            redstone
+                .0
+                .toggle_block(hit.block, &mut world.0, &ctx.registry);
             return;
         }
 
@@ -145,17 +151,36 @@ pub fn block_interaction(
         }
         let (existing, _) = world.0.get_block(place_pos);
         if existing == air {
-            world
-                .0
-                .set_block(place_pos, selected.0, stagcrest_protocol::BlockState(0));
-            if ctx
+            let nx = hit.face_normal.x as i32;
+            let ny = hit.face_normal.y as i32;
+            let nz = hit.face_normal.z as i32;
+
+            let block_state = if ctx
                 .registry
                 .block(selected.0)
-                .and_then(|d| d.redstone)
-                .is_some()
+                .is_some_and(|d| d.namespaced_id == "stagcrest:redstone_torch")
             {
-                redstone.0.propagate_from(place_pos, 0);
-            }
+                let Some(state) = stagcrest_mod_host::validate_torch_placement(
+                    |x, y, z| {
+                        let (id, _) = world.0.get_block(stagcrest_protocol::BlockPos::new(x, y, z));
+                        ctx.registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
+                    },
+                    place_pos,
+                    nx,
+                    ny,
+                    nz,
+                ) else {
+                    return;
+                };
+                state
+            } else {
+                stagcrest_protocol::BlockState(0)
+            };
+
+            world.0.set_block(place_pos, selected.0, block_state);
+            redstone
+                .0
+                .notify_block_changed(place_pos, &world.0, &ctx.registry);
         }
     }
 }

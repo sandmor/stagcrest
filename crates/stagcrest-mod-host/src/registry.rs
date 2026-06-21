@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
     AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures, FaceTexture,
-    TextureDef, TextureId, TintKind,
+    TextureDef, TextureId, TintKind, torch_lit,
 };
 use std::collections::HashMap;
 
@@ -141,23 +141,20 @@ impl BlockRegistry {
         state: BlockState,
     ) -> Option<BlockFaceTextures> {
         let def = self.block(id)?;
+        if def.namespaced_id == "stagcrest:redstone_torch" {
+            if !torch_lit(state) {
+                return Some(def.face_textures);
+            }
+            return self.resolve_face_textures(
+                "stagcrest:redstone_torch_on",
+                "stagcrest:redstone_torch_on",
+                "stagcrest:redstone_torch_on",
+            );
+        }
         if state.0 == 0 {
             return Some(def.face_textures);
         }
-        let powered = match def.namespaced_id.as_str() {
-            "stagcrest:redstone_dust" => self.resolve_face_textures(
-                "stagcrest:redstone_dust_on",
-                "stagcrest:redstone_dust_on",
-                "stagcrest:redstone_dust_on",
-            ),
-            "stagcrest:redstone_torch" => self.resolve_face_textures(
-                "stagcrest:redstone_torch_on",
-                "stagcrest:redstone_torch_on",
-                "stagcrest:redstone_torch_on",
-            ),
-            _ => None,
-        };
-        Some(powered.unwrap_or(def.face_textures))
+        Some(def.face_textures)
     }
 
     pub fn tint_for_kind(kind: TintKind) -> f32 {

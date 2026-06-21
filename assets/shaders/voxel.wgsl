@@ -9,6 +9,9 @@
 @group(2) @binding(1) var atlas_s: sampler;
 @group(2) @binding(2) var<uniform> grass_tint: vec4<f32>;
 @group(2) @binding(3) var<uniform> foliage_tint: vec4<f32>;
+@group(2) @binding(4) var<uniform> redstone_tint_dark: vec4<f32>;
+@group(2) @binding(5) var<uniform> redstone_tint_bright: vec4<f32>;
+@group(2) @binding(6) var<uniform> alpha_cutout: u32;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -40,6 +43,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 }
 
 fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
+    if tint >= 3.0 {
+        let power = clamp(tint - 3.0, 0.0, 1.0);
+        let rs = mix(redstone_tint_dark.rgb, redstone_tint_bright.rgb, power);
+        return rgb * rs;
+    }
     if tint >= 1.5 {
         return rgb * foliage_tint.rgb;
     }
@@ -52,10 +60,16 @@ fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var base = textureSample(atlas_tex, atlas_s, in.uv);
+    if alpha_cutout != 0u && base.a < 0.5 {
+        discard;
+    }
     var rgb = apply_tint(base.rgb, in.tint);
 
     if in.overlay_tint >= 0.5 {
         let ov = textureSample(atlas_tex, atlas_s, in.overlay_uv);
+        if alpha_cutout != 0u && ov.a < 0.5 {
+            discard;
+        }
         let tinted_overlay = apply_tint(ov.rgb, in.overlay_tint);
         rgb = mix(rgb, tinted_overlay, ov.a);
     }

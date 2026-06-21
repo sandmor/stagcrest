@@ -1,12 +1,12 @@
-use stagcrest_mod_host::BlockRegistry;
-use stagcrest_protocol::{BlockPos, BlockState};
+use stagcrest_mod_host::{BlockRegistry, RedstonePowerLookup};
+use stagcrest_protocol::{BlockPos, BlockState, set_torch_lit};
 use stagcrest_world::World;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone, Default)]
 pub struct RedstoneWorld {
     power: HashMap<BlockPos, u8>,
-    scheduled: VecDeque<(BlockPos, u8)>,
+    scheduled: VecDeque<BlockPos>,
 }
 
 impl RedstoneWorld {
@@ -18,27 +18,110 @@ impl RedstoneWorld {
         self.power.get(&pos).copied().unwrap_or(0)
     }
 
-    pub fn queue_update(&mut self, pos: BlockPos, power: u8) {
-        self.scheduled.push_back((pos, power));
+    pub fn queue_update(&mut self, pos: BlockPos) {
+        self.scheduled.push_back(pos);
     }
 
-    pub fn tick(&mut self, world: &mut World, registry: &BlockRegistry) {
-        let mut visited = HashSet::new();
-        while let Some((pos, power)) = self.scheduled.pop_front() {
-            if !visited.insert(pos) {
-                continue;
+    pub fn notify_block_changed(
+        &mut self,
+        pos: BlockPos,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        self.queue_update(pos);
+        for (dx, dy, dz) in neighbors() {
+            let npos = BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz);
+            let (nid, _) = world.get_block(npos);
+            if registry.block(nid).and_then(|d| d.redstone).is_some() {
+                self.queue_update(npos);
             }
-            self.set_power_at(pos, power, world, registry);
         }
     }
 
-    fn set_power_at(
-        &mut self,
+    pub fn tick(&mut self, world: &mut World, registry: &BlockRegistry) {
+        const MAX_STEPS: usize = 4096;
+        let mut steps = 0usize;
+        while let Some(pos) = self.scheduled.pop_front() {
+            if steps >= MAX_STEPS {
+                break;
+            }
+            steps += 1;
+            self.set_power_at(pos, world, registry);
+        }
+    }
+
+    fn evaluate_power_at(&self, pos: BlockPos, world: &World, registry: &BlockRegistry) -> u8 {
+        let (id, state) = world.get_block(pos);
+        let Some(def) = registry.block(id) else {
+            return 0;
+        };
+        let Some(rs) = def.redstone else {
+            return 0;
+        };
+
+        if rs.always_on {
+            return rs.emits;
+        }
+
+        if rs.invertible {
+            let side = self.max_neighbor_power(pos, world, registry);
+            return if side > 0 { 0 } else { rs.emits };
+        }
+
+        if rs.receives && !rs.conducts {
+            return if state.0 > 0 { rs.emits.max(15) } else { 0 };
+        }
+
+        if rs.conducts {
+            return self.max_neighbor_power(pos, world, registry).saturating_sub(1);
+        }
+
+        if rs.receives {
+            return if state.0 > 0 { rs.emits } else { 0 };
+        }
+
+        0
+    }
+
+    fn max_neighbor_power(&self, pos: BlockPos, world: &World, registry: &BlockRegistry) -> u8 {
+        let mut max_power = 0u8;
+        for (dx, dy, dz) in neighbors() {
+            let npos = BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz);
+            max_power = max_power.max(self.neighbor_output_power(npos, world, registry));
+        }
+        max_power
+    }
+
+    fn neighbor_output_power(
+        &self,
         pos: BlockPos,
-        power: u8,
-        world: &mut World,
+        world: &World,
         registry: &BlockRegistry,
-    ) {
+    ) -> u8 {
+        let (id, state) = world.get_block(pos);
+        let Some(def) = registry.block(id) else {
+            return 0;
+        };
+        let Some(rs) = def.redstone else {
+            return 0;
+        };
+
+        if rs.always_on {
+            return rs.emits;
+        }
+        if rs.invertible {
+            return self.power_at(pos);
+        }
+        if rs.conducts {
+            return self.power_at(pos);
+        }
+        if rs.receives && state.0 > 0 {
+            return rs.emits;
+        }
+        self.power_at(pos)
+    }
+
+    fn set_power_at(&mut self, pos: BlockPos, world: &mut World, registry: &BlockRegistry) {
         let (id, state) = world.get_block(pos);
         let Some(def) = registry.block(id) else {
             return;
@@ -48,79 +131,42 @@ impl RedstoneWorld {
         };
 
         let current = self.power.get(&pos).copied().unwrap_or(0);
-        let new_power = if rs.always_on {
-            rs.emits
-        } else if rs.invertible {
-            if power > 0 {
-                0
-            } else {
-                rs.emits
+        let new_power = self.evaluate_power_at(pos, world, registry);
+
+        if new_power != current {
+            if rs.conducts {
+                world.mark_dirty_and_neighbors(pos);
             }
-        } else if rs.conducts {
-            power.saturating_sub(1)
-        } else {
-            power
-        };
 
-        if new_power == current {
-            return;
-        }
+            if new_power == 0 {
+                self.power.remove(&pos);
+            } else {
+                self.power.insert(pos, new_power);
+            }
 
-        if new_power == 0 {
-            self.power.remove(&pos);
-        } else {
-            self.power.insert(pos, new_power);
-        }
-
-        if rs.conducts || rs.receives {
-            let state_val = if new_power > 0 { 1 } else { 0 };
-            if state.0 != state_val {
-                world.set_block(pos, id, BlockState(state_val));
+            if rs.conducts || rs.receives {
+                let state_val = if new_power > 0 { 1 } else { 0 };
+                if def.namespaced_id == "stagcrest:redstone_torch" {
+                    let new_state = set_torch_lit(state, state_val != 0);
+                    if state.0 != new_state.0 {
+                        world.set_block(pos, id, new_state);
+                    }
+                } else if state.0 != state_val {
+                    world.set_block(pos, id, BlockState(state_val));
+                }
             }
         }
 
         for (dx, dy, dz) in neighbors() {
             let npos = BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz);
             let (nid, _) = world.get_block(npos);
-            if let Some(ndef) = registry.block(nid) {
-                if ndef.redstone.is_some() {
-                    let src = self.compute_source_power(pos, world, registry);
-                    self.scheduled.push_back((npos, src));
-                }
+            if registry.block(nid).and_then(|d| d.redstone).is_some() {
+                self.scheduled.push_back(npos);
             }
         }
     }
 
-    fn compute_source_power(&self, from: BlockPos, world: &World, registry: &BlockRegistry) -> u8 {
-        let mut max_power = 0u8;
-        for (dx, dy, dz) in neighbors() {
-            let npos = BlockPos::new(from.x + dx, from.y + dy, from.z + dz);
-            let p = self.power.get(&npos).copied().unwrap_or(0);
-            let (nid, _) = world.get_block(npos);
-            if let Some(ndef) = registry.block(nid) {
-                if let Some(rs) = ndef.redstone {
-                    if rs.conducts {
-                        max_power = max_power.max(p);
-                    } else if rs.emits > 0 && !rs.invertible {
-                        max_power = max_power.max(rs.emits);
-                    } else if p > 0 {
-                        max_power = max_power.max(p);
-                    }
-                }
-            }
-        }
-        let (id, _) = world.get_block(from);
-        if let Some(def) = registry.block(id) {
-            if let Some(rs) = def.redstone {
-                if rs.always_on {
-                    return rs.emits;
-                }
-            }
-        }
-        max_power
-    }
-
-    pub fn toggle_block(&mut self, pos: BlockPos, world: &World, registry: &BlockRegistry) {
+    pub fn toggle_block(&mut self, pos: BlockPos, world: &mut World, registry: &BlockRegistry) {
         let (id, state) = world.get_block(pos);
         let Some(def) = registry.block(id) else {
             return;
@@ -131,14 +177,26 @@ impl RedstoneWorld {
         if rs.always_on {
             return;
         }
-        let on = state.0 > 0;
-        let power = if on { 0 } else { rs.emits.max(15) };
-        self.queue_update(pos, power);
-        let _ = registry;
+        let on = state.0 & 1 != 0;
+        let new_state = if def.namespaced_id == "stagcrest:redstone_torch" {
+            set_torch_lit(state, !on)
+        } else if on {
+            BlockState(0)
+        } else {
+            BlockState(1)
+        };
+        world.set_block(pos, id, new_state);
+        self.notify_block_changed(pos, world, registry);
     }
 
-    pub fn propagate_from(&mut self, pos: BlockPos, power: u8) {
-        self.queue_update(pos, power);
+    pub fn propagate_from(&mut self, pos: BlockPos, _power: u8) {
+        self.queue_update(pos);
+    }
+}
+
+impl RedstonePowerLookup for RedstoneWorld {
+    fn power_at(&self, pos: BlockPos) -> u8 {
+        RedstoneWorld::power_at(self, pos)
     }
 }
 
@@ -155,14 +213,7 @@ fn neighbors() -> [(i32, i32, i32); 6] {
 
 pub fn init_redstone_blocks(redstone: &mut RedstoneWorld, world: &World, registry: &BlockRegistry) {
     for pos in find_redstone_blocks(world, registry) {
-        let (id, _) = world.get_block(pos);
-        if let Some(def) = registry.block(id) {
-            if let Some(rs) = def.redstone {
-                if rs.always_on {
-                    redstone.propagate_from(pos, rs.emits);
-                }
-            }
-        }
+        redstone.notify_block_changed(pos, world, registry);
     }
 }
 

@@ -34,6 +34,12 @@ pub struct VoxelMaterial {
     pub grass_tint: LinearRgba,
     #[uniform(3)]
     pub foliage_tint: LinearRgba,
+    #[uniform(4)]
+    pub redstone_tint_dark: LinearRgba,
+    #[uniform(5)]
+    pub redstone_tint_bright: LinearRgba,
+    #[uniform(6)]
+    pub alpha_cutout: u32,
     pub alpha_mode: AlphaMode,
 }
 

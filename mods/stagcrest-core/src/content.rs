@@ -82,15 +82,33 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     register_texture_from_pack(reg, "stagcrest:bedrock", "bedrock", (40, 40, 40));
     register_texture_from_pack(
         reg,
-        "stagcrest:redstone_dust_off",
+        "stagcrest:redstone_dust_dot",
         "redstone_dust_dot",
-        (160, 0, 0),
+        (140, 0, 0),
     );
     register_texture_from_pack(
         reg,
-        "stagcrest:redstone_dust_on",
+        "stagcrest:redstone_dust_line",
         "redstone_dust_line0",
-        (255, 0, 0),
+        (180, 0, 0),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:redstone_dust_corner",
+        "redstone_dust_corner0",
+        (180, 0, 0),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:redstone_dust_t",
+        "redstone_dust_t0",
+        (180, 0, 0),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:redstone_dust_cross",
+        "redstone_dust_cross0",
+        (200, 0, 0),
     );
     register_texture_from_pack(
         reg,
@@ -130,6 +148,7 @@ fn register_solid_block(
     solid: bool,
     placeable: bool,
     redstone: Option<RegisterRedstoneRequest>,
+    geometry: Option<&str>,
 ) {
     reg.register_block(RegisterBlockRequest {
         namespaced_id: id.to_string(),
@@ -142,6 +161,8 @@ fn register_solid_block(
         bottom_texture: texture.to_string(),
         sides_texture: texture.to_string(),
         placeable,
+        geometry: geometry.map(str::to_string),
+        shape: None,
         redstone,
     });
 }
@@ -157,6 +178,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         false,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -168,6 +190,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         true,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -178,6 +201,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
+        None,
         None,
     );
     reg.register_block(RegisterBlockRequest {
@@ -191,6 +215,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         bottom_texture: "stagcrest:dirt".into(),
         sides_texture: "stagcrest:grass_side".into(),
         placeable: true,
+        geometry: None,
+        shape: None,
         redstone: None,
     });
     register_solid_block(
@@ -203,6 +229,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         true,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -213,6 +240,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
+        None,
         None,
     );
     register_solid_block(
@@ -225,6 +253,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         true,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -236,12 +265,13 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         false,
         None,
+        None,
     );
     register_solid_block(
         reg,
         "stagcrest:redstone_dust",
         "Redstone Dust",
-        "stagcrest:redstone_dust_off",
+        "stagcrest:redstone_dust_dot",
         false,
         true,
         false,
@@ -254,6 +284,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             invertible: false,
             delay_ticks: 0,
         }),
+        Some("flat"),
     );
     register_solid_block(
         reg,
@@ -272,6 +303,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             invertible: true,
             delay_ticks: 0,
         }),
+        Some("model:redstone_torch"),
     );
     register_solid_block(
         reg,
@@ -290,6 +322,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             invertible: false,
             delay_ticks: 0,
         }),
+        None,
     );
     register_solid_block(
         reg,
@@ -308,6 +341,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             invertible: false,
             delay_ticks: 0,
         }),
+        None,
     );
     register_solid_block(
         reg,
@@ -326,6 +360,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             invertible: false,
             delay_ticks: 0,
         }),
+        None,
     );
     register_solid_block(
         reg,
@@ -344,5 +379,6 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             invertible: false,
             delay_ticks: 2,
         }),
+        None,
     );
 }

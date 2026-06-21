@@ -16,6 +16,9 @@ BLOCK_TEXTURES=(
   bedrock
   redstone_dust_dot
   redstone_dust_line0
+  redstone_dust_corner0
+  redstone_dust_t0
+  redstone_dust_cross0
   redstone_torch_off
   redstone_torch
   redstone_block

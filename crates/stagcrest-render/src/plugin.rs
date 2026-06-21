@@ -22,10 +22,11 @@ pub struct VoxelCamera {
     pub position: glam::Vec3,
 }
 
+/// Render bucket: 0 = opaque, 1 = blend, 2 = cutout.
 #[derive(Component)]
 pub struct ChunkEntityMarker {
     pub pos: stagcrest_protocol::ChunkPos,
-    pub transparent: bool,
+    pub bucket: u8,
 }
 
 pub struct VoxelRenderPlugin;
@@ -62,7 +63,8 @@ fn sync_chunk_meshes(
     mut materials: ResMut<Assets<VoxelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut opaque_mat: Local<Option<Handle<VoxelMaterial>>>,
-    mut trans_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut blend_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut cutout_mat: Local<Option<Handle<VoxelMaterial>>>,
     mut last_atlas_key: Local<Option<(u32, u32, u32, u32, u32, u32)>>,
     existing: Query<(Entity, &ChunkEntityMarker)>,
 ) {
@@ -80,7 +82,8 @@ fn sync_chunk_meshes(
     );
     if *last_atlas_key != Some(atlas_key) {
         *opaque_mat = None;
-        *trans_mat = None;
+        *blend_mat = None;
+        *cutout_mat = None;
         *last_atlas_key = Some(atlas_key);
     }
 
@@ -89,56 +92,79 @@ fn sync_chunk_meshes(
         images.add(image)
     };
 
+    let base_tints = || VoxelMaterial {
+        atlas: image_handle.clone(),
+        grass_tint: grass,
+        foliage_tint: foliage,
+        redstone_tint_dark: LinearRgba::new(0.4, 0.0, 0.0, 1.0),
+        redstone_tint_bright: LinearRgba::new(1.0, 0.0, 0.0, 1.0),
+        alpha_cutout: 0,
+        alpha_mode: AlphaMode::Opaque,
+    };
+
     let opaque_handle = opaque_mat.get_or_insert_with(|| {
-        materials.add(VoxelMaterial {
-            atlas: image_handle.clone(),
-            grass_tint: grass,
-            foliage_tint: foliage,
-            alpha_mode: AlphaMode::Opaque,
-        })
+        materials.add(base_tints())
     });
 
-    let trans_handle = trans_mat.get_or_insert_with(|| {
+    let blend_handle = blend_mat.get_or_insert_with(|| {
         materials.add(VoxelMaterial {
-            atlas: image_handle.clone(),
-            grass_tint: grass,
-            foliage_tint: foliage,
             alpha_mode: AlphaMode::Blend,
+            ..base_tints()
         })
     });
 
-    let mut live: std::collections::HashSet<(stagcrest_protocol::ChunkPos, bool)> =
+    let cutout_handle = cutout_mat.get_or_insert_with(|| {
+        materials.add(VoxelMaterial {
+            alpha_cutout: 1,
+            alpha_mode: AlphaMode::Mask(0.5),
+            ..base_tints()
+        })
+    });
+
+    let mut live: std::collections::HashSet<(stagcrest_protocol::ChunkPos, u8)> =
         std::collections::HashSet::new();
 
     for (pos, mesh) in cache.0.meshes() {
         if !mesh.opaque_vertices.is_empty() {
-            live.insert((*pos, false));
+            live.insert((*pos, 0));
             sync_one(
                 &mut commands,
                 &mut meshes,
                 &existing,
                 *pos,
-                false,
-                chunk_to_mesh(mesh, false),
+                0,
+                chunk_to_mesh(mesh, 0),
                 opaque_handle.clone(),
             );
         }
         if !mesh.transparent_vertices.is_empty() {
-            live.insert((*pos, true));
+            live.insert((*pos, 1));
             sync_one(
                 &mut commands,
                 &mut meshes,
                 &existing,
                 *pos,
-                true,
-                chunk_to_mesh(mesh, true),
-                trans_handle.clone(),
+                1,
+                chunk_to_mesh(mesh, 1),
+                blend_handle.clone(),
+            );
+        }
+        if !mesh.cutout_vertices.is_empty() {
+            live.insert((*pos, 2));
+            sync_one(
+                &mut commands,
+                &mut meshes,
+                &existing,
+                *pos,
+                2,
+                chunk_to_mesh(mesh, 2),
+                cutout_handle.clone(),
             );
         }
     }
 
     for (entity, chunk) in &existing {
-        if !live.contains(&(chunk.pos, chunk.transparent)) {
+        if !live.contains(&(chunk.pos, chunk.bucket)) {
             commands.entity(entity).despawn();
         }
     }
@@ -149,13 +175,13 @@ fn sync_one(
     meshes: &mut Assets<Mesh>,
     existing: &Query<(Entity, &ChunkEntityMarker)>,
     pos: stagcrest_protocol::ChunkPos,
-    transparent: bool,
+    bucket: u8,
     mesh_data: Mesh,
     mat: Handle<VoxelMaterial>,
 ) {
     let mesh_handle = meshes.add(mesh_data);
     for (entity, chunk) in existing {
-        if chunk.pos == pos && chunk.transparent == transparent {
+        if chunk.pos == pos && chunk.bucket == bucket {
             commands.entity(entity).insert((
                 Mesh3d(mesh_handle.clone()),
                 MeshMaterial3d(mat.clone()),
@@ -164,25 +190,23 @@ fn sync_one(
         }
     }
     commands.spawn((
-        ChunkEntityMarker { pos, transparent },
+        ChunkEntityMarker { pos, bucket },
         Mesh3d(mesh_handle),
         MeshMaterial3d(mat),
     ));
 }
 
-fn chunk_to_mesh(chunk: &ChunkMesh, transparent: bool) -> Mesh {
+fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
     use bevy::render::mesh::{Indices, PrimitiveTopology};
     use bevy::render::render_asset::RenderAssetUsages;
 
-    let vertices = if transparent {
-        &chunk.transparent_vertices
-    } else {
-        &chunk.opaque_vertices
-    };
-    let indices = if transparent {
-        &chunk.transparent_indices
-    } else {
-        &chunk.opaque_indices
+    let (vertices, indices) = match bucket {
+        1 => (
+            &chunk.transparent_vertices,
+            &chunk.transparent_indices,
+        ),
+        2 => (&chunk.cutout_vertices, &chunk.cutout_indices),
+        _ => (&chunk.opaque_vertices, &chunk.opaque_indices),
     };
 
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all());

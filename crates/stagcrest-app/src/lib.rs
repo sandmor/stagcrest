@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use stagcrest_render::{VoxelMaterial, VoxelMaterialPlugin};
 
+pub mod block_icons;
 pub mod game;
 pub mod loading;
 pub mod menu;
