@@ -17,17 +17,22 @@ pub struct RegisterBlockRequest {
     /// Deprecated: use `geometry` instead.
     #[serde(default)]
     pub shape: Option<String>,
-    pub redstone: Option<RegisterRedstoneRequest>,
+    pub circuit: Option<RegisterCircuitRequest>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct RegisterRedstoneRequest {
-    pub emits: u8,
-    pub receives: bool,
-    pub conducts: bool,
-    pub always_on: bool,
-    pub invertible: bool,
-    pub delay_ticks: u8,
+pub struct RegisterCircuitRequest {
+    pub kind: CircuitKindRequest,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CircuitKindRequest {
+    Source { level: u8 },
+    Inverter { output: u8 },
+    Wire { falloff: u8 },
+    Switch { output: u8 },
+    Delay { output: u8, delay: u8 },
 }
 
 #[derive(Serialize, Deserialize)]

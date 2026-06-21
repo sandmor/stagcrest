@@ -85,7 +85,7 @@ pub fn block_interaction(
     mouse: Res<ButtonInput<MouseButton>>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
     mut world: ResMut<crate::game::StagcrestWorldResource>,
-    mut redstone: ResMut<crate::game::RedstoneResource>,
+    mut circuit: ResMut<crate::game::CircuitResource>,
     selected: Res<SelectedBlock>,
     camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
 ) {
@@ -124,21 +124,18 @@ pub fn block_interaction(
         world
             .0
             .set_block(break_pos, air, stagcrest_protocol::BlockState(0));
-        redstone
+        circuit
             .0
             .notify_block_changed(break_pos, &world.0, &ctx.registry);
     } else if mouse.just_pressed(MouseButton::Right) {
         let (hit_id, _) = world.0.get_block(hit.block);
-        if ctx
-            .registry
-            .block(hit_id)
-            .and_then(|d| d.redstone)
-            .is_some()
-        {
-            redstone
-                .0
-                .toggle_block(hit.block, &mut world.0, &ctx.registry);
-            return;
+        if let Some(def) = ctx.registry.block(hit_id) {
+            if stagcrest_circuit::is_player_toggleable(def) {
+                circuit
+                    .0
+                    .toggle_block(hit.block, &mut world.0, &ctx.registry);
+                return;
+            }
         }
 
         let place_pos = stagcrest_protocol::BlockPos::new(
@@ -178,7 +175,7 @@ pub fn block_interaction(
             };
 
             world.0.set_block(place_pos, selected.0, block_state);
-            redstone
+            circuit
                 .0
                 .notify_block_changed(place_pos, &world.0, &ctx.registry);
         }

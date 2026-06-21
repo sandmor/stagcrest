@@ -4,7 +4,7 @@ members = [
     "crates/stagcrest-protocol",
     "crates/stagcrest-world",
     "crates/stagcrest-mesh",
-    "crates/stagcrest-redstone",
+    "crates/stagcrest-circuit",
     "crates/stagcrest-mod-sdk",
     "crates/stagcrest-mod-host",
     "crates/stagcrest-render",
@@ -53,7 +53,7 @@ bytemuck = { version = "1", features = ["derive"] }
 stagcrest-protocol = { path = "crates/stagcrest-protocol" }
 stagcrest-world = { path = "crates/stagcrest-world" }
 stagcrest-mesh = { path = "crates/stagcrest-mesh" }
-stagcrest-redstone = { path = "crates/stagcrest-redstone" }
+stagcrest-circuit = { path = "crates/stagcrest-circuit" }
 stagcrest-mod-sdk = { path = "crates/stagcrest-mod-sdk" }
 stagcrest-mod-host = { path = "crates/stagcrest-mod-host" }
 stagcrest-render = { path = "crates/stagcrest-render" }

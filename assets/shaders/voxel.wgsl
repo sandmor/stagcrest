@@ -9,8 +9,8 @@
 @group(2) @binding(1) var atlas_s: sampler;
 @group(2) @binding(2) var<uniform> grass_tint: vec4<f32>;
 @group(2) @binding(3) var<uniform> foliage_tint: vec4<f32>;
-@group(2) @binding(4) var<uniform> redstone_tint_dark: vec4<f32>;
-@group(2) @binding(5) var<uniform> redstone_tint_bright: vec4<f32>;
+@group(2) @binding(4) var<uniform> power_tint_dark: vec4<f32>;
+@group(2) @binding(5) var<uniform> power_tint_bright: vec4<f32>;
 @group(2) @binding(6) var<uniform> alpha_cutout: u32;
 
 struct Vertex {
@@ -45,7 +45,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
     if tint >= 3.0 {
         let power = clamp(tint - 3.0, 0.0, 1.0);
-        let rs = mix(redstone_tint_dark.rgb, redstone_tint_bright.rgb, power);
+        let rs = mix(power_tint_dark.rgb, power_tint_bright.rgb, power);
         return rgb * rs;
     }
     if tint >= 1.5 {

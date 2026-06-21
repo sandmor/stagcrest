@@ -2,7 +2,7 @@ use crate::player;
 use bevy::prelude::*;
 use stagcrest_mod_host::{BlockRegistry, ModHost, ModelRegistry, TextureAtlas, WorldGenState};
 use stagcrest_protocol::ChunkPos;
-use stagcrest_redstone::RedstoneWorld;
+use stagcrest_circuit::CircuitWorld;
 use stagcrest_render::{BlockAtlasResource, MeshCacheResource, VoxelCamera, VoxelRenderPlugin};
 use stagcrest_world::World as StagcrestWorld;
 
@@ -27,7 +27,7 @@ pub struct ModContext {
 pub struct StagcrestWorldResource(pub StagcrestWorld);
 
 #[derive(Resource, Default)]
-pub struct RedstoneResource(pub RedstoneWorld);
+pub struct CircuitResource(pub CircuitWorld);
 
 #[derive(Resource, Default)]
 pub struct TerrainGen(pub WorldGenState);
@@ -51,7 +51,7 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameConfig>()
-            .init_resource::<RedstoneResource>()
+            .init_resource::<CircuitResource>()
             .init_resource::<TerrainGen>()
             .init_resource::<LastStreamCenter>()
             .init_resource::<MeshCacheResource>()
@@ -65,12 +65,12 @@ impl Plugin for GamePlugin {
                     chunk_streaming.run_if(in_state(AppState::InGame)),
                     rebuild_meshes.run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
-                    redstone_tick.run_if(in_state(AppState::InGame)),
+                    circuit_tick.run_if(in_state(AppState::InGame)),
                 ),
             )
             .add_systems(
                 OnEnter(AppState::InGame),
-                (setup_game_camera, init_redstone_on_enter),
+                (setup_game_camera, init_circuit_on_enter),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session);
     }
@@ -93,7 +93,7 @@ fn cleanup_game_session(
     commands.remove_resource::<ModContext>();
     commands.remove_resource::<StagcrestWorldResource>();
     commands.remove_resource::<TerrainGen>();
-    commands.remove_resource::<RedstoneResource>();
+    commands.remove_resource::<CircuitResource>();
     commands.remove_resource::<BlockAtlasResource>();
     commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<LastStreamCenter>();
@@ -124,13 +124,13 @@ fn setup_game_camera(mut commands: Commands) {
     ));
 }
 
-fn init_redstone_on_enter(
+fn init_circuit_on_enter(
     world: Res<StagcrestWorldResource>,
     mod_ctx: Option<Res<ModContext>>,
-    mut redstone: ResMut<RedstoneResource>,
+    mut circuit: ResMut<CircuitResource>,
 ) {
     if let Some(ctx) = mod_ctx {
-        stagcrest_redstone::init_redstone_blocks(&mut redstone.0, &world.0, &ctx.registry);
+        stagcrest_circuit::init_circuit_blocks(&mut circuit.0, &world.0, &ctx.registry);
     }
 }
 
@@ -170,7 +170,7 @@ fn chunk_streaming(
 
 fn rebuild_meshes(
     mod_ctx: Option<Res<ModContext>>,
-    redstone: Option<Res<RedstoneResource>>,
+    circuit: Option<Res<CircuitResource>>,
     mut world: ResMut<StagcrestWorldResource>,
     mut cache: ResMut<MeshCacheResource>,
 ) {
@@ -179,9 +179,9 @@ fn rebuild_meshes(
     if dirty.is_empty() {
         return;
     }
-    let power = redstone
+    let power = circuit
         .as_ref()
-        .map(|r| &r.0 as &dyn stagcrest_mod_host::RedstonePowerLookup);
+        .map(|r| &r.0 as &dyn stagcrest_mod_host::PowerLookup);
     cache.0.rebuild_dirty(&world.0, &ctx.registry, &ctx.models, power, dirty);
 }
 
@@ -219,18 +219,18 @@ fn update_voxel_camera(
     );
 }
 
-fn redstone_tick(
+fn circuit_tick(
     time: Res<Time>,
     mut accumulator: Local<f32>,
     mod_ctx: Option<Res<ModContext>>,
     mut world: ResMut<StagcrestWorldResource>,
-    mut redstone: ResMut<RedstoneResource>,
+    mut circuit: ResMut<CircuitResource>,
 ) {
     *accumulator += time.delta_secs();
     while *accumulator >= 0.1 {
         *accumulator -= 0.1;
         if let Some(ctx) = mod_ctx.as_ref() {
-            redstone.0.tick(&mut world.0, &ctx.registry);
+            circuit.0.tick(&mut world.0, &ctx.registry);
         }
     }
 }

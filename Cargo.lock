@@ -3781,15 +3781,24 @@ dependencies = [
  "console_error_panic_hook",
  "futures-lite",
  "glam",
+ "stagcrest-circuit",
  "stagcrest-mesh",
  "stagcrest-mod-host",
  "stagcrest-protocol",
- "stagcrest-redstone",
  "stagcrest-render",
  "stagcrest-world",
  "tracing",
  "tracing-subscriber",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "stagcrest-circuit"
+version = "0.1.0"
+dependencies = [
+ "stagcrest-mod-host",
+ "stagcrest-protocol",
+ "stagcrest-world",
 ]
 
 [[package]]
@@ -3843,15 +3852,6 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "serde",
-]
-
-[[package]]
-name = "stagcrest-redstone"
-version = "0.1.0"
-dependencies = [
- "stagcrest-mod-host",
- "stagcrest-protocol",
- "stagcrest-world",
 ]
 
 [[package]]

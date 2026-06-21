@@ -1,5 +1,5 @@
 [package]
-name = "stagcrest-redstone"
+name = "stagcrest-circuit"
 version.workspace = true
 edition.workspace = true
 

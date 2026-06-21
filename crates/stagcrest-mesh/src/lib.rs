@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_host::{
     dust_connections_from_neighbors, dust_vertex_tint, face_texture_for, is_dust_connectable,
-    resolve_block_model, resolve_dust_face, BlockRegistry, ModelRegistry, RedstonePowerLookup,
+    resolve_block_model, resolve_dust_face, BlockRegistry, ModelRegistry, PowerLookup,
 };
 use stagcrest_protocol::{
     BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TintKind,
@@ -50,7 +50,7 @@ impl MeshCache {
         world: &World,
         registry: &BlockRegistry,
         models: &ModelRegistry,
-        power: Option<&dyn RedstonePowerLookup>,
+        power: Option<&dyn PowerLookup>,
         dirty: impl IntoIterator<Item = ChunkPos>,
     ) {
         let dirty: Vec<_> = dirty.into_iter().collect();
@@ -175,7 +175,7 @@ fn build_chunk_mesh(
     world: &World,
     registry: &BlockRegistry,
     models: &ModelRegistry,
-    power: Option<&dyn RedstonePowerLookup>,
+    power: Option<&dyn PowerLookup>,
 ) -> ChunkMesh {
     let mut mesh = ChunkMesh::default();
     let base_x = chunk_pos.x * CHUNK_SIZE;
@@ -372,7 +372,7 @@ fn emit_flat(
 }
 
 pub(crate) fn vertex_tint(face_tex: FaceTexture, power: u8) -> f32 {
-    if face_tex.tint == TintKind::RedstonePower {
+    if face_tex.tint == TintKind::PowerLevel {
         dust_vertex_tint(power)
     } else {
         face_tex.tint.as_f32()

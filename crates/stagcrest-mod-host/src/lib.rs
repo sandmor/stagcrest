@@ -18,7 +18,7 @@ pub use atlas::TextureAtlas;
 pub use block_tints::{apply_block_face_tints, face_texture_for};
 pub use dust_visual::{
     dust_connections_from_neighbors, dust_vertex_tint, is_dust_connectable, resolve_dust_face,
-    DustConnections, RedstonePowerLookup,
+    DustConnections, PowerLookup,
 };
 pub use colormap::{sample_colormap_rgb, ColormapSet};
 pub use host::{ModError, ModHost};

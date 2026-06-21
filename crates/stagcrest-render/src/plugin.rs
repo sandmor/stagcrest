@@ -96,8 +96,8 @@ fn sync_chunk_meshes(
         atlas: image_handle.clone(),
         grass_tint: grass,
         foliage_tint: foliage,
-        redstone_tint_dark: LinearRgba::new(0.4, 0.0, 0.0, 1.0),
-        redstone_tint_bright: LinearRgba::new(1.0, 0.0, 0.0, 1.0),
+        power_tint_dark: LinearRgba::new(0.4, 0.0, 0.0, 1.0),
+        power_tint_bright: LinearRgba::new(1.0, 0.0, 0.0, 1.0),
         alpha_cutout: 0,
         alpha_mode: AlphaMode::Opaque,
     };

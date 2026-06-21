@@ -3,9 +3,10 @@ use crate::block_tints::apply_block_face_tints;
 use crate::registry::BlockRegistry;
 use crate::resourcepack::{ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES};
 use crate::runtime::{load_mod, ModLoadContext};
-use stagcrest_mod_sdk::RegisterBlockRequest;
+use stagcrest_mod_sdk::{CircuitKindRequest, RegisterBlockRequest};
 use stagcrest_protocol::{
-    BlockDef, BlockFaceTextures, BlockGeometry, BlockId, ModManifest, ModsManifest, RedstoneDef,
+    BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind, CircuitNodeDef, ModManifest,
+    ModsManifest,
 };
 use thiserror::Error;
 
@@ -116,13 +117,14 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
     apply_block_face_tints(&json.namespaced_id, &mut face_textures, reg);
 
     let id = reg.allocate_block_id();
-    let redstone = json.redstone.map(|r| RedstoneDef {
-        emits: r.emits,
-        receives: r.receives,
-        conducts: r.conducts,
-        always_on: r.always_on,
-        invertible: r.invertible,
-        delay_ticks: r.delay_ticks,
+    let circuit = json.circuit.map(|r| CircuitNodeDef {
+        kind: match r.kind {
+            CircuitKindRequest::Source { level } => CircuitKind::Source { level },
+            CircuitKindRequest::Inverter { output } => CircuitKind::Inverter { output },
+            CircuitKindRequest::Wire { falloff } => CircuitKind::Wire { falloff },
+            CircuitKindRequest::Switch { output } => CircuitKind::Switch { output },
+            CircuitKindRequest::Delay { output, delay } => CircuitKind::Delay { output, delay },
+        },
     });
 
     reg.register_block(BlockDef {
@@ -134,7 +136,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         solid: json.solid,
         hardness: json.hardness,
         face_textures,
-        redstone,
+        circuit,
         placeable: json.placeable,
         geometry: json
             .geometry

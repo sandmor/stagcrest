@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use stagcrest_mesh::{build_single_block_icon_mesh, ChunkMesh};
 use stagcrest_protocol::{
-    decode_redstone_power_tint, BlockGeometry, BlockId, BlockState, TINT_REDSTONE_POWER_BASE,
+    decode_power_tint, BlockGeometry, BlockId, BlockState, TINT_POWER_BASE,
     torch_state, TorchAttachment,
 };
 
@@ -80,8 +80,8 @@ pub fn bake_block_icons(
         atlas_res.foliage_tint.to_srgba().green,
         atlas_res.foliage_tint.to_srgba().blue,
     ];
-    let redstone_dark = [0.4f32, 0.0, 0.0];
-    let redstone_bright = [1.0f32, 0.0, 0.0];
+    let power_dark = [0.4f32, 0.0, 0.0];
+    let power_bright = [1.0f32, 0.0, 0.0];
 
     let mut icons = HashMap::new();
     for &block_id in mod_ctx.registry.placeable_blocks() {
@@ -126,8 +126,8 @@ pub fn bake_block_icons(
             atlas_res.atlas.height,
             grass,
             foliage,
-            redstone_dark,
-            redstone_bright,
+            power_dark,
+            power_bright,
         );
         let handle = images.add(image_from_rgba(rgba));
         icons.insert(block_id, handle);
@@ -188,8 +188,8 @@ fn rasterize_block_icon(
     atlas_h: u32,
     grass_tint: [f32; 3],
     foliage_tint: [f32; 3],
-    redstone_dark: [f32; 3],
-    redstone_bright: [f32; 3],
+    power_dark: [f32; 3],
+    power_bright: [f32; 3],
 ) -> Vec<u8> {
     let mut tris = Vec::new();
     collect_triangles(mesh, profile, 0, &mut tris);
@@ -218,8 +218,8 @@ fn rasterize_block_icon(
             atlas_h,
             grass_tint,
             foliage_tint,
-            redstone_dark,
-            redstone_bright,
+            power_dark,
+            power_bright,
         );
     }
 
@@ -337,8 +337,8 @@ fn rasterize_triangle(
     atlas_h: u32,
     grass_tint: [f32; 3],
     foliage_tint: [f32; 3],
-    redstone_dark: [f32; 3],
-    redstone_bright: [f32; 3],
+    power_dark: [f32; 3],
+    power_bright: [f32; 3],
 ) {
     let min_x = tri.p0[0].min(tri.p1[0]).min(tri.p2[0]).floor().max(0.0) as i32;
     let max_x = tri.p0[0].max(tri.p1[0]).max(tri.p2[0]).ceil().min(size - 1.0) as i32;
@@ -374,8 +374,8 @@ fn rasterize_triangle(
                 tri.tint,
                 grass_tint,
                 foliage_tint,
-                redstone_dark,
-                redstone_bright,
+                power_dark,
+                power_bright,
             );
 
             if px[3] < alpha_cutoff {
@@ -408,15 +408,15 @@ fn apply_tint(
     tint: f32,
     grass: [f32; 3],
     foliage: [f32; 3],
-    redstone_dark: [f32; 3],
-    redstone_bright: [f32; 3],
+    power_dark: [f32; 3],
+    power_bright: [f32; 3],
 ) {
-    if tint >= TINT_REDSTONE_POWER_BASE {
-        let power = decode_redstone_power_tint(tint);
+    if tint >= TINT_POWER_BASE {
+        let power = decode_power_tint(tint);
         let rs = [
-            redstone_dark[0] + (redstone_bright[0] - redstone_dark[0]) * power,
-            redstone_dark[1] + (redstone_bright[1] - redstone_dark[1]) * power,
-            redstone_dark[2] + (redstone_bright[2] - redstone_dark[2]) * power,
+            power_dark[0] + (power_bright[0] - power_dark[0]) * power,
+            power_dark[1] + (power_bright[1] - power_dark[1]) * power,
+            power_dark[2] + (power_bright[2] - power_dark[2]) * power,
         ];
         for c in 0..3 {
             px[c] = (px[c] as f32 * rs[c]).clamp(0.0, 255.0) as u8;

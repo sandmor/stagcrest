@@ -1,4 +1,4 @@
-use stagcrest_protocol::{encode_redstone_power_tint, BlockId, FaceTexture, TintKind};
+use stagcrest_protocol::{encode_power_tint, BlockId, CircuitKind, FaceTexture, TintKind};
 
 use crate::registry::BlockRegistry;
 
@@ -12,7 +12,7 @@ impl DustConnections {
     }
 }
 
-pub trait RedstonePowerLookup: Sync {
+pub trait PowerLookup: Sync {
     fn power_at(&self, pos: stagcrest_protocol::BlockPos) -> u8;
 }
 
@@ -24,7 +24,8 @@ pub fn is_dust_connectable(registry: &BlockRegistry, id: BlockId) -> bool {
     if def.namespaced_id == "stagcrest:redstone_dust" {
         return true;
     }
-    def.redstone.is_some_and(|r| r.conducts)
+    def.circuit
+        .is_some_and(|c| matches!(c.kind, CircuitKind::Wire { .. }))
 }
 
 /// Resolve dust texture from neighbor layout. Tint is always power-based (0–15 levels).
@@ -42,14 +43,14 @@ pub fn resolve_dust_face(
     FaceTexture {
         texture,
         overlay: None,
-        tint: TintKind::RedstonePower,
+        tint: TintKind::PowerLevel,
         overlay_tint: TintKind::None,
     }
 }
 
 /// Vertex tint value for dust at the given power level.
 pub fn dust_vertex_tint(power: u8) -> f32 {
-    encode_redstone_power_tint(power)
+    encode_power_tint(power)
 }
 
 fn dust_texture_name(connections: DustConnections) -> &'static str {

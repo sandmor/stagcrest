@@ -1,5 +1,6 @@
 use stagcrest_mod_sdk::{
-    ContentRegistrar, RegisterBlockRequest, RegisterRedstoneRequest, RegisterTextureRequest,
+    CircuitKindRequest, ContentRegistrar, RegisterBlockRequest, RegisterCircuitRequest,
+    RegisterTextureRequest,
 };
 
 pub fn register_content(reg: &mut impl ContentRegistrar) {
@@ -147,7 +148,7 @@ fn register_solid_block(
     transparent: bool,
     solid: bool,
     placeable: bool,
-    redstone: Option<RegisterRedstoneRequest>,
+    circuit: Option<RegisterCircuitRequest>,
     geometry: Option<&str>,
 ) {
     reg.register_block(RegisterBlockRequest {
@@ -163,7 +164,7 @@ fn register_solid_block(
         placeable,
         geometry: geometry.map(str::to_string),
         shape: None,
-        redstone,
+        circuit,
     });
 }
 
@@ -217,7 +218,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         placeable: true,
         geometry: None,
         shape: None,
-        redstone: None,
+        circuit: None,
     });
     register_solid_block(
         reg,
@@ -276,13 +277,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         false,
         true,
-        Some(RegisterRedstoneRequest {
-            emits: 0,
-            receives: true,
-            conducts: true,
-            always_on: false,
-            invertible: false,
-            delay_ticks: 0,
+        Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Wire { falloff: 1 },
         }),
         Some("flat"),
     );
@@ -295,13 +291,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         false,
         true,
-        Some(RegisterRedstoneRequest {
-            emits: 15,
-            receives: true,
-            conducts: false,
-            always_on: false,
-            invertible: true,
-            delay_ticks: 0,
+        Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Inverter { output: 15 },
         }),
         Some("model:redstone_torch"),
     );
@@ -314,13 +305,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
-        Some(RegisterRedstoneRequest {
-            emits: 15,
-            receives: false,
-            conducts: false,
-            always_on: true,
-            invertible: false,
-            delay_ticks: 0,
+        Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Source { level: 15 },
         }),
         None,
     );
@@ -333,13 +319,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
-        Some(RegisterRedstoneRequest {
-            emits: 15,
-            receives: false,
-            conducts: false,
-            always_on: false,
-            invertible: false,
-            delay_ticks: 0,
+        Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Switch { output: 15 },
         }),
         None,
     );
@@ -352,13 +333,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
-        Some(RegisterRedstoneRequest {
-            emits: 15,
-            receives: false,
-            conducts: false,
-            always_on: false,
-            invertible: false,
-            delay_ticks: 0,
+        Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Switch { output: 15 },
         }),
         None,
     );
@@ -371,13 +347,11 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
-        Some(RegisterRedstoneRequest {
-            emits: 15,
-            receives: true,
-            conducts: false,
-            always_on: false,
-            invertible: false,
-            delay_ticks: 2,
+        Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Delay {
+                output: 15,
+                delay: 2,
+            },
         }),
         None,
     );

@@ -155,21 +155,21 @@ pub enum TintKind {
     None = 0,
     Grass = 1,
     Foliage = 2,
-    /// Vertex tint is `encode_redstone_power_tint(power)`; shader lerps dark→bright by level.
-    RedstonePower = 3,
+    /// Vertex tint is `encode_power_tint(power)`; shader lerps dark→bright by level.
+    PowerLevel = 3,
 }
 
-/// Base value for redstone power encoded in the vertex `tint` attribute.
-pub const TINT_REDSTONE_POWER_BASE: f32 = 3.0;
+/// Base value for signal power encoded in the vertex `tint` attribute.
+pub const TINT_POWER_BASE: f32 = 3.0;
 
-/// Encode redstone strength 0–15 into the vertex tint channel.
-pub fn encode_redstone_power_tint(power: u8) -> f32 {
-    TINT_REDSTONE_POWER_BASE + (power as f32 / 15.0)
+/// Encode signal strength 0–15 into the vertex tint channel.
+pub fn encode_power_tint(power: u8) -> f32 {
+    TINT_POWER_BASE + (power as f32 / 15.0)
 }
 
 /// Normalized power 0.0–1.0 from an encoded vertex tint.
-pub fn decode_redstone_power_tint(tint: f32) -> f32 {
-    (tint - TINT_REDSTONE_POWER_BASE).clamp(0.0, 1.0)
+pub fn decode_power_tint(tint: f32) -> f32 {
+    (tint - TINT_POWER_BASE).clamp(0.0, 1.0)
 }
 
 impl TintKind {
@@ -225,7 +225,7 @@ pub struct BlockDef {
     pub solid: bool,
     pub hardness: f32,
     pub face_textures: BlockFaceTextures,
-    pub redstone: Option<RedstoneDef>,
+    pub circuit: Option<CircuitNodeDef>,
     pub placeable: bool,
     pub geometry: BlockGeometry,
 }
@@ -247,14 +247,19 @@ impl BlockTextures {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CircuitKind {
+    Source { level: u8 },
+    Inverter { output: u8 },
+    Wire { falloff: u8 },
+    Switch { output: u8 },
+    Delay { output: u8, delay: u8 },
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct RedstoneDef {
-    pub emits: u8,
-    pub receives: bool,
-    pub conducts: bool,
-    pub always_on: bool,
-    pub invertible: bool,
-    pub delay_ticks: u8,
+pub struct CircuitNodeDef {
+    pub kind: CircuitKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

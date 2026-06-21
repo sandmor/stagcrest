@@ -13,7 +13,7 @@ Mod-first voxel engine in Rust: **Bevy** for UI and app shell, **wgpu** (via Bev
 
 - Creative mode: fly, place/break blocks, hotbar with block previews, creative block picker
 - Greedy mesh chunk rendering with texture atlas from mod PNGs
-- Basic redstone (dust, torch, block, lever, button, repeater)
+- Basic redstone (dust, torch, block, lever, button, repeater) via a 10 Hz circuit graph engine
 - Main menu → mod loading → in-game flow (Bevy UI)
 - Native desktop + WASM/web
 
@@ -115,7 +115,7 @@ crates/
   stagcrest-protocol   — shared types
   stagcrest-world      — chunks, raycast
   stagcrest-mesh       — greedy meshing
-  stagcrest-redstone   — 10 Hz tick engine
+  stagcrest-circuit     — 10 Hz event-driven circuit graph interpreter
   stagcrest-mod-sdk    — mod author API (host imports)
   stagcrest-mod-host   — wasmi loader, AssetReader, registries
   stagcrest-render     — chunk mesh → Bevy entities
