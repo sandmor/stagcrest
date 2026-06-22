@@ -261,6 +261,7 @@ mod tests {
             circuit: Some(CircuitNodeDef { kind }),
             placeable: true,
             geometry,
+            fluid: false,
         }
     }
 

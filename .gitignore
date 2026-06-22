@@ -1,5 +1,6 @@
 /target/
 /dist/
+/rust_out
 **/*.rs.bk
 .DS_Store
 mods/**/*.wasm

@@ -84,7 +84,7 @@ pub struct ChunkNeighborhood<'a> {
 }
 
 impl ChunkNeighborhood<'_> {
-    pub fn get(&self, x: i32, y: i32, z: i32) -> ChunkBlock {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> Option<ChunkBlock> {
         let (cx, lx) = div_rem(x, CHUNK_SIZE);
         let (cy, ly) = div_rem(y, CHUNK_SIZE);
         let (cz, lz) = div_rem(z, CHUNK_SIZE);
@@ -92,17 +92,14 @@ impl ChunkNeighborhood<'_> {
         let chunk = if cx == 0 && cy == 0 && cz == 0 {
             self.center
         } else {
-            match self.neighbors.get(&(cx, cy, cz)) {
-                Some(c) => c,
-                None => return ChunkBlock::default(),
-            }
+            self.neighbors.get(&(cx, cy, cz))?
         };
 
-        chunk.get(LocalBlockPos {
+        Some(chunk.get(LocalBlockPos {
             x: lx as u8,
             y: ly as u8,
             z: lz as u8,
-        })
+        }))
     }
 }
 

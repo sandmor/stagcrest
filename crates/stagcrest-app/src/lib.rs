@@ -10,6 +10,7 @@ pub mod loading;
 pub mod menu;
 pub mod pause;
 pub mod player;
+pub mod terrain_queue;
 pub mod targeting;
 pub mod ui;
 

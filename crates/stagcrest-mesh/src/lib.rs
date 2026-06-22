@@ -4,14 +4,14 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_host::{
     dust_connections_from_neighbors, dust_vertex_tint, face_texture_for,
-    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face, BlockRegistry,
-    ModelRegistry, PowerLookup,
+    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face,
+    BlockRegistry, ModelRegistry, PowerLookup,
 };
 use stagcrest_protocol::{
-    BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TintKind,
-    CHUNK_SIZE,
+    fluid_flowing, BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TextureId,
+    TintKind, CHUNK_SIZE,
 };
-use stagcrest_world::{Chunk, ChunkNeighborhood, World};
+use stagcrest_world::{Chunk, ChunkBlock, ChunkNeighborhood, World};
 use std::collections::{HashMap, HashSet};
 
 pub use block_model::{
@@ -185,6 +185,51 @@ fn build_single_block_mesh_internal(
     mesh
 }
 
+fn should_cull_face(
+    block_def: &stagcrest_protocol::BlockDef,
+    neighbor: Option<ChunkBlock>,
+    air: BlockId,
+    registry: &BlockRegistry,
+) -> bool {
+    let Some(neighbor) = neighbor else {
+        return false;
+    };
+    if neighbor.id == air {
+        return false;
+    }
+    let neighbor_def = registry.block(neighbor.id);
+    neighbor_culls_face(block_def, neighbor_def)
+}
+
+fn neighbor_culls_face(
+    block_def: &stagcrest_protocol::BlockDef,
+    neighbor_def: Option<&stagcrest_protocol::BlockDef>,
+) -> bool {
+    let Some(neighbor) = neighbor_def else {
+        return false;
+    };
+    if block_def.fluid && neighbor.fluid {
+        return true;
+    }
+    neighbor.opaque && neighbor.solid
+}
+
+fn fluid_flow_textures(
+    mut faces: stagcrest_protocol::BlockFaceTextures,
+    flow_tex: TextureId,
+) -> stagcrest_protocol::BlockFaceTextures {
+    let flow = FaceTexture {
+        texture: flow_tex,
+        overlay: None,
+        tint: faces.top.tint,
+        overlay_tint: TintKind::None,
+    };
+    faces.top = flow;
+    faces.bottom = flow;
+    faces.sides = flow;
+    faces
+}
+
 fn build_chunk_mesh(
     chunk_pos: ChunkPos,
     chunk: &Chunk,
@@ -249,13 +294,21 @@ fn build_chunk_mesh(
                     .map(|p| p.power_at(BlockPos::new(wx, wy, wz)))
                     .unwrap_or(0);
 
-                let face_textures = registry
+                let mut face_textures = registry
                     .block_face_textures_for_state(block.id, block.state)
                     .unwrap_or(def.face_textures);
 
+                if def.fluid && fluid_flowing(block.state) {
+                    if let Some(flow_tex) = registry.texture_by_name("stagcrest:water_flow") {
+                        face_textures = fluid_flow_textures(face_textures, flow_tex);
+                    }
+                }
+
                 let dust_face = if def.namespaced_id == "stagcrest:redstone_dust" {
                     let connections = dust_connections_from_neighbors(|dx, _, dz| {
-                        let neighbor = hood.get(x + dx, y, z + dz);
+                        let Some(neighbor) = hood.get(x + dx, y, z + dz) else {
+                            return false;
+                        };
                         neighbor.id != world.air()
                             && is_dust_connectable_neighbor(
                                 registry,
@@ -281,15 +334,16 @@ fn build_chunk_mesh(
                     models,
                     block_power,
                     block.state,
-                    |normal| {
-                        let neighbor = hood.get(
+                    |normal| should_cull_face(
+                        def,
+                        hood.get(
                             x + normal.x as i32,
                             y + normal.y as i32,
                             z + normal.z as i32,
-                        );
-                        let neighbor_def = registry.block(neighbor.id);
-                        neighbor_def.map(|d| d.opaque && d.solid).unwrap_or(false)
-                    },
+                        ),
+                        world.air(),
+                        registry,
+                    ),
                     dust_face,
                 );
             }
@@ -393,6 +447,48 @@ pub(crate) fn vertex_tint(face_tex: FaceTexture, power: u8) -> f32 {
     }
 }
 
+fn atlas_uv_bounds(
+    registry: &BlockRegistry,
+    tex_id: TextureId,
+    uv_rect: stagcrest_protocol::AtlasRect,
+) -> (f32, f32, f32, f32) {
+    let (aw, ah) = registry.atlas_dimensions();
+    let anim_meta = registry.texture_animation(tex_id);
+    let frame_h = anim_meta
+        .map(|anim| anim.frame_height.min(uv_rect.h))
+        .or_else(|| {
+            if uv_rect.h > uv_rect.w && uv_rect.w > 0 && uv_rect.h % uv_rect.w == 0 {
+                Some(uv_rect.w)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(uv_rect.h);
+    let bounds = {
+        // Inset to texel centers so quad corners never sample the neighboring atlas column/row.
+        let x = uv_rect.x as f32;
+        let y = uv_rect.y as f32;
+        let w = uv_rect.w as f32;
+        let u0 = (x + 0.5) / aw as f32;
+        let v0 = (y + 0.5) / ah as f32;
+        let u1 = (x + w - 0.5) / aw as f32;
+        let v1 = (y + frame_h as f32 - 0.5) / ah as f32;
+        (u0, v0, u1.max(u0), v1.max(v0))
+    };
+    bounds
+}
+
+fn overlay_uv_bounds(
+    registry: &BlockRegistry,
+    tex_id: TextureId,
+    uv_rect: stagcrest_protocol::AtlasRect,
+) -> (f32, f32, f32, f32) {
+    if uv_rect.w == 0 || uv_rect.h == 0 {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+    atlas_uv_bounds(registry, tex_id, uv_rect)
+}
+
 fn emit_face_from_texture(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
@@ -416,7 +512,9 @@ fn emit_face_from_texture(
         mesh,
         origin,
         normal,
+        face_tex.texture,
         uv_rect,
+        face_tex.overlay,
         overlay_uv,
         vertex_tint(face_tex, power),
         face_tex.overlay_tint.as_f32(),
@@ -447,16 +545,11 @@ fn emit_quad(
     let (verts, indices) = block_model::mesh_buffers(mesh, bucket);
 
     let base = verts.len() as u32;
-    let (aw, ah) = registry.atlas_dimensions();
-    let u0 = uv_rect.x as f32 / aw as f32;
-    let v0 = uv_rect.y as f32 / ah as f32;
-    let u1 = (uv_rect.x + uv_rect.w) as f32 / aw as f32;
-    let v1 = (uv_rect.y + uv_rect.h) as f32 / ah as f32;
-
-    let ou0 = overlay_uv.x as f32 / aw as f32;
-    let ov0 = overlay_uv.y as f32 / ah as f32;
-    let ou1 = (overlay_uv.x + overlay_uv.w) as f32 / aw as f32;
-    let ov1 = (overlay_uv.y + overlay_uv.h) as f32 / ah as f32;
+    let (u0, v0, u1, v1) = atlas_uv_bounds(registry, face_tex.texture, uv_rect);
+    let (ou0, ov0, ou1, ov1) = face_tex
+        .overlay
+        .map(|id| overlay_uv_bounds(registry, id, overlay_uv))
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
     let uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)];
     let overlay_uvs = [(ou0, ov1), (ou1, ov1), (ou1, ov0), (ou0, ov0)];
@@ -479,7 +572,9 @@ fn emit_face(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
     normal: glam::Vec3,
+    tex_id: TextureId,
     uv: stagcrest_protocol::AtlasRect,
+    overlay_tex: Option<TextureId>,
     overlay_uv_rect: stagcrest_protocol::AtlasRect,
     tint: f32,
     overlay_tint: f32,
@@ -489,16 +584,10 @@ fn emit_face(
     let (verts, indices) = block_model::mesh_buffers(mesh, bucket);
 
     let base = verts.len() as u32;
-    let (aw, ah) = registry.atlas_dimensions();
-    let u0 = uv.x as f32 / aw as f32;
-    let v0 = uv.y as f32 / ah as f32;
-    let u1 = (uv.x + uv.w) as f32 / aw as f32;
-    let v1 = (uv.y + uv.h) as f32 / ah as f32;
-
-    let ou0 = overlay_uv_rect.x as f32 / aw as f32;
-    let ov0 = overlay_uv_rect.y as f32 / ah as f32;
-    let ou1 = (overlay_uv_rect.x + overlay_uv_rect.w) as f32 / aw as f32;
-    let ov1 = (overlay_uv_rect.y + overlay_uv_rect.h) as f32 / ah as f32;
+    let (u0, v0, u1, v1) = atlas_uv_bounds(registry, tex_id, uv);
+    let (ou0, ov0, ou1, ov1) = overlay_tex
+        .map(|id| overlay_uv_bounds(registry, id, overlay_uv_rect))
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
     let corners = face_corners(origin, normal);
     for (i, pos) in corners.iter().enumerate() {
@@ -570,5 +659,46 @@ fn face_corners(origin: [f32; 3], normal: glam::Vec3) -> [[f32; 3]; 4] {
             [o[0], o[1] + 1.0, o[2] + 1.0],
             [o[0], o[1] + 1.0, o[2]],
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stagcrest_protocol::{BlockDef, TextureId};
+
+    fn def(fluid: bool, opaque: bool, solid: bool) -> BlockDef {
+        BlockDef {
+            id: BlockId(0),
+            namespaced_id: String::new(),
+            display_name: String::new(),
+            opaque,
+            transparent: !opaque,
+            solid,
+            fluid,
+            hardness: 1.0,
+            face_textures: stagcrest_protocol::BlockFaceTextures::uniform(TextureId(0)),
+            placeable: false,
+            geometry: BlockGeometry::Cube,
+            circuit: None,
+        }
+    }
+
+    #[test]
+    fn fluid_fluid_faces_culled() {
+        let water = def(true, false, false);
+        assert!(neighbor_culls_face(&water, Some(&def(true, false, false))));
+    }
+
+    #[test]
+    fn fluid_air_faces_not_culled() {
+        let water = def(true, false, false);
+        assert!(!neighbor_culls_face(&water, None));
+    }
+
+    #[test]
+    fn stone_stone_opaque_solid_culled() {
+        let stone = def(false, true, true);
+        assert!(neighbor_culls_face(&stone, Some(&def(false, true, true))));
     }
 }

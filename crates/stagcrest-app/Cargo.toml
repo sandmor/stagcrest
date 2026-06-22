@@ -22,6 +22,8 @@ stagcrest-mod-host.workspace = true
 stagcrest-render.workspace = true
 glam.workspace = true
 tracing.workspace = true
+serde_json.workspace = true
+futures-lite = "2.6"
 tracing-subscriber = { version = "0.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

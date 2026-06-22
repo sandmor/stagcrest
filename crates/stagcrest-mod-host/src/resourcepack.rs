@@ -1,5 +1,6 @@
 use crate::assets::{AssetError, AssetReader};
 use serde::Deserialize;
+use stagcrest_protocol::TextureAnimation;
 use std::collections::HashMap;
 
 /// Minecraft block texture names referenced by bundled mods (used for web preload).
@@ -13,6 +14,8 @@ pub const DEFAULT_MC_BLOCK_TEXTURES: &[&str] = &[
     "oak_planks",
     "glass",
     "bedrock",
+    "water_still",
+    "water_flow",
     "redstone_dust_dot",
     "redstone_dust_line0",
     "redstone_dust_corner0",
@@ -39,9 +42,38 @@ struct PackEntry {
     enabled: bool,
 }
 
+#[derive(Debug, Clone)]
+struct BlockTextureEntry {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+    animation: Option<TextureAnimation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McMetaRoot {
+    animation: Option<McMetaAnimation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McMetaAnimation {
+    #[serde(default)]
+    frametime: u32,
+    #[serde(default)]
+    frames: Vec<McMetaFrame>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+#[allow(dead_code)]
+enum McMetaFrame {
+    Index(u32),
+    Object { index: u32 },
+}
+
 pub struct ResourcePackLoader {
     pack_roots: Vec<String>,
-    block_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    block_textures: HashMap<String, BlockTextureEntry>,
 }
 
 impl ResourcePackLoader {
@@ -127,6 +159,12 @@ impl ResourcePackLoader {
 
     pub fn warm_block_textures(&mut self, reader: &dyn AssetReader, names: &[&str]) {
         for name in names {
+            self.ensure_block_texture(reader, name);
+        }
+    }
+
+    pub fn ensure_block_texture(&mut self, reader: &dyn AssetReader, name: &str) {
+        if !self.block_textures.contains_key(name) {
             self.try_load_block_texture(reader, name);
         }
     }
@@ -151,6 +189,10 @@ impl ResourcePackLoader {
         format!("{pack_root}/assets/minecraft/textures/block/{filename}")
     }
 
+    fn block_texture_mcmeta_path(pack_root: &str, mc_name: &str) -> String {
+        format!("{}.mcmeta", Self::block_texture_path(pack_root, mc_name))
+    }
+
     pub(crate) fn colormap_path(pack_root: &str, name: &str) -> String {
         let filename = if name.ends_with(".png") {
             name.to_string()
@@ -167,6 +209,51 @@ impl ResourcePackLoader {
         Some((w, h, rgba.into_raw()))
     }
 
+    pub fn parse_mcmeta_animation(
+        mcmeta_bytes: &[u8],
+        texture_width: u32,
+        texture_height: u32,
+    ) -> Option<TextureAnimation> {
+        let root: McMetaRoot = serde_json::from_slice(mcmeta_bytes).ok()?;
+        let anim = root.animation?;
+        let frame_width = texture_width.max(1);
+        let frame_height = if anim.frames.is_empty() {
+            frame_width
+        } else {
+            frame_width
+        };
+        let frame_count = if anim.frames.is_empty() {
+            (texture_height / frame_height).max(1)
+        } else {
+            anim.frames.len() as u32
+        };
+        Some(TextureAnimation {
+            frame_width,
+            frame_height,
+            frame_count,
+            frametime_ticks: anim.frametime.max(1),
+        })
+    }
+
+    /// Minecraft-style vertical animation strip when `.mcmeta` is absent.
+    pub fn infer_vertical_strip_animation(
+        texture_width: u32,
+        texture_height: u32,
+    ) -> Option<TextureAnimation> {
+        if texture_width == 0 || texture_height <= texture_width {
+            return None;
+        }
+        if texture_height % texture_width != 0 {
+            return None;
+        }
+        Some(TextureAnimation {
+            frame_width: texture_width,
+            frame_height: texture_width,
+            frame_count: texture_height / texture_width,
+            frametime_ticks: 20,
+        })
+    }
+
     fn try_load_block_texture(&mut self, reader: &dyn AssetReader, name: &str) {
         if self.block_textures.contains_key(name) {
             return;
@@ -175,8 +262,28 @@ impl ResourcePackLoader {
             let path = Self::block_texture_path(pack, name);
             if reader.exists(&path) {
                 if let Ok(bytes) = reader.read_bytes(&path) {
-                    if let Some(tex) = Self::load_rgba_from_bytes(&bytes) {
-                        self.block_textures.insert(name.to_string(), tex);
+                    if let Some((w, h, rgba)) = Self::load_rgba_from_bytes(&bytes) {
+                        let mcmeta_path = Self::block_texture_mcmeta_path(pack, name);
+                        let mcmeta_exists = reader.exists(&mcmeta_path);
+                        let animation = if mcmeta_exists {
+                            reader
+                                .read_bytes(&mcmeta_path)
+                                .ok()
+                                .and_then(|b| Self::parse_mcmeta_animation(&b, w, h))
+                        } else {
+                            None
+                        };
+                        let animation = animation
+                            .or_else(|| Self::infer_vertical_strip_animation(w, h));
+                        self.block_textures.insert(
+                            name.to_string(),
+                            BlockTextureEntry {
+                                width: w,
+                                height: h,
+                                rgba,
+                                animation,
+                            },
+                        );
                         return;
                     }
                 }
@@ -197,8 +304,28 @@ impl ResourcePackLoader {
             let path = Self::block_texture_path(pack, name);
             if reader.exists_async(&path).await {
                 if let Ok(bytes) = reader.read_bytes_async(&path).await {
-                    if let Some(tex) = Self::load_rgba_from_bytes(&bytes) {
-                        self.block_textures.insert(name.to_string(), tex);
+                    if let Some((w, h, rgba)) = Self::load_rgba_from_bytes(&bytes) {
+                        let mcmeta_path = Self::block_texture_mcmeta_path(pack, name);
+                        let animation = if reader.exists_async(&mcmeta_path).await {
+                            reader
+                                .read_bytes_async(&mcmeta_path)
+                                .await
+                                .ok()
+                                .and_then(|b| Self::parse_mcmeta_animation(&b, w, h))
+                        } else {
+                            None
+                        };
+                        let animation = animation
+                            .or_else(|| Self::infer_vertical_strip_animation(w, h));
+                        self.block_textures.insert(
+                            name.to_string(),
+                            BlockTextureEntry {
+                                width: w,
+                                height: h,
+                                rgba,
+                                animation,
+                            },
+                        );
                         return;
                     }
                 }
@@ -207,7 +334,24 @@ impl ResourcePackLoader {
     }
 
     pub fn load_mc_block_texture(&self, name: &str) -> Option<(u32, u32, Vec<u8>)> {
-        self.block_textures.get(name).cloned()
+        self.block_textures
+            .get(name)
+            .map(|e| (e.width, e.height, e.rgba.clone()))
+    }
+
+    pub fn animation_for_mc_texture(&self, name: &str) -> Option<TextureAnimation> {
+        self.block_textures
+            .get(name)
+            .and_then(|e| e.animation.clone())
+    }
+
+    pub fn animation_for_stagcrest_texture(&self, namespaced_id: &str) -> Option<TextureAnimation> {
+        let mc_name = match namespaced_id {
+            "stagcrest:water_still" => "water_still",
+            "stagcrest:water_flow" => "water_flow",
+            _ => return None,
+        };
+        self.animation_for_mc_texture(mc_name)
     }
 
     pub fn load_colormap(
@@ -239,5 +383,28 @@ impl ResourcePackLoader {
             }
         }
         None
+    }
+}
+
+/// Minecraft-style vertical animation strip when `.mcmeta` is absent.
+pub fn infer_vertical_strip_animation(
+    texture_width: u32,
+    texture_height: u32,
+) -> Option<TextureAnimation> {
+    ResourcePackLoader::infer_vertical_strip_animation(texture_width, texture_height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_vertical_strip_mcmeta() {
+        let json = r#"{"animation":{"frametime":2,"frames":[0,1,2,3]}}"#;
+        let anim = ResourcePackLoader::parse_mcmeta_animation(json.as_bytes(), 16, 64).unwrap();
+        assert_eq!(anim.frame_width, 16);
+        assert_eq!(anim.frame_height, 16);
+        assert_eq!(anim.frame_count, 4);
+        assert_eq!(anim.frametime_ticks, 2);
     }
 }

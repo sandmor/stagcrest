@@ -372,6 +372,28 @@ pub fn cycle_repeater_delay(state: BlockState) -> BlockState {
     BlockState((state.0 & !REPEATER_DELAY_MASK) | (delay_bits << REPEATER_DELAY_SHIFT))
 }
 
+/// Fluid block state bits (MC-style; flow simulation not yet implemented).
+pub const FLUID_FLOWING_BIT: u16 = 1 << 8;
+pub const FLUID_LEVEL_MASK: u16 = 0xF << 9;
+pub const FLUID_LEVEL_SHIFT: u16 = 9;
+
+pub fn fluid_flowing(state: BlockState) -> bool {
+    state.0 & FLUID_FLOWING_BIT != 0
+}
+
+pub fn fluid_level(state: BlockState) -> u8 {
+    ((state.0 & FLUID_LEVEL_MASK) >> FLUID_LEVEL_SHIFT) as u8
+}
+
+pub fn still_water_state() -> BlockState {
+    BlockState(0)
+}
+
+pub fn flowing_water_state(level: u8) -> BlockState {
+    let level = level.min(15);
+    BlockState(FLUID_FLOWING_BIT | ((level as u16) << FLUID_LEVEL_SHIFT))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum TintKind {
     #[default]
@@ -380,7 +402,12 @@ pub enum TintKind {
     Foliage = 2,
     /// Vertex tint is `encode_power_tint(power)`; shader lerps dark→bright by level.
     PowerLevel = 3,
+    /// Biome water colormap tint (shader multiplies greyscale fluid texture).
+    Water = 4,
 }
+
+/// Vertex tint for [`TintKind::Water`]. Distinct from max power (`TINT_POWER_BASE + 1.0` = 4.0).
+pub const TINT_WATER: f32 = 4.5;
 
 /// Base value for signal power encoded in the vertex `tint` attribute.
 pub const TINT_POWER_BASE: f32 = 3.0;
@@ -397,7 +424,10 @@ pub fn decode_power_tint(tint: f32) -> f32 {
 
 impl TintKind {
     pub fn as_f32(self) -> f32 {
-        self as u8 as f32
+        match self {
+            TintKind::Water => TINT_WATER,
+            _ => self as u8 as f32,
+        }
     }
 }
 
@@ -451,6 +481,7 @@ pub struct BlockDef {
     pub circuit: Option<CircuitNodeDef>,
     pub placeable: bool,
     pub geometry: BlockGeometry,
+    pub fluid: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -488,12 +519,22 @@ pub struct CircuitNodeDef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextureAnimation {
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub frame_count: u32,
+    pub frametime_ticks: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextureDef {
     pub id: TextureId,
     pub namespaced_id: String,
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+    #[serde(default)]
+    pub animation: Option<TextureAnimation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -528,4 +569,17 @@ fn floor_div(a: i32, b: i32) -> i32 {
 
 fn rem_euclid(a: i32, b: i32) -> i32 {
     ((a % b) + b) % b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn water_tint_above_max_power_tint() {
+        assert!(
+            TINT_WATER > encode_power_tint(15),
+            "water tint must not collide with max redstone power tint"
+        );
+    }
 }

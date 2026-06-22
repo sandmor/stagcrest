@@ -1,10 +1,15 @@
+use crate::game::{AppState, GameConfig, ModContext, StagcrestWorldResource, TerrainGen};
+use crate::terrain_queue::{TerrainBlocks, TerrainGenQueue, TerrainStreamState};
+#[cfg(target_arch = "wasm32")]
+use crate::terrain_queue::{terrain_apply, terrain_dispatch, terrain_poll_tasks};
 use bevy::prelude::*;
 use stagcrest_mesh::MeshCache;
-use stagcrest_mod_host::{ColormapSet, ModHost, ModelRegistry, WorldGenState};
-use stagcrest_protocol::ChunkPos;
+use stagcrest_mod_host::{
+    world_chunk_y_bounds, ColormapSet, ColumnBlocks, ModHost, ModelRegistry, WorldGenState,
+    WorldSeed, SEA_LEVEL,
+};
+use stagcrest_protocol::BlockPos;
 use stagcrest_render::BlockAtlasResource;
-
-use crate::game::{AppState, GameConfig, ModContext, StagcrestWorldResource, TerrainGen};
 
 pub struct LoadingPlugin;
 
@@ -45,6 +50,17 @@ impl Plugin for LoadingPlugin {
         );
 
         #[cfg(target_arch = "wasm32")]
+        app.add_systems(
+            Update,
+            (
+                terrain_dispatch,
+                terrain_poll_tasks,
+                terrain_apply,
+            )
+                .run_if(in_state(AppState::Loading)),
+        );
+
+        #[cfg(target_arch = "wasm32")]
         app.init_resource::<WebLoadingTask>().add_systems(
             Update,
             (
@@ -69,6 +85,34 @@ fn on_enter_loading(
     }
 }
 
+fn fluid_anim_uniform(
+    registry: &stagcrest_mod_host::BlockRegistry,
+    atlas_height: u32,
+) -> Vec4 {
+    let Some(tex_id) = registry.texture_by_name("stagcrest:water_still") else {
+        return Vec4::ONE;
+    };
+    let anim = registry
+        .texture_animation(tex_id)
+        .cloned()
+        .or_else(|| {
+            registry.textures().find(|t| t.id == tex_id).and_then(|t| {
+                stagcrest_mod_host::infer_vertical_strip_animation(t.width, t.height)
+            })
+        });
+    let Some(anim) = anim else {
+        return Vec4::ONE;
+    };
+    let frame_uv_step = anim.frame_height as f32 / atlas_height.max(1) as f32;
+    let frametime_secs = (anim.frametime_ticks as f32 / 20.0).max(0.05);
+    Vec4::new(
+        anim.frame_count as f32,
+        frame_uv_step,
+        frametime_secs,
+        0.0,
+    )
+}
+
 fn apply_loaded_content(
     commands: &mut Commands,
     config: &GameConfig,
@@ -78,25 +122,30 @@ fn apply_loaded_content(
     let atlas = host.finalize_atlas();
     let grass_rgb = colormaps.default_grass_tint();
     let foliage_rgb = colormaps.default_foliage_tint();
+    let water_rgb = colormaps.default_water_tint();
     let registry = std::mem::take(&mut host.registry);
+    let fluid_anim = fluid_anim_uniform(&registry, atlas.height);
     let air = registry
         .block_by_name("stagcrest:air")
         .unwrap_or(stagcrest_protocol::BlockId(0));
+    let column_blocks = ColumnBlocks::resolve(&registry, air);
 
-    let mut world = StagcrestWorldResource(stagcrest_world::World::new(air));
-    let mut terrain = WorldGenState::default();
-    terrain.generate_area(
-        &mut world.0,
-        &registry,
-        ChunkPos { x: 0, y: 0, z: 0 },
-        config.render_distance.min(4),
+    let world = StagcrestWorldResource(stagcrest_world::World::new(air));
+    let terrain = WorldGenState::new(WorldSeed(config.world_seed));
+    let spawn = BlockPos::new(8, SEA_LEVEL + 16, 8);
+    let spawn_chunk = spawn.chunk_pos();
+    let initial_h = config.render_distance.min(4);
+    let initial_v = config.vertical_render_distance.min(4);
+    let y_bounds = world_chunk_y_bounds(terrain.config());
+    let mut queue = TerrainGenQueue::default();
+    queue.enqueue_area(
+        &terrain,
+        spawn_chunk,
+        initial_h,
+        initial_v,
+        y_bounds,
+        spawn,
     );
-
-    let mut cache = MeshCache::default();
-    let all_chunks: Vec<_> = world.0.loaded_chunk_positions().collect();
-    world.0.dirty_chunks.extend(all_chunks);
-    let dirty = world.0.take_dirty_chunks();
-    cache.rebuild_dirty(&world.0, &registry, &ModelRegistry::new(), None, dirty);
 
     commands.insert_resource(ModContext {
         host,
@@ -106,12 +155,22 @@ fn apply_loaded_content(
     });
     commands.insert_resource(world);
     commands.insert_resource(TerrainGen(terrain));
+    commands.insert_resource(TerrainBlocks(column_blocks));
+    commands.insert_resource(queue);
+    commands.insert_resource(TerrainStreamState {
+        center_x: spawn_chunk.x,
+        center_y: spawn_chunk.y,
+        center_z: spawn_chunk.z,
+        valid: true,
+    });
     commands.insert_resource(BlockAtlasResource {
         atlas,
         grass_tint: Color::srgb(grass_rgb[0], grass_rgb[1], grass_rgb[2]),
         foliage_tint: Color::srgb(foliage_rgb[0], foliage_rgb[1], foliage_rgb[2]),
+        water_tint: Color::srgb(water_rgb[0], water_rgb[1], water_rgb[2]),
+        fluid_anim,
     });
-    commands.insert_resource(stagcrest_render::MeshCacheResource(cache));
+    commands.insert_resource(stagcrest_render::MeshCacheResource(MeshCache::default()));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -8,6 +8,9 @@ pub struct ColormapSet {
     pub foliage: Vec<u8>,
     pub foliage_w: u32,
     pub foliage_h: u32,
+    pub water: Vec<u8>,
+    pub water_w: u32,
+    pub water_h: u32,
 }
 
 impl ColormapSet {
@@ -15,9 +18,11 @@ impl ColormapSet {
         let grass = load_colormap(reader, packs, "grass").unwrap_or_else(default_grass_colormap);
         let foliage =
             load_colormap(reader, packs, "foliage").unwrap_or_else(default_foliage_colormap);
+        let water = load_colormap(reader, packs, "water").unwrap_or_else(default_water_colormap);
 
         let (grass_w, grass_h, grass) = grass;
         let (foliage_w, foliage_h, foliage) = foliage;
+        let (water_w, water_h, water) = water;
 
         Self {
             grass,
@@ -26,6 +31,9 @@ impl ColormapSet {
             foliage,
             foliage_w,
             foliage_h,
+            water,
+            water_w,
+            water_h,
         }
     }
 
@@ -40,9 +48,13 @@ impl ColormapSet {
         let foliage = load_colormap_async(reader, packs, "foliage")
             .await
             .unwrap_or_else(default_foliage_colormap);
+        let water = load_colormap_async(reader, packs, "water")
+            .await
+            .unwrap_or_else(default_water_colormap);
 
         let (grass_w, grass_h, grass) = grass;
         let (foliage_w, foliage_h, foliage) = foliage;
+        let (water_w, water_h, water) = water;
 
         Self {
             grass,
@@ -51,6 +63,9 @@ impl ColormapSet {
             foliage,
             foliage_w,
             foliage_h,
+            water,
+            water_w,
+            water_h,
         }
     }
 
@@ -61,6 +76,10 @@ impl ColormapSet {
 
     pub fn default_foliage_tint(&self) -> [f32; 3] {
         sample_colormap_rgb(&self.foliage, self.foliage_w, self.foliage_h, 0.8, 0.4)
+    }
+
+    pub fn default_water_tint(&self) -> [f32; 3] {
+        sample_colormap_rgb(&self.water, self.water_w, self.water_h, 0.8, 0.4)
     }
 }
 
@@ -183,6 +202,26 @@ fn default_foliage_colormap() -> (u32, u32, Vec<u8>) {
                 let b = (30.0 + mix * 12.0) as u8;
                 (r, g, b)
             };
+            let i = ((y * w + x) * 4) as usize;
+            rgba[i..i + 4].copy_from_slice(&[r, g, b, 255]);
+        }
+    }
+    (w, h, rgba)
+}
+
+fn default_water_colormap() -> (u32, u32, Vec<u8>) {
+    let w = 256u32;
+    let h = 256u32;
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let t = 1.0 - (x as f32 / (w - 1) as f32);
+            let d = 1.0 - (y as f32 / (h - 1) as f32);
+            let downfall = if t > 0.0 { d / t } else { 0.0 };
+            let mix = downfall.min(1.0);
+            let r = (32.0 + mix * 20.0) as u8;
+            let g = (56.0 + mix * 40.0) as u8;
+            let b = (140.0 + mix * 60.0) as u8;
             let i = ((y * w + x) * 4) as usize;
             rgba[i..i + 4].copy_from_slice(&[r, g, b, 255]);
         }

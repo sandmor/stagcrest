@@ -32,6 +32,9 @@ pub use host::load_mods;
 #[cfg(target_arch = "wasm32")]
 pub use host::load_mods_async;
 pub use registry::BlockRegistry;
-pub use resourcepack::ResourcePackLoader;
+pub use resourcepack::{ResourcePackLoader, infer_vertical_strip_animation};
 pub use torch_placement::{torch_can_attach, torch_state_from_normal, validate_torch_placement};
-pub use worldgen::{generate_columns_for_chunks, WorldGenState};
+pub use worldgen::{
+    generate_chunks, terrain_chunk_y_range, world_chunk_y_bounds, ChunkGenData, ColumnBlocks,
+    ColumnData, TerrainConfig, TerrainGenerator, WorldGenState, WorldSeed, SEA_LEVEL,
+};

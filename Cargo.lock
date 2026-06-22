@@ -3781,6 +3781,7 @@ dependencies = [
  "console_error_panic_hook",
  "futures-lite",
  "glam",
+ "serde_json",
  "stagcrest-circuit",
  "stagcrest-mesh",
  "stagcrest-mod-host",

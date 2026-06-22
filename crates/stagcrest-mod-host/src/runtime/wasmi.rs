@@ -48,11 +48,21 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
             let req: RegisterTextureRequest = serde_json::from_str(&json)
                 .map_err(|e| Error::new(format!("register_texture json: {e}")))?;
             let registry = unsafe { &mut *caller.data().registry };
-            registry.register_texture(
+            let packs = unsafe {
+                if caller.data().packs.is_null() {
+                    None
+                } else {
+                    Some(&*caller.data().packs)
+                }
+            };
+            let animation = packs
+                .and_then(|p| p.animation_for_stagcrest_texture(&req.namespaced_id));
+            registry.register_texture_with_animation(
                 req.namespaced_id,
                 req.width,
                 req.height,
                 req.rgba,
+                animation,
             );
             Ok(0)
         },
@@ -103,14 +113,15 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
                 "rgba": rgba,
             });
             let bytes = payload.to_string();
-            let written = write_bytes(
+            let Some(written) = write_bytes(
                 &memory,
                 &mut caller,
                 out_ptr,
                 out_max,
                 bytes.as_bytes(),
-            )
-            .ok_or_else(|| Error::new("texture output buffer too small"))?;
+            ) else {
+                return Ok(-2);
+            };
             Ok(written)
         },
     )?;

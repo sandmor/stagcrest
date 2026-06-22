@@ -13,6 +13,8 @@ pub struct RegisterBlockRequest {
     pub sides_texture: String,
     pub placeable: bool,
     #[serde(default)]
+    pub fluid: bool,
+    #[serde(default)]
     pub geometry: Option<String>,
     /// Deprecated: use `geometry` instead.
     #[serde(default)]

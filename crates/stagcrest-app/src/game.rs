@@ -1,6 +1,13 @@
 use crate::{block_outline, debug_overlay, player, targeting};
+use crate::terrain_queue::{
+    terrain_apply, terrain_dispatch, terrain_poll_tasks, TerrainBlocks, TerrainGenQueue,
+    TerrainStreamState,
+};
 use bevy::prelude::*;
-use stagcrest_mod_host::{BlockRegistry, ModHost, ModelRegistry, TextureAtlas, WorldGenState};
+use stagcrest_mod_host::{
+    world_chunk_y_bounds, BlockRegistry, ModHost, ModelRegistry, TextureAtlas, WorldGenState,
+    SEA_LEVEL,
+};
 use stagcrest_protocol::ChunkPos;
 use stagcrest_circuit::CircuitWorld;
 use stagcrest_render::{
@@ -38,14 +45,22 @@ pub struct TerrainGen(pub WorldGenState);
 #[derive(Resource, Default)]
 struct LastStreamCenter(Option<ChunkPos>);
 
+const MESH_REBUILD_BUDGET: usize = 32;
+
 #[derive(Resource)]
 pub struct GameConfig {
     pub render_distance: i32,
+    pub vertical_render_distance: i32,
+    pub world_seed: u64,
 }
 
 impl Default for GameConfig {
     fn default() -> Self {
-        Self { render_distance: 8 }
+        Self {
+            render_distance: 8,
+            vertical_render_distance: 4,
+            world_seed: 42,
+        }
     }
 }
 
@@ -57,6 +72,8 @@ impl Plugin for GamePlugin {
             .init_resource::<CircuitResource>()
             .init_resource::<TerrainGen>()
             .init_resource::<LastStreamCenter>()
+            .init_resource::<TerrainGenQueue>()
+            .init_resource::<TerrainStreamState>()
             .init_resource::<MeshCacheResource>()
             .init_resource::<VoxelCamera>()
             .init_resource::<targeting::BlockTarget>()
@@ -69,6 +86,9 @@ impl Plugin for GamePlugin {
                     player::block_interaction.run_if(in_state(AppState::InGame)),
                     block_outline::sync_block_outline.run_if(in_state(AppState::InGame)),
                     chunk_streaming.run_if(in_state(AppState::InGame)),
+                    terrain_dispatch.run_if(in_state(AppState::InGame)),
+                    terrain_poll_tasks.run_if(in_state(AppState::InGame)),
+                    terrain_apply.run_if(in_state(AppState::InGame)),
                     rebuild_meshes.run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
                     circuit_tick.run_if(in_state(AppState::InGame)),
@@ -107,6 +127,9 @@ fn cleanup_game_session(
     commands.remove_resource::<BlockAtlasResource>();
     commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<LastStreamCenter>();
+    commands.remove_resource::<TerrainGenQueue>();
+    commands.remove_resource::<TerrainStreamState>();
+    commands.remove_resource::<TerrainBlocks>();
     commands.remove_resource::<targeting::BlockTarget>();
     // MeshCacheResource is re-inited by VoxelRenderPlugin; reset it for the next session.
     commands.insert_resource(MeshCacheResource::default());
@@ -130,8 +153,10 @@ fn setup_game_camera(mut commands: Commands) {
         ..default()
     });
 
+    let look_y = (SEA_LEVEL + 8) as f32;
+    let spawn_y = (SEA_LEVEL + 16) as f32;
     let transform =
-        Transform::from_xyz(8.0, 20.0, 8.0).looking_at(Vec3::new(0.0, 12.0, 0.0), Vec3::Y);
+        Transform::from_xyz(8.0, spawn_y, 8.0).looking_at(Vec3::new(0.0, look_y, 0.0), Vec3::Y);
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -159,29 +184,52 @@ fn chunk_streaming(
     mut world: ResMut<StagcrestWorldResource>,
     mut terrain: ResMut<TerrainGen>,
     mut last_center: ResMut<LastStreamCenter>,
+    mut queue: ResMut<TerrainGenQueue>,
+    mut stream: ResMut<TerrainStreamState>,
+    mut cache: ResMut<MeshCacheResource>,
     camera: Query<&Transform, With<player::FlyCamera>>,
 ) {
-    let Some(ctx) = mod_ctx else { return };
+    let Some(_ctx) = mod_ctx else { return };
     let Ok(cam) = camera.single() else { return };
     let pos = cam.translation;
-    let center = stagcrest_protocol::BlockPos::new(
+    let player_block = stagcrest_protocol::BlockPos::new(
         pos.x.floor() as i32,
         pos.y.floor() as i32,
         pos.z.floor() as i32,
-    )
-    .chunk_pos();
+    );
+    let center = player_block.chunk_pos();
+    let y_bounds = world_chunk_y_bounds(terrain.0.config());
+    let h_radius = config.render_distance;
+    let v_radius = config.vertical_render_distance;
+    let unload_h = h_radius + 2;
+    let unload_v = v_radius + 2;
 
-    world.0.load_area(center, config.render_distance);
+    stream.center_x = center.x;
+    stream.center_y = center.y;
+    stream.center_z = center.z;
+    stream.valid = true;
+
     world
         .0
-        .unload_far_chunks(center, config.render_distance + 2);
+        .load_area_3d(center, h_radius, v_radius, y_bounds.clone());
+    let removed = world
+        .0
+        .unload_far_chunks_3d(center, unload_h, unload_v);
+
+    for chunk_pos in removed {
+        cache.0.remove(chunk_pos);
+        terrain.0.clear_chunk(chunk_pos);
+        queue.cancel_chunk(chunk_pos);
+    }
 
     if last_center.0 != Some(center) {
-        terrain.0.generate_area(
-            &mut world.0,
-            &ctx.registry,
+        queue.enqueue_area(
+            &terrain.0,
             center,
-            config.render_distance,
+            h_radius,
+            v_radius,
+            y_bounds,
+            player_block,
         );
         last_center.0 = Some(center);
     }
@@ -198,10 +246,16 @@ fn rebuild_meshes(
     if dirty.is_empty() {
         return;
     }
+    let mut iter = dirty.into_iter();
+    let to_rebuild: std::collections::HashSet<_> = iter.by_ref().take(MESH_REBUILD_BUDGET).collect();
+    world.0.dirty_chunks.extend(iter);
+    if to_rebuild.is_empty() {
+        return;
+    }
     let power = circuit
         .as_ref()
         .map(|r| &r.0 as &dyn stagcrest_mod_host::PowerLookup);
-    cache.0.rebuild_dirty(&world.0, &ctx.registry, &ctx.models, power, dirty);
+    cache.0.rebuild_dirty(&world.0, &ctx.registry, &ctx.models, power, to_rebuild);
 }
 
 fn update_voxel_camera(

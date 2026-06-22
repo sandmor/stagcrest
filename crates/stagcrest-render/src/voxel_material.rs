@@ -40,6 +40,12 @@ pub struct VoxelMaterial {
     pub power_tint_bright: LinearRgba,
     #[uniform(6)]
     pub alpha_cutout: u32,
+    #[uniform(7)]
+    pub water_tint: LinearRgba,
+    #[uniform(8)]
+    pub fluid_time: f32,
+    #[uniform(9)]
+    pub fluid_anim: Vec4,
     pub alpha_mode: AlphaMode,
 }
 
@@ -59,10 +65,17 @@ impl Material for VoxelMaterial {
     fn specialize(
         _pipeline: &MaterialPipeline<Self>,
         descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayoutRef,
+        layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.vertex.buffers = vec![voxel_vertex_layout()];
+        let vertex_layout = layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+            ATTRIBUTE_OVERLAY_UV.at_shader_location(2),
+            ATTRIBUTE_BLOCK_TINT.at_shader_location(3),
+            ATTRIBUTE_OVERLAY_TINT.at_shader_location(4),
+        ])?;
+        descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
     }
 }

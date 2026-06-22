@@ -14,6 +14,8 @@ BLOCK_TEXTURES=(
   oak_planks
   glass
   bedrock
+  water_still
+  water_flow
   redstone_dust_dot
   redstone_dust_line0
   redstone_dust_corner0
@@ -83,6 +85,9 @@ for name in "${BLOCK_TEXTURES[@]}"; do
     continue
   fi
   cp "$src" "$dst"
+  if [[ -f "${src}.mcmeta" ]]; then
+    cp "${src}.mcmeta" "${dst}.mcmeta"
+  fi
 done
 
 for name in "${COLORMAPS[@]}"; do

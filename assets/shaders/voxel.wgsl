@@ -12,6 +12,9 @@
 @group(2) @binding(4) var<uniform> power_tint_dark: vec4<f32>;
 @group(2) @binding(5) var<uniform> power_tint_bright: vec4<f32>;
 @group(2) @binding(6) var<uniform> alpha_cutout: u32;
+@group(2) @binding(7) var<uniform> water_tint: vec4<f32>;
+@group(2) @binding(8) var<uniform> fluid_time: f32;
+@group(2) @binding(9) var<uniform> fluid_anim: vec4<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -42,7 +45,15 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     return out;
 }
 
+// Matches stagcrest_protocol::TINT_WATER (4.5), above max power tint (4.0).
+fn is_water(tint: f32) -> bool {
+    return tint >= 4.25 && tint < 5.0;
+}
+
 fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
+    if is_water(tint) {
+        return rgb * water_tint.rgb;
+    }
     if tint >= 3.0 {
         let power = clamp(tint - 3.0, 0.0, 1.0);
         let rs = mix(power_tint_dark.rgb, power_tint_bright.rgb, power);
@@ -57,16 +68,35 @@ fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
     return rgb;
 }
 
+fn animated_uv(uv: vec2<f32>, tint: f32) -> vec2<f32> {
+    if is_water(tint) && fluid_anim.x > 1.0 {
+        let frame = floor(fluid_time / fluid_anim.z) % fluid_anim.x;
+        return vec2<f32>(uv.x, uv.y + frame * fluid_anim.y);
+    }
+    return uv;
+}
+
+fn shade_water(uv: vec2<f32>, tint: f32) -> vec4<f32> {
+    let sample_uv = animated_uv(uv, tint);
+    let tex = textureSample(atlas_tex, atlas_s, sample_uv);
+    return vec4(vec3<f32>(tex.r) * water_tint.rgb, tex.a);
+}
+
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    var base = textureSample(atlas_tex, atlas_s, in.uv);
+    if is_water(in.tint) {
+        return shade_water(in.uv, in.tint);
+    }
+    let uv = animated_uv(in.uv, in.tint);
+    var base = textureSample(atlas_tex, atlas_s, uv);
     if alpha_cutout != 0u && base.a < 0.5 {
         discard;
     }
     var rgb = apply_tint(base.rgb, in.tint);
 
     if in.overlay_tint >= 0.5 {
-        let ov = textureSample(atlas_tex, atlas_s, in.overlay_uv);
+        let ov_uv = animated_uv(in.overlay_uv, in.overlay_tint);
+        let ov = textureSample(atlas_tex, atlas_s, ov_uv);
         if alpha_cutout != 0u && ov.a < 0.5 {
             discard;
         }

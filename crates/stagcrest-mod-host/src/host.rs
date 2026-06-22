@@ -114,7 +114,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         )
         .unwrap_or(BlockFaceTextures::uniform(stagcrest_protocol::TextureId(0)));
 
-    apply_block_face_tints(&json.namespaced_id, &mut face_textures, reg);
+    apply_block_face_tints(&json.namespaced_id, json.fluid, &mut face_textures, reg);
 
     let id = reg.allocate_block_id();
     let circuit = json.circuit.map(|r| CircuitNodeDef {
@@ -139,6 +139,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         face_textures,
         circuit,
         placeable: json.placeable,
+        fluid: json.fluid,
         geometry: json
             .geometry
             .as_deref()
@@ -157,6 +158,9 @@ pub fn load_mods(repo_root: &std::path::Path) -> Result<ModHost, ModError> {
         packs.warm_block_textures(&reader, DEFAULT_MC_BLOCK_TEXTURES);
     }
     let mut host = ModHost::new();
+    if let Some(packs) = packs.as_mut() {
+        register_pack_fluid_textures(&mut host.registry, packs, &reader);
+    }
     host.load_all(&reader, packs.as_ref())?;
     Ok(host)
 }
@@ -172,8 +176,35 @@ pub async fn load_mods_async() -> Result<ModHost, ModError> {
             .await;
     }
     let mut host = ModHost::new();
+    if let Some(packs) = packs.as_mut() {
+        register_pack_fluid_textures(&mut host.registry, packs, &reader);
+    }
     host.load_all_async(&reader, packs.as_ref()).await?;
     Ok(host)
+}
+
+fn register_pack_fluid_textures(
+    registry: &mut BlockRegistry,
+    packs: &mut ResourcePackLoader,
+    reader: &dyn crate::assets::AssetReader,
+) {
+    for (namespaced_id, mc_name) in [
+        ("stagcrest:water_still", "water_still"),
+        ("stagcrest:water_flow", "water_flow"),
+    ] {
+        packs.ensure_block_texture(reader, mc_name);
+        let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
+            continue;
+        };
+        let animation = packs.animation_for_mc_texture(mc_name);
+        registry.register_texture_with_animation(
+            namespaced_id.to_string(),
+            width,
+            height,
+            rgba,
+            animation,
+        );
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

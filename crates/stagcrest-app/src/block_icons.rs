@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use stagcrest_mesh::{build_single_block_icon_mesh, ChunkMesh};
 use stagcrest_protocol::{
-    decode_power_tint, BlockGeometry, BlockId, BlockState, TINT_POWER_BASE,
+    decode_power_tint, BlockGeometry, BlockId, BlockState, TINT_POWER_BASE, TINT_WATER,
     torch_state, TorchAttachment,
 };
 
@@ -75,6 +75,11 @@ pub fn bake_block_icons(
         atlas_res.grass_tint.to_srgba().green,
         atlas_res.grass_tint.to_srgba().blue,
     ];
+    let water = [
+        atlas_res.water_tint.to_srgba().red,
+        atlas_res.water_tint.to_srgba().green,
+        atlas_res.water_tint.to_srgba().blue,
+    ];
     let foliage = [
         atlas_res.foliage_tint.to_srgba().red,
         atlas_res.foliage_tint.to_srgba().green,
@@ -126,6 +131,7 @@ pub fn bake_block_icons(
             atlas_res.atlas.height,
             grass,
             foliage,
+            water,
             power_dark,
             power_bright,
         );
@@ -188,6 +194,7 @@ fn rasterize_block_icon(
     atlas_h: u32,
     grass_tint: [f32; 3],
     foliage_tint: [f32; 3],
+    water_tint: [f32; 3],
     power_dark: [f32; 3],
     power_bright: [f32; 3],
 ) -> Vec<u8> {
@@ -218,6 +225,7 @@ fn rasterize_block_icon(
             atlas_h,
             grass_tint,
             foliage_tint,
+            water_tint,
             power_dark,
             power_bright,
         );
@@ -337,6 +345,7 @@ fn rasterize_triangle(
     atlas_h: u32,
     grass_tint: [f32; 3],
     foliage_tint: [f32; 3],
+    water_tint: [f32; 3],
     power_dark: [f32; 3],
     power_bright: [f32; 3],
 ) {
@@ -374,6 +383,7 @@ fn rasterize_triangle(
                 tri.tint,
                 grass_tint,
                 foliage_tint,
+                water_tint,
                 power_dark,
                 power_bright,
             );
@@ -408,10 +418,18 @@ fn apply_tint(
     tint: f32,
     grass: [f32; 3],
     foliage: [f32; 3],
+    water: [f32; 3],
     power_dark: [f32; 3],
     power_bright: [f32; 3],
 ) {
-    if tint >= TINT_POWER_BASE {
+    if (tint - TINT_WATER).abs() < 0.25 {
+        let grey = px[0] as f32;
+        for c in 0..3 {
+            px[c] = (grey * water[c]).clamp(0.0, 255.0) as u8;
+        }
+        return;
+    }
+    if tint >= TINT_POWER_BASE && (tint - TINT_WATER).abs() >= 0.25 {
         let power = decode_power_tint(tint);
         let rs = [
             power_dark[0] + (power_bright[0] - power_dark[0]) * power,

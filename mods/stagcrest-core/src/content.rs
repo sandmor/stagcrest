@@ -9,6 +9,29 @@ pub fn register_content(reg: &mut impl ContentRegistrar) {
     reg.log("stagcrest-core registered");
 }
 
+fn fluid_mask_texture(reg: &mut impl ContentRegistrar, name: &str, alpha: u8) {
+    let mut rgba = Vec::with_capacity(16 * 16 * 4);
+    for _ in 0..(16 * 16) {
+        rgba.extend_from_slice(&[255, 255, 255, alpha]);
+    }
+    reg.register_texture(RegisterTextureRequest {
+        namespaced_id: name.to_string(),
+        width: 16,
+        height: 16,
+        rgba,
+    });
+}
+
+fn register_fluid_texture_from_pack(
+    reg: &mut impl ContentRegistrar,
+    id: &str,
+    _mc_name: &str,
+) {
+    // Host preloads fluid textures (large animation strips) before mod init.
+    // register_texture skips when the namespaced id is already registered.
+    fluid_mask_texture(reg, id, 180);
+}
+
 fn solid_color_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g: u8, b: u8) {
     let mut rgba = Vec::with_capacity(16 * 16 * 4);
     for _ in 0..(16 * 16) {
@@ -80,6 +103,8 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
         (162, 130, 78),
     );
     register_texture_from_pack(reg, "stagcrest:glass", "glass", (200, 230, 255));
+    register_fluid_texture_from_pack(reg, "stagcrest:water_still", "water_still");
+    register_fluid_texture_from_pack(reg, "stagcrest:water_flow", "water_flow");
     register_texture_from_pack(reg, "stagcrest:bedrock", "bedrock", (40, 40, 40));
     register_texture_from_pack(
         reg,
@@ -173,6 +198,7 @@ fn register_solid_block(
         bottom_texture: texture.to_string(),
         sides_texture: texture.to_string(),
         placeable,
+        fluid: false,
         geometry: geometry.map(str::to_string),
         shape: None,
         circuit,
@@ -222,6 +248,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         opaque: true,
         transparent: false,
         solid: true,
+        fluid: false,
         hardness: 1.0,
         top_texture: "stagcrest:grass_top".into(),
         bottom_texture: "stagcrest:dirt".into(),
@@ -267,6 +294,22 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         None,
         None,
     );
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:water".into(),
+        display_name: "Water".into(),
+        opaque: false,
+        transparent: true,
+        solid: false,
+        fluid: true,
+        hardness: 1.0,
+        top_texture: "stagcrest:water_still".into(),
+        bottom_texture: "stagcrest:water_still".into(),
+        sides_texture: "stagcrest:water_still".into(),
+        placeable: false,
+        geometry: None,
+        shape: None,
+        circuit: None,
+    });
     register_solid_block(
         reg,
         "stagcrest:bedrock",
@@ -330,6 +373,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         opaque: false,
         transparent: false,
         solid: true,
+        fluid: false,
         hardness: 0.5,
         top_texture: "stagcrest:cobblestone".into(),
         bottom_texture: "stagcrest:cobblestone".into(),
@@ -348,6 +392,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         opaque: false,
         transparent: false,
         solid: true,
+        fluid: false,
         hardness: 0.5,
         top_texture: "stagcrest:stone".into(),
         bottom_texture: "stagcrest:stone".into(),
@@ -365,6 +410,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         opaque: false,
         transparent: false,
         solid: true,
+        fluid: false,
         hardness: 0.0,
         top_texture: "stagcrest:repeater".into(),
         bottom_texture: "stagcrest:smooth_stone".into(),

@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
     repeater_powered, AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures,
-    FaceTexture, TextureDef, TextureId, TintKind, torch_lit,
+    FaceTexture, TextureAnimation, TextureDef, TextureId, TintKind, torch_lit,
 };
 use std::collections::HashMap;
 
@@ -30,6 +30,17 @@ impl BlockRegistry {
         height: u32,
         rgba: Vec<u8>,
     ) -> TextureId {
+        self.register_texture_with_animation(namespaced_id, width, height, rgba, None)
+    }
+
+    pub fn register_texture_with_animation(
+        &mut self,
+        namespaced_id: String,
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        animation: Option<TextureAnimation>,
+    ) -> TextureId {
         if let Some(&id) = self.texture_by_name.get(&namespaced_id) {
             return id;
         }
@@ -43,10 +54,15 @@ impl BlockRegistry {
                 width,
                 height,
                 rgba,
+                animation,
             },
         );
         self.texture_by_name.insert(namespaced_id, id);
         id
+    }
+
+    pub fn texture_animation(&self, id: TextureId) -> Option<&TextureAnimation> {
+        self.textures.get(&id).and_then(|t| t.animation.as_ref())
     }
 
     pub fn register_block(&mut self, def: BlockDef) -> BlockId {
