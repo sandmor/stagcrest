@@ -373,10 +373,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: Some("model:repeater".into()),
         shape: None,
         circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Delay {
-                output: 15,
-                delay: 2,
-            },
+            kind: CircuitKindRequest::Repeater { output: 15 },
         }),
     });
 }

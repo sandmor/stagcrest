@@ -478,6 +478,8 @@ pub enum CircuitKind {
     Wire { falloff: u8 },
     Switch { output: u8 },
     Delay { output: u8, delay: u8 },
+    /// Directional delay; tick count lives in block state (`repeater_delay_ticks`).
+    Repeater { output: u8 },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
