@@ -1,7 +1,7 @@
 use stagcrest_mod_host::BlockRegistry;
 use stagcrest_protocol::{
-    AtlasRect, BlockFaceTextures, BlockModel, FaceTexture, ModelAxis, ModelElement, ModelFace,
-    ModelRenderLayer, ModelRotation, ModelTexture, TintKind,
+    AtlasRect, BlockFaceTextures, BlockGeometry, BlockModel, FaceTexture, ModelAxis, ModelElement,
+    ModelFace, ModelRenderLayer, ModelRotation, ModelTexture, TintKind,
 };
 
 use crate::{vertex_tint, ChunkMesh, VoxelVertex};
@@ -82,20 +82,10 @@ fn emit_element(
     bucket: MeshBucket,
     registry: &BlockRegistry,
 ) {
-    let from = element.from;
-    let to = element.to;
-    let corners = box_corners(from, to);
-
-    // Transform each corner entirely in block-local space (element rotation,
-    // then the whole-model orientation), then translate by the world origin.
-    let transformed: [[f32; 3]; 8] = corners.map(|c| {
-        let mut p = c;
-        if let Some(rot) = element.rotation {
-            p = rotate_local(p, rot);
-        }
-        p = rotate_model_about(p, model_rotation, CENTER);
-        [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]]
-    });
+    let transformed: [[f32; 3]; 8] =
+        element_corners_block_local(element, model_rotation).map(|p| {
+            [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]]
+        });
 
     let atlas_uv = registry.atlas_uv(face_tex.texture);
     let overlay_atlas = face_tex
@@ -167,6 +157,19 @@ fn box_corners(from: [f32; 3], to: [f32; 3]) -> [[f32; 3]; 8] {
         [to[0], to[1], to[2]],
         [from[0], to[1], to[2]],
     ]
+}
+
+/// Element corners in block-local space after element and model rotation.
+fn element_corners_block_local(
+    element: &ModelElement,
+    model_rotation: [f32; 3],
+) -> [[f32; 3]; 8] {
+    box_corners(element.from, element.to).map(|mut p| {
+        if let Some(rot) = element.rotation {
+            p = rotate_local(p, rot);
+        }
+        rotate_model_about(p, model_rotation, CENTER)
+    })
 }
 
 /// Rotate a block-local point about an element rotation (pivot in block-local
@@ -279,4 +282,60 @@ fn emit_model_face(
     }
 
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+/// Y offset for flat (redstone dust) geometry, matching `emit_flat`.
+pub const FLAT_Y: f32 = 0.07;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectionBounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+impl SelectionBounds {
+    pub fn cube() -> Self {
+        Self {
+            min: [0.0, 0.0, 0.0],
+            max: [1.0, 1.0, 1.0],
+        }
+    }
+
+    pub fn flat() -> Self {
+        const EPS: f32 = 0.001;
+        Self {
+            min: [0.0, FLAT_Y - EPS, 0.0],
+            max: [1.0, FLAT_Y + EPS, 1.0],
+        }
+    }
+}
+
+pub fn block_selection_bounds(geometry: BlockGeometry, model: Option<&BlockModel>) -> SelectionBounds {
+    match geometry {
+        BlockGeometry::Cube => SelectionBounds::cube(),
+        BlockGeometry::Flat => SelectionBounds::flat(),
+        BlockGeometry::Model(_) => model
+            .map(model_bounds)
+            .unwrap_or_else(SelectionBounds::cube),
+    }
+}
+
+fn model_bounds(model: &BlockModel) -> SelectionBounds {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+
+    for element in &model.elements {
+        for p in element_corners_block_local(element, model.rotation) {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(p[axis]);
+                max[axis] = max[axis].max(p[axis]);
+            }
+        }
+    }
+
+    if min[0].is_finite() {
+        SelectionBounds { min, max }
+    } else {
+        SelectionBounds::cube()
+    }
 }

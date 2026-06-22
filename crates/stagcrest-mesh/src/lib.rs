@@ -12,9 +12,11 @@ use stagcrest_protocol::{
     CHUNK_SIZE,
 };
 use stagcrest_world::{Chunk, ChunkNeighborhood, World};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-pub use block_model::{emit_block_model, MeshBucket};
+pub use block_model::{
+    block_selection_bounds, emit_block_model, MeshBucket, SelectionBounds,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -39,6 +41,8 @@ pub struct ChunkMesh {
 #[derive(Debug, Clone, Default)]
 pub struct MeshCache {
     meshes: HashMap<ChunkPos, ChunkMesh>,
+    /// Chunks whose CPU meshes changed and need a Bevy mesh upload.
+    dirty: HashSet<ChunkPos>,
 }
 
 impl MeshCache {
@@ -71,6 +75,7 @@ impl MeshCache {
                 .collect();
             for (pos, mesh) in built {
                 self.meshes.insert(pos, mesh);
+                self.dirty.insert(pos);
             }
         }
         #[cfg(not(feature = "parallel"))]
@@ -79,6 +84,7 @@ impl MeshCache {
                 if let Some(chunk) = world.chunk(pos) {
                     let mesh = build_chunk_mesh(pos, chunk, world, registry, models, power);
                     self.meshes.insert(pos, mesh);
+                    self.dirty.insert(pos);
                 }
             }
         }
@@ -88,8 +94,17 @@ impl MeshCache {
         &self.meshes
     }
 
+    pub fn mark_all_dirty(&mut self) {
+        self.dirty.extend(self.meshes.keys().copied());
+    }
+
+    pub fn take_dirty(&mut self) -> HashSet<ChunkPos> {
+        std::mem::take(&mut self.dirty)
+    }
+
     pub fn remove(&mut self, pos: ChunkPos) {
         self.meshes.remove(&pos);
+        self.dirty.remove(&pos);
     }
 }
 
@@ -352,8 +367,6 @@ fn emit_cube_faces(
     }
 }
 
-const FLAT_Y: f32 = 0.07;
-
 fn emit_flat(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
@@ -362,7 +375,7 @@ fn emit_flat(
     registry: &BlockRegistry,
 ) {
     let o = origin;
-    let y = o[1] + FLAT_Y;
+    let y = o[1] + block_model::FLAT_Y;
     let top = [
         [o[0], y, o[2] + 1.0],
         [o[0] + 1.0, y, o[2] + 1.0],

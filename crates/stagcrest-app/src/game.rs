@@ -1,9 +1,12 @@
-use crate::player;
+use crate::{block_outline, debug_overlay, player, targeting};
 use bevy::prelude::*;
 use stagcrest_mod_host::{BlockRegistry, ModHost, ModelRegistry, TextureAtlas, WorldGenState};
 use stagcrest_protocol::ChunkPos;
 use stagcrest_circuit::CircuitWorld;
-use stagcrest_render::{BlockAtlasResource, MeshCacheResource, VoxelCamera, VoxelRenderPlugin};
+use stagcrest_render::{
+    spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, VoxelCamera,
+    VoxelRenderPlugin,
+};
 use stagcrest_world::World as StagcrestWorld;
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -56,12 +59,15 @@ impl Plugin for GamePlugin {
             .init_resource::<LastStreamCenter>()
             .init_resource::<MeshCacheResource>()
             .init_resource::<VoxelCamera>()
+            .init_resource::<targeting::BlockTarget>()
             .add_plugins(VoxelRenderPlugin)
             .add_systems(
                 Update,
                 (
                     player::camera_system.run_if(in_state(AppState::InGame)),
+                    targeting::update_block_target.run_if(in_state(AppState::InGame)),
                     player::block_interaction.run_if(in_state(AppState::InGame)),
+                    block_outline::sync_block_outline.run_if(in_state(AppState::InGame)),
                     chunk_streaming.run_if(in_state(AppState::InGame)),
                     rebuild_meshes.run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
@@ -70,7 +76,7 @@ impl Plugin for GamePlugin {
             )
             .add_systems(
                 OnEnter(AppState::InGame),
-                (setup_game_camera, init_circuit_on_enter),
+                (setup_game_camera, init_circuit_on_enter, setup_block_outline),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session);
     }
@@ -80,6 +86,8 @@ fn cleanup_game_session(
     mut commands: Commands,
     mod_ctx: Option<Res<ModContext>>,
     chunk_entities: Query<Entity, With<stagcrest_render::ChunkEntityMarker>>,
+    outline_entities: Query<Entity, With<stagcrest_render::BlockOutlineMarker>>,
+    debug_roots: Query<Entity, With<debug_overlay::DebugOverlayRoot>>,
     cameras: Query<Entity, With<player::FlyCamera>>,
 ) {
     if mod_ctx.is_none() {
@@ -87,6 +95,8 @@ fn cleanup_game_session(
     }
 
     stagcrest_render::despawn_chunk_entities(&mut commands, &chunk_entities);
+    block_outline::despawn_block_outline(&mut commands, &outline_entities);
+    debug_overlay::cleanup_debug_overlay(&mut commands, &debug_roots);
     for cam in &cameras {
         commands.entity(cam).despawn();
     }
@@ -97,8 +107,17 @@ fn cleanup_game_session(
     commands.remove_resource::<BlockAtlasResource>();
     commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<LastStreamCenter>();
+    commands.remove_resource::<targeting::BlockTarget>();
     // MeshCacheResource is re-inited by VoxelRenderPlugin; reset it for the next session.
     commands.insert_resource(MeshCacheResource::default());
+}
+
+fn setup_block_outline(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<OutlineMaterial>>,
+) {
+    spawn_block_outline(&mut commands, &mut meshes, &mut materials);
 }
 
 fn setup_game_camera(mut commands: Commands) {

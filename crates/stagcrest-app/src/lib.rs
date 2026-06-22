@@ -2,12 +2,15 @@ use bevy::prelude::*;
 use stagcrest_render::{VoxelMaterial, VoxelMaterialPlugin};
 
 pub mod block_icons;
+pub mod block_outline;
+pub mod debug_overlay;
 pub mod game;
 pub mod inventory;
 pub mod loading;
 pub mod menu;
 pub mod pause;
 pub mod player;
+pub mod targeting;
 pub mod ui;
 
 pub use game::AppState;
@@ -29,11 +32,14 @@ pub fn run_app() {
         }))
         .init_state::<AppState>()
         .add_plugins(VoxelMaterialPlugin)
+        .add_plugins(stagcrest_render::OutlineMaterialPlugin)
         .add_plugins(MaterialPlugin::<VoxelMaterial>::default())
+        .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
         .add_plugins((
             menu::MenuPlugin,
             loading::LoadingPlugin,
             game::GamePlugin,
+            debug_overlay::DebugPlugin,
             pause::PausePlugin,
             ui::UiPlugin,
             UiCameraPlugin,

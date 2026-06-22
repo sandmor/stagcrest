@@ -87,6 +87,7 @@ pub fn block_interaction(
     mut world: ResMut<crate::game::StagcrestWorldResource>,
     mut circuit: ResMut<crate::game::CircuitResource>,
     mut selected: ResMut<SelectedBlock>,
+    target: Res<crate::targeting::BlockTarget>,
     inventory_ui: Option<Res<crate::inventory::InventoryUiState>>,
     inventory: Option<ResMut<crate::inventory::CreativeInventory>>,
     camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
@@ -102,14 +103,9 @@ pub fn block_interaction(
         return;
     }
 
-    let origin = glam::Vec3::new(cam.translation.x, cam.translation.y, cam.translation.z);
-    let dir = glam::Vec3::new(cam.forward().x, cam.forward().y, cam.forward().z);
     let air = world.0.air();
-
-    let hit = stagcrest_world::raycast_blocks(origin, dir, 8.0, |pos| {
-        let (id, _) = world.0.get_block(pos);
-        ctx.registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
-    });
+    let hit = target.hit;
+    let dir = glam::Vec3::new(cam.forward().x, cam.forward().y, cam.forward().z);
 
     if mouse.just_pressed(MouseButton::Middle) {
         let Some(hit) = hit else { return };
