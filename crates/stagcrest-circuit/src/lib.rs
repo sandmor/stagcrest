@@ -4,7 +4,7 @@ mod node;
 mod world;
 
 pub use init::init_circuit_blocks;
-pub use node::is_player_toggleable;
+pub use node::{is_player_toggleable, is_repeater};
 pub use world::{CircuitWorld, MAX_EVALS_PER_TICK};
 
 use stagcrest_protocol::BlockPos;

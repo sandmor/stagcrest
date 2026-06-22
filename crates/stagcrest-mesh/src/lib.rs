@@ -3,8 +3,9 @@ mod block_model;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_host::{
-    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for, is_dust_connectable,
-    resolve_block_model, resolve_dust_face, BlockRegistry, ModelRegistry, PowerLookup,
+    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for,
+    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face, BlockRegistry,
+    ModelRegistry, PowerLookup,
 };
 use stagcrest_protocol::{
     BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TintKind,
@@ -241,7 +242,13 @@ fn build_chunk_mesh(
                     let connections = dust_connections_from_neighbors(|dx, _, dz| {
                         let neighbor = hood.get(x + dx, y, z + dz);
                         neighbor.id != world.air()
-                            && is_dust_connectable(registry, neighbor.id)
+                            && is_dust_connectable_neighbor(
+                                registry,
+                                neighbor.id,
+                                neighbor.state,
+                                -dx,
+                                -dz,
+                            )
                     });
                     Some(resolve_dust_face(registry, connections, block_power))
                 } else {
@@ -306,14 +313,8 @@ fn emit_block_geometry(
         }
         BlockGeometry::Model(model_id) => {
             let model = resolve_block_model(models, model_id, namespaced_id, state);
-            emit_block_model(
-                mesh,
-                origin,
-                model,
-                face_textures.sides,
-                power,
-                registry,
-            );
+            // Circuit power is for dust tinting only; models use state-driven textures.
+            emit_block_model(mesh, origin, model, face_textures, 0, registry);
         }
     }
 }

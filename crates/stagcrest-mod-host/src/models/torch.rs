@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    BlockModel, ModelAxis, ModelElement, ModelFace, ModelId, ModelRenderLayer, ModelRotation,
-    ModelVariant, TorchAttachment,
+    BlockModel, ModelAxis, ModelElement, ModelFace, ModelRenderLayer, ModelRotation,
+    ModelTexture, ModelVariant, TorchAttachment,
 };
 
 const S: f32 = 1.0 / 16.0;
@@ -32,6 +32,7 @@ fn element(
         to: coord(to),
         rotation,
         faces,
+        texture: ModelTexture::Sides,
     }
 }
 
@@ -69,7 +70,7 @@ fn floor_torch_model() -> BlockModel {
     BlockModel {
         layer: ModelRenderLayer::Cutout,
         elements: torch_elements(None),
-        y_rotation: 0.0,
+        rotation: [0.0, 0.0, 0.0],
     }
 }
 
@@ -121,7 +122,7 @@ fn wall_torch_model(y_rotation: f32) -> BlockModel {
     BlockModel {
         layer: ModelRenderLayer::Cutout,
         elements,
-        y_rotation,
+        rotation: [0.0, y_rotation, 0.0],
     }
 }
 
@@ -129,40 +130,16 @@ pub fn torch_variant_from_attachment(attachment: TorchAttachment) -> ModelVarian
     attachment as u8
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelRegistry {
-    redstone_torch: [BlockModel; 5],
-}
-
-impl Default for ModelRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ModelRegistry {
-    pub fn new() -> Self {
-        // Variant index follows `TorchAttachment as u8`:
-        // 0 = Floor, 1 = WallNorth, 2 = WallSouth, 3 = WallEast, 4 = WallWest.
-        // The base wall model points east (mounted on the west wall), so it
-        // needs an extra Y rotation per facing.
-        Self {
-            redstone_torch: [
-                floor_torch_model(),
-                wall_torch_model(90.0),  // WallNorth: mounted +Z wall, leans -Z
-                wall_torch_model(270.0), // WallSouth: mounted -Z wall, leans +Z
-                wall_torch_model(0.0),   // WallEast: mounted -X wall, leans +X
-                wall_torch_model(180.0), // WallWest: mounted +X wall, leans -X
-            ],
-        }
-    }
-
-    pub fn get(&self, id: ModelId, variant: ModelVariant) -> &BlockModel {
-        match id {
-            ModelId::RedstoneTorch => {
-                let idx = variant.min(4) as usize;
-                &self.redstone_torch[idx]
-            }
-        }
-    }
+/// Build the five torch attachment variants. Variant index follows
+/// `TorchAttachment as u8`: 0 = Floor, 1 = WallNorth, 2 = WallSouth,
+/// 3 = WallEast, 4 = WallWest. The base wall model points east (mounted on
+/// the west wall), so it needs an extra Y rotation per facing.
+pub fn build_redstone_torch_models() -> [BlockModel; 5] {
+    [
+        floor_torch_model(),
+        wall_torch_model(90.0),  // WallNorth: mounted +Z wall, leans -Z
+        wall_torch_model(270.0), // WallSouth: mounted -Z wall, leans +Z
+        wall_torch_model(0.0),   // WallEast: mounted -X wall, leans +X
+        wall_torch_model(180.0), // WallWest: mounted +X wall, leans -X
+    ]
 }

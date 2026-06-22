@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub use block_model::{
     BlockGeometry, BlockModel, BoxFace, ModelAxis, ModelElement, ModelFace, ModelId,
-    ModelRenderLayer, ModelRotation, ModelVariant,
+    ModelRenderLayer, ModelRotation, ModelTexture, ModelVariant,
 };
 
 pub const CHUNK_SIZE: i32 = 16;
@@ -63,7 +63,8 @@ pub struct LocalBlockPos {
 
 impl LocalBlockPos {
     pub fn index(self) -> usize {
-        (self.x as usize) + (self.z as usize) * CHUNK_SIZE as usize
+        (self.x as usize)
+            + (self.z as usize) * CHUNK_SIZE as usize
             + (self.y as usize) * CHUNK_SIZE as usize * CHUNK_SIZE as usize
     }
 }
@@ -147,6 +148,228 @@ pub fn set_torch_lit(state: BlockState, lit: bool) -> BlockState {
     } else {
         BlockState(state.0 & !TORCH_LIT_BIT)
     }
+}
+
+/// Surface a face-mounted block (lever, button) is attached to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum AttachFace {
+    #[default]
+    Floor = 0,
+    Ceiling = 1,
+    Wall = 2,
+}
+
+/// Cardinal facing of a face-mounted block. For wall mounts this is the
+/// direction the block points away from its supporting wall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum Facing {
+    #[default]
+    North = 0,
+    South = 1,
+    East = 2,
+    West = 3,
+}
+
+impl AttachFace {
+    pub fn from_bits(bits: u16) -> Self {
+        match bits {
+            1 => Self::Ceiling,
+            2 => Self::Wall,
+            _ => Self::Floor,
+        }
+    }
+    pub fn to_bits(self) -> u16 {
+        self as u16
+    }
+}
+
+impl Facing {
+    pub fn from_bits(bits: u16) -> Self {
+        match bits {
+            1 => Self::South,
+            2 => Self::East,
+            3 => Self::West,
+            _ => Self::North,
+        }
+    }
+    pub fn to_bits(self) -> u16 {
+        self as u16
+    }
+
+    /// Cardinal facing from a horizontal look direction (e.g. camera forward).
+    pub fn from_horizontal(fx: f32, fz: f32) -> Self {
+        if fx.abs() >= fz.abs() {
+            if fx >= 0.0 {
+                Self::East
+            } else {
+                Self::West
+            }
+        } else if fz >= 0.0 {
+            Self::South
+        } else {
+            Self::North
+        }
+    }
+
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::North => Self::South,
+            Self::South => Self::North,
+            Self::East => Self::West,
+            Self::West => Self::East,
+        }
+    }
+}
+
+// State bit layout for mountable blocks (lever, button):
+//   bit 0      -> on/powered (shared with the circuit `Switch` node)
+//   bits 1-2   -> AttachFace
+//   bits 3-4   -> Facing
+pub const MOUNT_ON_BIT: u16 = 1;
+pub const MOUNT_FACE_SHIFT: u16 = 1;
+pub const MOUNT_FACE_MASK: u16 = 0b110;
+pub const MOUNT_FACING_SHIFT: u16 = 3;
+pub const MOUNT_FACING_MASK: u16 = 0b11000;
+
+pub fn mount_state(on: bool, face: AttachFace, facing: Facing) -> BlockState {
+    let mut bits = face.to_bits() << MOUNT_FACE_SHIFT;
+    bits |= facing.to_bits() << MOUNT_FACING_SHIFT;
+    if on {
+        bits |= MOUNT_ON_BIT;
+    }
+    BlockState(bits)
+}
+
+pub fn mount_on(state: BlockState) -> bool {
+    state.0 & MOUNT_ON_BIT != 0
+}
+
+pub fn mount_face(state: BlockState) -> AttachFace {
+    AttachFace::from_bits((state.0 & MOUNT_FACE_MASK) >> MOUNT_FACE_SHIFT)
+}
+
+pub fn mount_facing(state: BlockState) -> Facing {
+    Facing::from_bits((state.0 & MOUNT_FACING_MASK) >> MOUNT_FACING_SHIFT)
+}
+
+/// Model variant index encoding (on, face, facing) for model lookup.
+pub fn mount_variant(state: BlockState) -> ModelVariant {
+    let on = (state.0 & MOUNT_ON_BIT) as u8;
+    let face = ((state.0 & MOUNT_FACE_MASK) >> MOUNT_FACE_SHIFT) as u8;
+    let facing = ((state.0 & MOUNT_FACING_MASK) >> MOUNT_FACING_SHIFT) as u8;
+    on | (face << 1) | (facing << 3)
+}
+
+/// Block-space offset from a mounted block to its supporting solid block.
+pub fn mount_support_offset(face: AttachFace, facing: Facing) -> (i32, i32, i32) {
+    match face {
+        AttachFace::Floor => (0, -1, 0),
+        AttachFace::Ceiling => (0, 1, 0),
+        AttachFace::Wall => match facing {
+            // Wall mounts point away from their support, so the support sits
+            // on the opposite side of the facing direction.
+            Facing::North => (0, 0, 1),
+            Facing::South => (0, 0, -1),
+            Facing::East => (-1, 0, 0),
+            Facing::West => (1, 0, 0),
+        },
+    }
+}
+
+/// Derive (face, facing) for a mountable block from the clicked face normal
+/// (pointing out of the support into the placed cell) and a horizontal look
+/// direction used to orient floor/ceiling mounts.
+pub fn mount_from_placement(
+    nx: i32,
+    ny: i32,
+    nz: i32,
+    look_x: f32,
+    look_z: f32,
+) -> Option<(AttachFace, Facing)> {
+    match (nx, ny, nz) {
+        (0, 1, 0) => Some((AttachFace::Floor, Facing::from_horizontal(look_x, look_z))),
+        (0, -1, 0) => Some((AttachFace::Ceiling, Facing::from_horizontal(look_x, look_z))),
+        (1, 0, 0) => Some((AttachFace::Wall, Facing::East)),
+        (-1, 0, 0) => Some((AttachFace::Wall, Facing::West)),
+        (0, 0, 1) => Some((AttachFace::Wall, Facing::South)),
+        (0, 0, -1) => Some((AttachFace::Wall, Facing::North)),
+        _ => None,
+    }
+}
+
+// Repeater state (floor-only redstone component):
+//   bit 0      -> powered (lit torches; top keeps `repeater`, not `repeater_on`)
+//   bits 1-2   -> Facing (output direction)
+//   bits 3-4   -> delay index 0..3 (= 1..4 ticks)
+pub const REPEATER_POWERED_BIT: u16 = 1;
+pub const REPEATER_FACING_SHIFT: u16 = 1;
+pub const REPEATER_FACING_MASK: u16 = 0b110;
+pub const REPEATER_DELAY_SHIFT: u16 = 3;
+pub const REPEATER_DELAY_MASK: u16 = 0b11000;
+
+pub fn repeater_state(powered: bool, facing: Facing, delay_ticks: u8) -> BlockState {
+    let delay = (delay_ticks.clamp(1, 4) - 1) as u16;
+    let mut bits = facing.to_bits() << REPEATER_FACING_SHIFT;
+    bits |= delay << REPEATER_DELAY_SHIFT;
+    if powered {
+        bits |= REPEATER_POWERED_BIT;
+    }
+    BlockState(bits)
+}
+
+pub fn repeater_powered(state: BlockState) -> bool {
+    state.0 & REPEATER_POWERED_BIT != 0
+}
+
+pub fn repeater_facing(state: BlockState) -> Facing {
+    Facing::from_bits((state.0 & REPEATER_FACING_MASK) >> REPEATER_FACING_SHIFT)
+}
+
+pub fn repeater_delay_ticks(state: BlockState) -> u8 {
+    let idx = (state.0 & REPEATER_DELAY_MASK) >> REPEATER_DELAY_SHIFT;
+    (idx + 1) as u8
+}
+
+/// Model variant index: `(delay << 3) | (powered << 2) | facing`.
+pub fn repeater_variant(state: BlockState) -> ModelVariant {
+    let powered = ((state.0 & REPEATER_POWERED_BIT) != 0) as u8;
+    let facing = ((state.0 & REPEATER_FACING_MASK) >> REPEATER_FACING_SHIFT) as u8;
+    let delay = ((state.0 & REPEATER_DELAY_MASK) >> REPEATER_DELAY_SHIFT) as u8;
+    (delay << 3) | (powered << 2) | facing
+}
+
+pub fn repeater_facing_yaw(facing: Facing) -> f32 {
+    // Vanilla `repeater_*tick` model arrow points toward -Z at yaw 0; these
+    // rotations map stored output `facing` onto world space (MC blockstates).
+    match facing {
+        Facing::South => 180.0,
+        Facing::East => 270.0,
+        Facing::North => 0.0,
+        Facing::West => 90.0,
+    }
+}
+
+/// Horizontal unit step toward the repeater model's output face (arrow tip).
+pub fn facing_delta(facing: Facing) -> (i32, i32, i32) {
+    match facing {
+        Facing::North => (0, 0, -1),
+        Facing::South => (0, 0, 1),
+        Facing::East => (1, 0, 0),
+        Facing::West => (-1, 0, 0),
+    }
+}
+
+/// Whether dust at `(toward_dx, toward_dz)` relative to a repeater may connect.
+pub fn repeater_connects_toward(facing: Facing, toward_dx: i32, toward_dz: i32) -> bool {
+    let (fx, _, fz) = facing_delta(facing);
+    (toward_dx == fx && toward_dz == fz) || (toward_dx == -fx && toward_dz == -fz)
+}
+
+/// Cycle delay 1 → 2 → 3 → 4 → 1; preserves powered and facing bits.
+pub fn cycle_repeater_delay(state: BlockState) -> BlockState {
+    let next = repeater_delay_ticks(state) % 4 + 1;
+    let delay_bits = (next - 1) as u16;
+    BlockState((state.0 & !REPEATER_DELAY_MASK) | (delay_bits << REPEATER_DELAY_SHIFT))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]

@@ -130,12 +130,23 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
         (200, 0, 0),
     );
     register_texture_from_pack(reg, "stagcrest:lever", "lever", (100, 100, 100));
-    register_texture_from_pack(reg, "stagcrest:button", "lever", (120, 120, 120));
     register_texture_from_pack(
         reg,
         "stagcrest:repeater",
         "repeater",
         (180, 160, 140),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:repeater_on",
+        "repeater_on",
+        (200, 180, 160),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:smooth_stone",
+        "smooth_stone",
+        (160, 160, 160),
     );
 }
 
@@ -310,49 +321,62 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         None,
     );
-    register_solid_block(
-        reg,
-        "stagcrest:lever",
-        "Lever",
-        "stagcrest:lever",
-        true,
-        false,
-        true,
-        true,
-        Some(RegisterCircuitRequest {
+    // Lever: cobblestone base (top/bottom slots) + lever handle (sides slot),
+    // rendered as a cutout model. Non-opaque so it doesn't cull neighbors, but
+    // solid so it can be targeted for breaking/toggling.
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:lever".into(),
+        display_name: "Lever".into(),
+        opaque: false,
+        transparent: false,
+        solid: true,
+        hardness: 0.5,
+        top_texture: "stagcrest:cobblestone".into(),
+        bottom_texture: "stagcrest:cobblestone".into(),
+        sides_texture: "stagcrest:lever".into(),
+        placeable: true,
+        geometry: Some("model:lever".into()),
+        shape: None,
+        circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Switch { output: 15 },
         }),
-        None,
-    );
-    register_solid_block(
-        reg,
-        "stagcrest:stone_button",
-        "Stone Button",
-        "stagcrest:button",
-        true,
-        false,
-        true,
-        true,
-        Some(RegisterCircuitRequest {
+    });
+    // Stone button: a small stone box that sinks when pressed.
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:stone_button".into(),
+        display_name: "Stone Button".into(),
+        opaque: false,
+        transparent: false,
+        solid: true,
+        hardness: 0.5,
+        top_texture: "stagcrest:stone".into(),
+        bottom_texture: "stagcrest:stone".into(),
+        sides_texture: "stagcrest:stone".into(),
+        placeable: true,
+        geometry: Some("model:stone_button".into()),
+        shape: None,
+        circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Switch { output: 15 },
         }),
-        None,
-    );
-    register_solid_block(
-        reg,
-        "stagcrest:repeater",
-        "Repeater",
-        "stagcrest:repeater",
-        true,
-        false,
-        true,
-        true,
-        Some(RegisterCircuitRequest {
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:repeater".into(),
+        display_name: "Repeater".into(),
+        opaque: false,
+        transparent: false,
+        solid: true,
+        hardness: 0.0,
+        top_texture: "stagcrest:repeater".into(),
+        bottom_texture: "stagcrest:smooth_stone".into(),
+        sides_texture: "stagcrest:redstone_torch_off".into(),
+        placeable: true,
+        geometry: Some("model:repeater".into()),
+        shape: None,
+        circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Delay {
                 output: 15,
                 delay: 2,
             },
         }),
-        None,
-    );
+    });
 }

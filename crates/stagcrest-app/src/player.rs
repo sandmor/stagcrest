@@ -86,7 +86,9 @@ pub fn block_interaction(
     mod_ctx: Option<Res<crate::game::ModContext>>,
     mut world: ResMut<crate::game::StagcrestWorldResource>,
     mut circuit: ResMut<crate::game::CircuitResource>,
-    selected: Res<SelectedBlock>,
+    mut selected: ResMut<SelectedBlock>,
+    inventory_ui: Option<Res<crate::inventory::InventoryUiState>>,
+    inventory: Option<ResMut<crate::inventory::CreativeInventory>>,
     camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
 ) {
     let Some(ctx) = mod_ctx else { return };
@@ -96,7 +98,7 @@ pub fn block_interaction(
         return;
     }
 
-    if !mouse.just_pressed(MouseButton::Left) && !mouse.just_pressed(MouseButton::Right) {
+    if inventory_ui.is_some_and(|ui| ui.open) {
         return;
     }
 
@@ -108,6 +110,25 @@ pub fn block_interaction(
         let (id, _) = world.0.get_block(pos);
         ctx.registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
     });
+
+    if mouse.just_pressed(MouseButton::Middle) {
+        let Some(hit) = hit else { return };
+        let (id, _) = world.0.get_block(hit.block);
+        let Some(def) = ctx.registry.block(id) else { return };
+        if !def.placeable {
+            return;
+        }
+        if let Some(mut inv) = inventory {
+            let idx = inv.selected_index;
+            inv.hotbar[idx] = Some(id);
+            selected.0 = id;
+        }
+        return;
+    }
+
+    if !mouse.just_pressed(MouseButton::Left) && !mouse.just_pressed(MouseButton::Right) {
+        return;
+    }
 
     let Some(hit) = hit else { return };
 
@@ -130,6 +151,12 @@ pub fn block_interaction(
     } else if mouse.just_pressed(MouseButton::Right) {
         let (hit_id, _) = world.0.get_block(hit.block);
         if let Some(def) = ctx.registry.block(hit_id) {
+            if stagcrest_circuit::is_repeater(def) {
+                circuit
+                    .0
+                    .cycle_repeater_delay(hit.block, &mut world.0, &ctx.registry);
+                return;
+            }
             if stagcrest_circuit::is_player_toggleable(def) {
                 circuit
                     .0
@@ -152,26 +179,53 @@ pub fn block_interaction(
             let ny = hit.face_normal.y as i32;
             let nz = hit.face_normal.z as i32;
 
-            let block_state = if ctx
+            let is_solid_at = |x: i32, y: i32, z: i32| {
+                let (id, _) = world.0.get_block(stagcrest_protocol::BlockPos::new(x, y, z));
+                ctx.registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
+            };
+            let selected_name = ctx
                 .registry
                 .block(selected.0)
-                .is_some_and(|d| d.namespaced_id == "stagcrest:redstone_torch")
-            {
-                let Some(state) = stagcrest_mod_host::validate_torch_placement(
-                    |x, y, z| {
-                        let (id, _) = world.0.get_block(stagcrest_protocol::BlockPos::new(x, y, z));
-                        ctx.registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
-                    },
-                    place_pos,
-                    nx,
-                    ny,
-                    nz,
-                ) else {
-                    return;
-                };
-                state
-            } else {
-                stagcrest_protocol::BlockState(0)
+                .map(|d| d.namespaced_id.as_str());
+
+            let block_state = match selected_name {
+                Some("stagcrest:redstone_torch") => {
+                    let Some(state) = stagcrest_mod_host::validate_torch_placement(
+                        is_solid_at, place_pos, nx, ny, nz,
+                    ) else {
+                        return;
+                    };
+                    state
+                }
+                Some("stagcrest:lever") | Some("stagcrest:stone_button") => {
+                    let Some(state) = stagcrest_mod_host::validate_mount_placement(
+                        is_solid_at,
+                        place_pos,
+                        nx,
+                        ny,
+                        nz,
+                        dir.x,
+                        dir.z,
+                    ) else {
+                        return;
+                    };
+                    state
+                }
+                Some("stagcrest:repeater") => {
+                    let Some(state) = stagcrest_mod_host::validate_repeater_placement(
+                        is_solid_at,
+                        place_pos,
+                        nx,
+                        ny,
+                        nz,
+                        dir.x,
+                        dir.z,
+                    ) else {
+                        return;
+                    };
+                    state
+                }
+                _ => stagcrest_protocol::BlockState(0),
             };
 
             world.0.set_block(place_pos, selected.0, block_state);

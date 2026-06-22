@@ -1,4 +1,4 @@
-use stagcrest_protocol::{encode_power_tint, BlockId, CircuitKind, FaceTexture, TintKind};
+use stagcrest_protocol::{encode_power_tint, repeater_connects_toward, repeater_facing, BlockId, BlockState, CircuitKind, FaceTexture, ModelId, TintKind, BlockGeometry};
 
 use crate::registry::BlockRegistry;
 
@@ -26,6 +26,23 @@ pub fn is_dust_connectable(registry: &BlockRegistry, id: BlockId) -> bool {
     }
     def.circuit
         .is_some_and(|c| matches!(c.kind, CircuitKind::Wire { .. }))
+}
+
+/// Dust connection check with directional rules for repeaters.
+pub fn is_dust_connectable_neighbor(
+    registry: &BlockRegistry,
+    id: BlockId,
+    state: BlockState,
+    toward_dust_dx: i32,
+    toward_dust_dz: i32,
+) -> bool {
+    let Some(def) = registry.block(id) else {
+        return false;
+    };
+    if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
+        return repeater_connects_toward(repeater_facing(state), toward_dust_dx, toward_dust_dz);
+    }
+    is_dust_connectable(registry, id)
 }
 
 /// Resolve dust texture from neighbor layout. Tint is always power-based (0–15 levels).

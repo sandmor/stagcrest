@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures, FaceTexture,
-    TextureDef, TextureId, TintKind, torch_lit,
+    repeater_powered, AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures,
+    FaceTexture, TextureDef, TextureId, TintKind, torch_lit,
 };
 use std::collections::HashMap;
 
@@ -128,10 +128,18 @@ impl BlockRegistry {
         bottom: &str,
         sides: &str,
     ) -> Option<BlockFaceTextures> {
+        let uniform = |name: &str| {
+            Some(FaceTexture {
+                texture: self.texture_by_name(name)?,
+                overlay: None,
+                tint: TintKind::None,
+                overlay_tint: TintKind::None,
+            })
+        };
         Some(BlockFaceTextures {
-            top: FaceTexture::uniform(self.texture_by_name(top)?),
-            bottom: FaceTexture::uniform(self.texture_by_name(bottom)?),
-            sides: FaceTexture::uniform(self.texture_by_name(sides)?),
+            top: uniform(top)?,
+            bottom: uniform(bottom)?,
+            sides: uniform(sides)?,
         })
     }
 
@@ -148,6 +156,15 @@ impl BlockRegistry {
             return self.resolve_face_textures(
                 "stagcrest:redstone_torch_on",
                 "stagcrest:redstone_torch_on",
+                "stagcrest:redstone_torch_on",
+            );
+        }
+        if def.namespaced_id == "stagcrest:repeater" && repeater_powered(state) {
+            // Top stays `repeater`: `repeater_on` on the full slab cap reads as a flat
+            // red wash. Lit state is shown by the powered model variant + torch sides.
+            return self.resolve_face_textures(
+                "stagcrest:repeater",
+                "stagcrest:smooth_stone",
                 "stagcrest:redstone_torch_on",
             );
         }

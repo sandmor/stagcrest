@@ -3,6 +3,7 @@ use stagcrest_render::{VoxelMaterial, VoxelMaterialPlugin};
 
 pub mod block_icons;
 pub mod game;
+pub mod inventory;
 pub mod loading;
 pub mod menu;
 pub mod pause;

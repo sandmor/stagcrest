@@ -24,6 +24,8 @@ BLOCK_TEXTURES=(
   redstone_block
   lever
   repeater
+  repeater_on
+  smooth_stone
 )
 
 COLORMAPS=(grass foliage)

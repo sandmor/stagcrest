@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ModelId {
     RedstoneTorch,
+    Lever,
+    Button,
+    Repeater,
 }
 
 /// Variant index for model lookup (e.g. torch attachment as `TorchAttachment::to_bits()`).
@@ -22,9 +25,21 @@ impl BlockGeometry {
         match s {
             "flat" => Self::Flat,
             "torch" | "model:redstone_torch" => Self::Model(ModelId::RedstoneTorch),
+            "model:lever" => Self::Model(ModelId::Lever),
+            "model:button" | "model:stone_button" => Self::Model(ModelId::Button),
+            "model:repeater" => Self::Model(ModelId::Repeater),
             _ => Self::Cube,
         }
     }
+}
+
+/// Which of a block's three texture slots a model element samples from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum ModelTexture {
+    Top,
+    Bottom,
+    #[default]
+    Sides,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -85,16 +100,19 @@ pub struct ModelElement {
     pub to: [f32; 3],
     pub rotation: Option<ModelRotation>,
     pub faces: [Option<ModelFace>; 6],
+    /// Which block texture slot this element's faces sample from.
+    pub texture: ModelTexture,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockModel {
     pub layer: ModelRenderLayer,
     pub elements: Vec<ModelElement>,
-    /// Whole-model rotation about the vertical block-center axis, in degrees
-    /// (applied after each element's own rotation). Mirrors how Minecraft
-    /// blockstates rotate a shared model to face different directions.
-    pub y_rotation: f32,
+    /// Whole-model orientation in degrees, applied about the block center
+    /// after each element's own rotation, in X then Y then Z order. Mirrors
+    /// how Minecraft blockstates rotate a shared model to face/attach in
+    /// different directions (`[0, yaw, 0]` is a plain facing rotation).
+    pub rotation: [f32; 3],
 }
 
 impl ModelElement {

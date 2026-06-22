@@ -1,10 +1,14 @@
 use stagcrest_mod_host::{BlockRegistry, PowerLookup};
-use stagcrest_protocol::{BlockPos, BlockState, CircuitKind, set_torch_lit};
+use stagcrest_protocol::{
+    repeater_delay_ticks, BlockGeometry, BlockPos, BlockState, CircuitKind, ModelId, set_torch_lit,
+};
 use stagcrest_world::World;
 use std::collections::HashMap;
 
 use crate::event::{CircuitEvent, EventQueue};
-use crate::node::{compute_power, is_torch_geometry, sync_block_state};
+use crate::node::{
+    compute_power, is_torch_geometry, repeater_input_power, sync_block_state,
+};
 
 pub const MAX_EVALS_PER_TICK: usize = 4096;
 
@@ -96,12 +100,23 @@ impl CircuitWorld {
 
         match node.kind {
             CircuitKind::Delay { output, delay } => {
-                let input = crate::node::max_neighbor_input(self, pos, world, registry);
+                let input = if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
+                    repeater_input_power(self, pos, state, world, registry)
+                } else {
+                    crate::node::max_neighbor_input(self, pos, world, registry)
+                };
                 let prev_input = self.delay_input.get(&pos).copied().unwrap_or(0);
                 if input != prev_input {
                     self.delay_input.insert(pos, input);
                     let target = if input > 0 { output } else { 0 };
-                    self.queue.schedule_delay(self.tick + delay as u64, pos, target);
+                    let delay_ticks = if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater))
+                    {
+                        repeater_delay_ticks(state) as u64
+                    } else {
+                        delay as u64
+                    };
+                    self.queue
+                        .schedule_delay(self.tick + delay_ticks, pos, target);
                 }
             }
             kind => {
@@ -127,7 +142,7 @@ impl CircuitWorld {
             return;
         }
 
-        if matches!(kind, CircuitKind::Wire { .. }) {
+        if matches!(kind, CircuitKind::Wire { .. } | CircuitKind::Delay { .. }) {
             world.mark_dirty_and_neighbors(pos);
         }
 
@@ -170,12 +185,9 @@ impl CircuitWorld {
                 set_torch_lit(state, !stagcrest_protocol::torch_lit(state))
             }
             CircuitKind::Switch { .. } => {
-                let on = state.0 & 1 != 0;
-                if on {
-                    BlockState(0)
-                } else {
-                    BlockState(1)
-                }
+                // Flip only the on/powered bit; keep orientation bits intact so
+                // a lever/button stays mounted the way it was placed.
+                BlockState(state.0 ^ 1)
             }
             CircuitKind::Inverter { .. } | CircuitKind::Wire { .. } | CircuitKind::Delay { .. } => {
                 return;
@@ -184,6 +196,31 @@ impl CircuitWorld {
 
         world.set_block(pos, id, new_state);
         self.notify_block_changed(pos, world, registry);
+    }
+
+    /// Right-click: cycle repeater delay (1–4 ticks).
+    pub fn cycle_repeater_delay(
+        &mut self,
+        pos: BlockPos,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        let (id, state) = world.get_block(pos);
+        let Some(def) = registry.block(id) else {
+            return;
+        };
+        if !matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
+            return;
+        }
+
+        let new_state = stagcrest_protocol::cycle_repeater_delay(state);
+        if new_state == state {
+            return;
+        }
+
+        // Delay-only change: remesh via set_block, but don't reset delay_input or
+        // cancel in-flight timers (vanilla keeps timing when cycling delay).
+        world.set_block(pos, id, new_state);
     }
 }
 
@@ -198,10 +235,14 @@ mod tests {
     use super::*;
     use stagcrest_protocol::{
         BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind, CircuitNodeDef,
-        TextureId,
+        Facing, ModelId, TextureId, repeater_state,
     };
 
     fn test_block(id: BlockId, kind: CircuitKind) -> BlockDef {
+        test_block_with_geometry(id, kind, BlockGeometry::Cube)
+    }
+
+    fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeometry) -> BlockDef {
         BlockDef {
             id,
             namespaced_id: format!("test:{id:?}"),
@@ -213,7 +254,7 @@ mod tests {
             face_textures: BlockFaceTextures::uniform(TextureId(0)),
             circuit: Some(CircuitNodeDef { kind }),
             placeable: true,
-            geometry: BlockGeometry::Cube,
+            geometry,
         }
     }
 
@@ -238,12 +279,13 @@ mod tests {
             switch,
             CircuitKind::Switch { output: 15 },
         ));
-        reg.register_block(test_block(
+        reg.register_block(test_block_with_geometry(
             delay,
             CircuitKind::Delay {
                 output: 15,
                 delay: 2,
             },
+            BlockGeometry::Model(ModelId::Repeater),
         ));
 
         (reg, source, wire, inverter, switch, delay)
@@ -313,7 +355,11 @@ mod tests {
 
         world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
         world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(BlockPos::new(2, 0, 0), delay, BlockState(0));
+        world.set_block(
+            BlockPos::new(2, 0, 0),
+            delay,
+            repeater_state(false, Facing::East, 2),
+        );
         world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
@@ -334,7 +380,11 @@ mod tests {
 
         world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
         world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(repeater_pos, delay, BlockState(0));
+        world.set_block(
+            repeater_pos,
+            delay,
+            repeater_state(false, Facing::East, 2),
+        );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
         circuit.tick(&mut world, &reg);
@@ -344,5 +394,48 @@ mod tests {
         settle(&mut circuit, &mut world, &reg, 4);
 
         assert_eq!(circuit.power_at(repeater_pos), 0);
+    }
+
+    #[test]
+    fn repeater_ignores_signal_on_output_face() {
+        let (reg, source, _, _, _, delay) = setup_registry();
+        let mut world = World::new(BlockId(0));
+        let mut circuit = CircuitWorld::new();
+        let repeater_pos = BlockPos::new(2, 0, 0);
+
+        // East-facing: input west at x=1, output east at x=3.
+        world.set_block(repeater_pos, delay, repeater_state(false, Facing::East, 2));
+        world.set_block(BlockPos::new(3, 0, 0), source, BlockState(0));
+
+        circuit.notify_block_changed(BlockPos::new(3, 0, 0), &world, &reg);
+        settle(&mut circuit, &mut world, &reg, 8);
+
+        assert_eq!(circuit.power_at(repeater_pos), 0);
+    }
+
+    #[test]
+    fn repeater_cycle_delay_keeps_output_while_powered() {
+        let (reg, source, wire, _, _, delay) = setup_registry();
+        let mut world = World::new(BlockId(0));
+        let mut circuit = CircuitWorld::new();
+        let repeater_pos = BlockPos::new(2, 0, 0);
+
+        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
+        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
+        world.set_block(
+            repeater_pos,
+            delay,
+            repeater_state(false, Facing::East, 2),
+        );
+        world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
+
+        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
+        settle(&mut circuit, &mut world, &reg, 3);
+        assert_eq!(circuit.power_at(repeater_pos), 15);
+
+        circuit.cycle_repeater_delay(repeater_pos, &mut world, &reg);
+        assert_eq!(circuit.power_at(repeater_pos), 15);
+        settle(&mut circuit, &mut world, &reg, 2);
+        assert_eq!(circuit.power_at(repeater_pos), 15);
     }
 }

@@ -23,6 +23,8 @@ pub const DEFAULT_MC_BLOCK_TEXTURES: &[&str] = &[
     "redstone_block",
     "lever",
     "repeater",
+    "repeater_on",
+    "smooth_stone",
 ];
 
 #[derive(Debug, Deserialize)]

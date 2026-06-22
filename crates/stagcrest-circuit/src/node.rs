@@ -1,18 +1,21 @@
 use stagcrest_mod_host::BlockRegistry;
 use stagcrest_protocol::{
-    BlockGeometry, BlockPos, BlockState, CircuitKind, ModelId, set_torch_lit, torch_lit,
+    repeater_facing, facing_delta, BlockGeometry, BlockPos, BlockState, CircuitKind, ModelId,
+    set_torch_lit, torch_lit,
 };
 use stagcrest_world::World;
 
 use crate::world::CircuitWorld;
 
-pub fn neighbor_output(
-    world: &CircuitWorld,
-    pos: BlockPos,
+/// Power a `consumer` block receives from an adjacent `source` circuit node.
+pub fn neighbor_output_into(
+    circuit: &CircuitWorld,
+    source: BlockPos,
+    consumer: BlockPos,
     world_blocks: &World,
     registry: &BlockRegistry,
 ) -> u8 {
-    let (id, state) = world_blocks.get_block(pos);
+    let (id, state) = world_blocks.get_block(source);
     let Some(def) = registry.block(id) else {
         return 0;
     };
@@ -29,27 +32,54 @@ pub fn neighbor_output(
                 0
             }
         }
-        CircuitKind::Inverter { .. } | CircuitKind::Wire { .. } | CircuitKind::Delay { .. } => {
-            world.power_at(pos)
+        CircuitKind::Inverter { .. } | CircuitKind::Wire { .. } => circuit.power_at(source),
+        CircuitKind::Delay { .. } => {
+            if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
+                let facing = repeater_facing(state);
+                let (fx, _, fz) = facing_delta(facing);
+                let output_pos = BlockPos::new(source.x + fx, source.y, source.z + fz);
+                if consumer == output_pos {
+                    circuit.power_at(source)
+                } else {
+                    0
+                }
+            } else {
+                circuit.power_at(source)
+            }
         }
     }
 }
 
 pub fn max_neighbor_input(
-    world: &CircuitWorld,
-    pos: BlockPos,
+    circuit: &CircuitWorld,
+    consumer: BlockPos,
     world_blocks: &World,
     registry: &BlockRegistry,
 ) -> u8 {
     let mut max_power = 0u8;
-    for npos in crate::neighbors(pos) {
-        max_power = max_power.max(neighbor_output(world, npos, world_blocks, registry));
+    for npos in crate::neighbors(consumer) {
+        max_power = max_power.max(neighbor_output_into(
+            circuit, npos, consumer, world_blocks, registry,
+        ));
     }
     max_power
 }
 
+pub fn repeater_input_power(
+    circuit: &CircuitWorld,
+    pos: BlockPos,
+    state: BlockState,
+    world_blocks: &World,
+    registry: &BlockRegistry,
+) -> u8 {
+    let facing = repeater_facing(state);
+    let (fx, _, fz) = facing_delta(facing);
+    let input_pos = BlockPos::new(pos.x - fx, pos.y, pos.z - fz);
+    neighbor_output_into(circuit, input_pos, pos, world_blocks, registry)
+}
+
 pub fn compute_power(
-    world: &CircuitWorld,
+    circuit: &CircuitWorld,
     pos: BlockPos,
     world_blocks: &World,
     registry: &BlockRegistry,
@@ -66,16 +96,17 @@ pub fn compute_power(
             }
         }
         CircuitKind::Inverter { output } => {
-            let input = max_neighbor_input(world, pos, world_blocks, registry);
+            let input = max_neighbor_input(circuit, pos, world_blocks, registry);
             if input > 0 {
                 0
             } else {
                 output
             }
         }
-        CircuitKind::Wire { falloff } => max_neighbor_input(world, pos, world_blocks, registry)
-            .saturating_sub(falloff),
-        CircuitKind::Delay { .. } => world.power_at(pos),
+        CircuitKind::Wire { falloff } => {
+            max_neighbor_input(circuit, pos, world_blocks, registry).saturating_sub(falloff)
+        }
+        CircuitKind::Delay { .. } => circuit.power_at(pos),
     }
 }
 
@@ -121,4 +152,8 @@ pub fn is_player_toggleable(def: &stagcrest_protocol::BlockDef) -> bool {
         CircuitKind::Inverter { .. } => is_torch_geometry(def),
         _ => false,
     }
+}
+
+pub fn is_repeater(def: &stagcrest_protocol::BlockDef) -> bool {
+    matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater))
 }

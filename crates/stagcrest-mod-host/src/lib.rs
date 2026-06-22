@@ -5,6 +5,8 @@ mod block_tints;
 mod colormap;
 mod host;
 mod models;
+mod mount_placement;
+mod repeater_placement;
 mod registry;
 mod resourcepack;
 mod runtime;
@@ -17,12 +19,14 @@ pub use assets::HttpAssetReader;
 pub use atlas::TextureAtlas;
 pub use block_tints::{apply_block_face_tints, face_texture_for};
 pub use dust_visual::{
-    dust_connections_from_neighbors, dust_vertex_tint, is_dust_connectable, resolve_dust_face,
-    DustConnections, PowerLookup,
+    dust_connections_from_neighbors, dust_vertex_tint, is_dust_connectable,
+    is_dust_connectable_neighbor, resolve_dust_face, DustConnections, PowerLookup,
 };
 pub use colormap::{sample_colormap_rgb, ColormapSet};
 pub use host::{ModError, ModHost};
 pub use models::{ModelRegistry, model_variant_for_block, resolve_block_model};
+pub use mount_placement::{mount_can_attach, validate_mount_placement};
+pub use repeater_placement::validate_repeater_placement;
 #[cfg(not(target_arch = "wasm32"))]
 pub use host::load_mods;
 #[cfg(target_arch = "wasm32")]

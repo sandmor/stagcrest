@@ -1,35 +1,44 @@
 use stagcrest_mod_host::BlockRegistry;
 use stagcrest_protocol::{
-    AtlasRect, BlockModel, FaceTexture, ModelAxis, ModelElement, ModelFace, ModelRenderLayer,
-    ModelRotation,
+    AtlasRect, BlockFaceTextures, BlockModel, FaceTexture, ModelAxis, ModelElement, ModelFace,
+    ModelRenderLayer, ModelRotation, ModelTexture, TintKind,
 };
 
 use crate::{vertex_tint, ChunkMesh, VoxelVertex};
 
 /// Block-space center of a voxel cell, used as the pivot for the whole-model
-/// Y rotation.
+/// orientation rotation.
 const CENTER: [f32; 3] = [0.5, 0.5, 0.5];
 
 pub fn emit_block_model(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
     model: &BlockModel,
-    face_tex: FaceTexture,
+    face_textures: &BlockFaceTextures,
     power: u8,
     registry: &BlockRegistry,
 ) {
     let bucket = layer_bucket(model.layer);
     for element in &model.elements {
+        let face_tex = select_face_texture(face_textures, element.texture);
         emit_element(
             mesh,
             origin,
             element,
-            model.y_rotation,
+            model.rotation,
             face_tex,
             power,
             bucket,
             registry,
         );
+    }
+}
+
+fn select_face_texture(textures: &BlockFaceTextures, slot: ModelTexture) -> FaceTexture {
+    match slot {
+        ModelTexture::Top => textures.top,
+        ModelTexture::Bottom => textures.bottom,
+        ModelTexture::Sides => textures.sides,
     }
 }
 
@@ -67,7 +76,7 @@ fn emit_element(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
     element: &ModelElement,
-    model_y_rotation: f32,
+    model_rotation: [f32; 3],
     face_tex: FaceTexture,
     power: u8,
     bucket: MeshBucket,
@@ -78,15 +87,13 @@ fn emit_element(
     let corners = box_corners(from, to);
 
     // Transform each corner entirely in block-local space (element rotation,
-    // then the whole-model Y rotation), then translate by the world origin.
+    // then the whole-model orientation), then translate by the world origin.
     let transformed: [[f32; 3]; 8] = corners.map(|c| {
         let mut p = c;
         if let Some(rot) = element.rotation {
             p = rotate_local(p, rot);
         }
-        if model_y_rotation != 0.0 {
-            p = rotate_y_about(p, model_y_rotation.to_radians(), CENTER);
-        }
+        p = rotate_model_about(p, model_rotation, CENTER);
         [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]]
     });
 
@@ -101,7 +108,13 @@ fn emit_element(
             h: 0,
         });
     let (aw, ah) = registry.atlas_dimensions();
-    let tint = vertex_tint(face_tex, power);
+    // Model faces never use dust power tint; `TintKind::PowerLevel` at power 0
+    // still encodes as 3.0 and triggers a red multiply in the shader.
+    let tint = if face_tex.tint == TintKind::PowerLevel {
+        vertex_tint(face_tex, power)
+    } else {
+        face_tex.tint.as_f32()
+    };
     let overlay_tint = face_tex.overlay_tint.as_f32();
 
     for face in 0..6 {
@@ -180,10 +193,23 @@ fn rotate_local(p: [f32; 3], rot: ModelRotation) -> [f32; 3] {
     ]
 }
 
-fn rotate_y_about(p: [f32; 3], angle: f32, pivot: [f32; 3]) -> [f32; 3] {
-    let rel = [p[0] - pivot[0], p[1] - pivot[1], p[2] - pivot[2]];
-    let out = rotate_y(rel, angle);
-    [out[0] + pivot[0], out[1] + pivot[1], out[2] + pivot[2]]
+/// Apply a whole-model orientation (Euler degrees in X, then Y, then Z order)
+/// about `pivot`.
+fn rotate_model_about(p: [f32; 3], euler_deg: [f32; 3], pivot: [f32; 3]) -> [f32; 3] {
+    if euler_deg == [0.0, 0.0, 0.0] {
+        return p;
+    }
+    let mut rel = [p[0] - pivot[0], p[1] - pivot[1], p[2] - pivot[2]];
+    if euler_deg[0] != 0.0 {
+        rel = rotate_x(rel, euler_deg[0].to_radians());
+    }
+    if euler_deg[1] != 0.0 {
+        rel = rotate_y(rel, euler_deg[1].to_radians());
+    }
+    if euler_deg[2] != 0.0 {
+        rel = rotate_z(rel, euler_deg[2].to_radians());
+    }
+    [rel[0] + pivot[0], rel[1] + pivot[1], rel[2] + pivot[2]]
 }
 
 fn rotate_x(p: [f32; 3], angle: f32) -> [f32; 3] {
@@ -239,10 +265,10 @@ fn emit_model_face(
     for (i, pos) in corners.iter().enumerate() {
         let u = (atlas_uv.x as f32 + uv_pixels[i][0] / 16.0 * atlas_uv.w as f32) / aw as f32;
         let v = (atlas_uv.y as f32 + uv_pixels[i][1] / 16.0 * atlas_uv.h as f32) / ah as f32;
-        let ou = (overlay_atlas.x as f32 + uv_pixels[i][0] / 16.0 * overlay_atlas.w as f32)
-            / aw as f32;
-        let ov = (overlay_atlas.y as f32 + uv_pixels[i][1] / 16.0 * overlay_atlas.h as f32)
-            / ah as f32;
+        let ou =
+            (overlay_atlas.x as f32 + uv_pixels[i][0] / 16.0 * overlay_atlas.w as f32) / aw as f32;
+        let ov =
+            (overlay_atlas.y as f32 + uv_pixels[i][1] / 16.0 * overlay_atlas.h as f32) / ah as f32;
         verts.push(VoxelVertex {
             position: *pos,
             uv: [u, v],

@@ -128,17 +128,18 @@ resourcepacks/         — local MC-format packs (gitignored; see example manife
 
 ## Controls
 
-| Input                | Action                            |
-| -------------------- | --------------------------------- |
-| Main menu Play       | Start loading mods                |
-| WASD / Space / Shift | Fly                               |
-| Mouse                | Look (after click to capture)     |
-| LMB                  | Break block                       |
-| RMB                  | Place / toggle redstone component |
-| 1–9                  | Hotbar slot                       |
-| Scroll wheel         | Cycle hotbar slot                 |
-| E                    | Creative block picker             |
-| Escape               | Release cursor / pause            |
+| Input                | Action                                              |
+| -------------------- | --------------------------------------------------- |
+| Main menu Play       | Start loading mods                                  |
+| WASD / Space / Shift | Fly                                                 |
+| Mouse                | Look (after click to capture)                       |
+| LMB                  | Break block                                         |
+| RMB                  | Place / toggle redstone component                   |
+| Middle-click         | Pick looked-at block into selected hotbar slot      |
+| 1–9                  | Hotbar slot                                         |
+| Scroll wheel         | Cycle hotbar slot                                   |
+| E                    | Creative inventory (search, drag-drop, block catalog) |
+| Escape               | Release cursor / pause                              |
 
 ## Mod API
 
