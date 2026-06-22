@@ -22,6 +22,7 @@ struct Vertex {
     @location(2) overlay_uv: vec2<f32>,
     @location(3) tint: f32,
     @location(4) overlay_tint: f32,
+    @location(5) tint_mul: vec3<f32>,
 }
 
 struct VertexOutput {
@@ -30,6 +31,7 @@ struct VertexOutput {
     @location(1) overlay_uv: vec2<f32>,
     @location(2) tint: f32,
     @location(3) overlay_tint: f32,
+    @location(4) tint_mul: vec3<f32>,
 }
 
 @vertex
@@ -42,6 +44,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.overlay_uv = vertex.overlay_uv;
     out.tint = vertex.tint;
     out.overlay_tint = vertex.overlay_tint;
+    out.tint_mul = vertex.tint_mul;
     return out;
 }
 
@@ -50,7 +53,11 @@ fn is_water(tint: f32) -> bool {
     return tint >= 4.25 && tint < 5.0;
 }
 
-fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
+fn uses_vertex_tint_mul(tint_mul: vec3<f32>) -> bool {
+    return length(tint_mul - vec3(1.0)) > 0.001;
+}
+
+fn apply_tint(rgb: vec3<f32>, tint: f32, tint_mul: vec3<f32>) -> vec3<f32> {
     if is_water(tint) {
         return rgb * water_tint.rgb;
     }
@@ -60,9 +67,15 @@ fn apply_tint(rgb: vec3<f32>, tint: f32) -> vec3<f32> {
         return rgb * rs;
     }
     if tint >= 1.5 {
+        if uses_vertex_tint_mul(tint_mul) {
+            return rgb * tint_mul;
+        }
         return rgb * foliage_tint.rgb;
     }
     if tint >= 0.5 {
+        if uses_vertex_tint_mul(tint_mul) {
+            return rgb * tint_mul;
+        }
         return rgb * grass_tint.rgb;
     }
     return rgb;
@@ -92,7 +105,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if alpha_cutout != 0u && base.a < 0.5 {
         discard;
     }
-    var rgb = apply_tint(base.rgb, in.tint);
+    var rgb = apply_tint(base.rgb, in.tint, in.tint_mul);
 
     if in.overlay_tint >= 0.5 {
         let ov_uv = animated_uv(in.overlay_uv, in.overlay_tint);
@@ -100,7 +113,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         if alpha_cutout != 0u && ov.a < 0.5 {
             discard;
         }
-        let tinted_overlay = apply_tint(ov.rgb, in.overlay_tint);
+        let tinted_overlay = apply_tint(ov.rgb, in.overlay_tint, in.tint_mul);
         rgb = mix(rgb, tinted_overlay, ov.a);
     }
 

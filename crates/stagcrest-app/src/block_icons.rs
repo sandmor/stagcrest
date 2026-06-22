@@ -56,7 +56,7 @@ fn profile_for_geometry(geometry: BlockGeometry) -> IconBakeProfile {
             margin: 10.0,
             alpha_cutoff: 4,
         },
-        BlockGeometry::Flat => IconBakeProfile {
+        BlockGeometry::Flat | BlockGeometry::Cross => IconBakeProfile {
             projection: IconProjection::TopDown,
             yaw: 0.0,
             margin: 8.0,

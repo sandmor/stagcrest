@@ -2,17 +2,22 @@ use crate::host::register_block_host;
 use crate::registry::BlockRegistry;
 use crate::resourcepack::ResourcePackLoader;
 use crate::runtime::memory::{read_utf8, write_bytes};
-use stagcrest_mod_sdk::{RegisterBlockRequest, RegisterTextureRequest};
+use crate::worldgen::{register_biome_feature_host, register_biome_host, BiomeRegistry};
+use stagcrest_mod_sdk::{
+    RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest, RegisterTextureRequest,
+};
 use std::ptr;
 use wasmi::*;
 
 pub struct ModLoadContext<'a> {
     pub registry: &'a mut BlockRegistry,
+    pub biome_registry: &'a mut BiomeRegistry,
     pub packs: Option<&'a ResourcePackLoader>,
 }
 
 struct HostState {
     registry: *mut BlockRegistry,
+    biome_registry: *mut BiomeRegistry,
     packs: *const ResourcePackLoader,
 }
 
@@ -64,6 +69,38 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
                 req.rgba,
                 animation,
             );
+            Ok(0)
+        },
+    )?;
+
+    linker.func_wrap(
+        "stagcrest_host",
+        "register_biome",
+        |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
+            let memory = guest_memory(&caller)
+                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let json = read_utf8(&memory, &caller, ptr, len)
+                .ok_or_else(|| Error::new("invalid register_biome payload"))?;
+            let req: RegisterBiomeRequest = serde_json::from_str(&json)
+                .map_err(|e| Error::new(format!("register_biome json: {e}")))?;
+            let biome_registry = unsafe { &mut *caller.data().biome_registry };
+            register_biome_host(biome_registry, req);
+            Ok(0)
+        },
+    )?;
+
+    linker.func_wrap(
+        "stagcrest_host",
+        "register_biome_feature",
+        |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
+            let memory = guest_memory(&caller)
+                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let json = read_utf8(&memory, &caller, ptr, len)
+                .ok_or_else(|| Error::new("invalid register_biome_feature payload"))?;
+            let req: RegisterBiomeFeatureRequest = serde_json::from_str(&json)
+                .map_err(|e| Error::new(format!("register_biome_feature json: {e}")))?;
+            let biome_registry = unsafe { &mut *caller.data().biome_registry };
+            register_biome_feature_host(biome_registry, req);
             Ok(0)
         },
     )?;
@@ -135,6 +172,7 @@ pub fn load_mod(ctx: &mut ModLoadContext<'_>, wasm_bytes: &[u8]) -> Result<(), S
 
     let state = HostState {
         registry: ctx.registry as *mut BlockRegistry,
+        biome_registry: ctx.biome_registry as *mut BiomeRegistry,
         packs: ctx
             .packs
             .map(|p| p as *const _)

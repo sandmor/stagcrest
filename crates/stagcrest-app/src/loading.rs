@@ -1,5 +1,6 @@
 use crate::game::{AppState, GameConfig, ModContext, StagcrestWorldResource, TerrainGen};
-use crate::terrain_queue::{TerrainBlocks, TerrainGenQueue, TerrainStreamState};
+use crate::game::WorldColormaps;
+use crate::terrain_queue::{TerrainBlocks, TerrainBiomes, TerrainGenQueue, TerrainStreamState};
 #[cfg(target_arch = "wasm32")]
 use crate::terrain_queue::{terrain_apply, terrain_dispatch, terrain_poll_tasks};
 use bevy::prelude::*;
@@ -147,6 +148,8 @@ fn apply_loaded_content(
         spawn,
     );
 
+    let biome_registry = host.biome_registry.clone();
+
     commands.insert_resource(ModContext {
         host,
         atlas: atlas.clone(),
@@ -156,6 +159,7 @@ fn apply_loaded_content(
     commands.insert_resource(world);
     commands.insert_resource(TerrainGen(terrain));
     commands.insert_resource(TerrainBlocks(column_blocks));
+    commands.insert_resource(TerrainBiomes(biome_registry));
     commands.insert_resource(queue);
     commands.insert_resource(TerrainStreamState {
         center_x: spawn_chunk.x,
@@ -170,6 +174,7 @@ fn apply_loaded_content(
         water_tint: Color::srgb(water_rgb[0], water_rgb[1], water_rgb[2]),
         fluid_anim,
     });
+    commands.insert_resource(WorldColormaps(colormaps));
     commands.insert_resource(stagcrest_render::MeshCacheResource(MeshCache::default()));
 }
 

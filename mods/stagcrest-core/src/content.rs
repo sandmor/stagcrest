@@ -1,11 +1,12 @@
 use stagcrest_mod_sdk::{
     CircuitKindRequest, ContentRegistrar, RegisterBlockRequest, RegisterCircuitRequest,
-    RegisterTextureRequest,
+    RegisterTextureRequest, RenderLayer,
 };
 
 pub fn register_content(reg: &mut impl ContentRegistrar) {
     register_textures(reg);
     register_blocks(reg);
+    crate::worldgen::register_worldgen(reg);
     reg.log("stagcrest-core registered");
 }
 
@@ -43,6 +44,47 @@ fn solid_color_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g: u8
         height: 16,
         rgba,
     });
+}
+
+fn cutout_fallback_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g: u8, b: u8) {
+    let mut rgba = Vec::with_capacity(16 * 16 * 4);
+    for z in 0..16u8 {
+        for x in 0..16u8 {
+            let on_cross = (i16::from(x) - i16::from(z)).unsigned_abs() <= 2
+                || (i16::from(x) + i16::from(z) - 15).unsigned_abs() <= 2;
+            let alpha = if on_cross { 255 } else { 0 };
+            rgba.extend_from_slice(&[r, g, b, alpha]);
+        }
+    }
+    reg.register_texture(RegisterTextureRequest {
+        namespaced_id: name.to_string(),
+        width: 16,
+        height: 16,
+        rgba,
+    });
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+fn register_plant_texture_from_pack(
+    reg: &mut impl ContentRegistrar,
+    id: &str,
+    mc_name: &str,
+    fallback: (u8, u8, u8),
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some((w, h, rgba)) = stagcrest_mod_sdk::load_texture_from_pack(mc_name) {
+            reg.register_texture(RegisterTextureRequest {
+                namespaced_id: id.to_string(),
+                width: w,
+                height: h,
+                rgba,
+            });
+            return;
+        }
+    }
+    let (r, g, b) = fallback;
+    cutout_fallback_texture(reg, id, r, g, b);
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
@@ -173,6 +215,64 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
         "smooth_stone",
         (160, 160, 160),
     );
+    register_texture_from_pack(reg, "stagcrest:sand", "sand", (219, 207, 163));
+    register_texture_from_pack(reg, "stagcrest:iron_ore", "iron_ore", (136, 129, 122));
+    register_texture_from_pack(reg, "stagcrest:oak_log", "oak_log", (102, 81, 51));
+    register_texture_from_pack(reg, "stagcrest:oak_log_top", "oak_log_top", (168, 134, 84));
+    register_plant_texture_from_pack(reg, "stagcrest:oak_leaves", "oak_leaves", (60, 120, 40));
+    register_plant_texture_from_pack(reg, "stagcrest:short_grass", "short_grass", (95, 159, 53));
+    register_plant_texture_from_pack(
+        reg,
+        "stagcrest:tall_grass_bottom",
+        "tall_grass_bottom",
+        (95, 159, 53),
+    );
+    register_plant_texture_from_pack(
+        reg,
+        "stagcrest:tall_grass_top",
+        "tall_grass_top",
+        (110, 170, 60),
+    );
+    register_plant_texture_from_pack(reg, "stagcrest:dandelion", "dandelion", (255, 220, 0));
+    register_plant_texture_from_pack(reg, "stagcrest:poppy", "poppy", (200, 40, 40));
+    register_texture_from_pack(
+        reg,
+        "stagcrest:cactus_side",
+        "cactus_side",
+        (85, 140, 60),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:cactus_top",
+        "cactus_top",
+        (95, 150, 65),
+    );
+    register_plant_texture_from_pack(reg, "stagcrest:dead_bush", "dead_bush", (140, 110, 70));
+}
+
+fn register_layered_cross_plant(
+    reg: &mut impl ContentRegistrar,
+    id: &str,
+    name: &str,
+    bottom_texture: &str,
+    top_texture: &str,
+) {
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: id.to_string(),
+        display_name: name.to_string(),
+        opaque: false,
+        transparent: true,
+        solid: false,
+        hardness: 1.0,
+        top_texture: top_texture.to_string(),
+        bottom_texture: bottom_texture.to_string(),
+        sides_texture: bottom_texture.to_string(),
+        placeable: false,
+        fluid: false,
+        render_layer: None,
+        geometry: Some("cross".into()),
+        circuit: None,
+    });
 }
 
 fn register_solid_block(
@@ -184,6 +284,7 @@ fn register_solid_block(
     transparent: bool,
     solid: bool,
     placeable: bool,
+    render_layer: Option<RenderLayer>,
     circuit: Option<RegisterCircuitRequest>,
     geometry: Option<&str>,
 ) {
@@ -199,8 +300,8 @@ fn register_solid_block(
         sides_texture: texture.to_string(),
         placeable,
         fluid: false,
+        render_layer,
         geometry: geometry.map(str::to_string),
-        shape: None,
         circuit,
     });
 }
@@ -217,6 +318,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         None,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -229,6 +331,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         None,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -239,6 +342,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
+        None,
         None,
         None,
     );
@@ -255,8 +359,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:grass_side".into(),
         placeable: true,
         geometry: None,
-        shape: None,
         circuit: None,
+        render_layer: None,
     });
     register_solid_block(
         reg,
@@ -267,6 +371,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
+        None,
         None,
         None,
     );
@@ -281,6 +386,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         None,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -291,6 +397,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         true,
         true,
+        Some(RenderLayer::Blend),
         None,
         None,
     );
@@ -307,8 +414,8 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:water_still".into(),
         placeable: false,
         geometry: None,
-        shape: None,
         circuit: None,
+        render_layer: Some(RenderLayer::Blend),
     });
     register_solid_block(
         reg,
@@ -321,6 +428,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         None,
         None,
+        None,
     );
     register_solid_block(
         reg,
@@ -331,6 +439,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         false,
         true,
+        None,
         Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Wire { falloff: 1 },
         }),
@@ -345,6 +454,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         true,
         false,
         true,
+        None,
         Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Inverter { output: 15 },
         }),
@@ -359,6 +469,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         true,
+        None,
         Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Source { level: 15 },
         }),
@@ -380,10 +491,10 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:lever".into(),
         placeable: true,
         geometry: Some("model:lever".into()),
-        shape: None,
         circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Switch { output: 15 },
         }),
+        render_layer: None,
     });
     // Stone button: a small stone box that sinks when pressed.
     reg.register_block(RegisterBlockRequest {
@@ -399,10 +510,10 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:stone".into(),
         placeable: true,
         geometry: Some("model:stone_button".into()),
-        shape: None,
         circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Switch { output: 15 },
         }),
+        render_layer: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:repeater".into(),
@@ -417,9 +528,139 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:redstone_torch_off".into(),
         placeable: true,
         geometry: Some("model:repeater".into()),
-        shape: None,
         circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Repeater { output: 15 },
         }),
+        render_layer: None,
     });
+    register_solid_block(
+        reg,
+        "stagcrest:sand",
+        "Sand",
+        "stagcrest:sand",
+        true,
+        false,
+        true,
+        true,
+        None,
+        None,
+        None,
+    );
+    register_solid_block(
+        reg,
+        "stagcrest:iron_ore",
+        "Iron Ore",
+        "stagcrest:iron_ore",
+        true,
+        false,
+        true,
+        true,
+        None,
+        None,
+        None,
+    );
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:oak_log".into(),
+        display_name: "Oak Log".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 1.0,
+        top_texture: "stagcrest:oak_log_top".into(),
+        bottom_texture: "stagcrest:oak_log_top".into(),
+        sides_texture: "stagcrest:oak_log".into(),
+        placeable: true,
+        geometry: None,
+        circuit: None,
+        render_layer: None,
+    });
+    register_solid_block(
+        reg,
+        "stagcrest:oak_leaves",
+        "Oak Leaves",
+        "stagcrest:oak_leaves",
+        false,
+        true,
+        false,
+        true,
+        Some(RenderLayer::Cutout),
+        None,
+        None,
+    );
+    register_solid_block(
+        reg,
+        "stagcrest:short_grass",
+        "Short Grass",
+        "stagcrest:short_grass",
+        false,
+        true,
+        false,
+        false,
+        None,
+        None,
+        Some("cross"),
+    );
+    register_layered_cross_plant(
+        reg,
+        "stagcrest:tall_grass",
+        "Tall Grass",
+        "stagcrest:tall_grass_bottom",
+        "stagcrest:tall_grass_top",
+    );
+    register_solid_block(
+        reg,
+        "stagcrest:dandelion",
+        "Dandelion",
+        "stagcrest:dandelion",
+        false,
+        true,
+        false,
+        false,
+        None,
+        None,
+        Some("cross"),
+    );
+    register_solid_block(
+        reg,
+        "stagcrest:poppy",
+        "Poppy",
+        "stagcrest:poppy",
+        false,
+        true,
+        false,
+        false,
+        None,
+        None,
+        Some("cross"),
+    );
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:cactus".into(),
+        display_name: "Cactus".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 0.4,
+        top_texture: "stagcrest:cactus_top".into(),
+        bottom_texture: "stagcrest:cactus_top".into(),
+        sides_texture: "stagcrest:cactus_side".into(),
+        placeable: true,
+        geometry: None,
+        circuit: None,
+        render_layer: None,
+    });
+    register_solid_block(
+        reg,
+        "stagcrest:dead_bush",
+        "Dead Bush",
+        "stagcrest:dead_bush",
+        false,
+        true,
+        false,
+        false,
+        None,
+        None,
+        Some("cross"),
+    );
 }

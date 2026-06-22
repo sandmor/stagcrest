@@ -17,6 +17,7 @@ pub enum BlockGeometry {
     #[default]
     Cube,
     Flat,
+    Cross,
     Model(ModelId),
 }
 
@@ -24,6 +25,7 @@ impl BlockGeometry {
     pub fn from_str(s: &str) -> Self {
         match s {
             "flat" => Self::Flat,
+            "cross" => Self::Cross,
             "torch" | "model:redstone_torch" => Self::Model(ModelId::RedstoneTorch),
             "model:lever" => Self::Model(ModelId::Lever),
             "model:button" | "model:stone_button" => Self::Model(ModelId::Button),

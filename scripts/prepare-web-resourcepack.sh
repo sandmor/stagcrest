@@ -28,6 +28,19 @@ BLOCK_TEXTURES=(
   repeater
   repeater_on
   smooth_stone
+  sand
+  iron_ore
+  oak_log
+  oak_log_top
+  oak_leaves
+  short_grass
+  tall_grass_top
+  tall_grass_bottom
+  dandelion
+  poppy
+  cactus_side
+  cactus_top
+  dead_bush
 )
 
 COLORMAPS=(grass foliage)

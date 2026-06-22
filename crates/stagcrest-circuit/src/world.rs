@@ -241,7 +241,7 @@ mod tests {
     use super::*;
     use stagcrest_protocol::{
         BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind, CircuitNodeDef,
-        Facing, ModelId, TextureId, repeater_state,
+        Facing, ModelId, ModelRenderLayer, TextureId, repeater_state,
     };
 
     fn test_block(id: BlockId, kind: CircuitKind) -> BlockDef {
@@ -262,6 +262,7 @@ mod tests {
             placeable: true,
             geometry,
             fluid: false,
+            render_layer: ModelRenderLayer::Opaque,
         }
     }
 

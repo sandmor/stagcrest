@@ -3,6 +3,7 @@ use crate::block_tints::apply_block_face_tints;
 use crate::registry::BlockRegistry;
 use crate::resourcepack::{ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES};
 use crate::runtime::{load_mod, ModLoadContext};
+use crate::worldgen::BiomeRegistry;
 use stagcrest_mod_sdk::{CircuitKindRequest, RegisterBlockRequest};
 use stagcrest_protocol::{
     BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind, CircuitNodeDef, ModManifest,
@@ -26,6 +27,7 @@ pub enum ModError {
 
 pub struct ModHost {
     pub registry: BlockRegistry,
+    pub biome_registry: BiomeRegistry,
     pub loaded_mods: Vec<String>,
 }
 
@@ -33,8 +35,15 @@ impl ModHost {
     pub fn new() -> Self {
         Self {
             registry: BlockRegistry::new(),
+            biome_registry: BiomeRegistry::default(),
             loaded_mods: Vec::new(),
         }
+    }
+
+    pub fn finalize_biomes(&mut self) -> Result<(), ModError> {
+        self.biome_registry
+            .finalize(&self.registry)
+            .map_err(ModError::Message)
     }
 
     pub fn load_all(
@@ -51,6 +60,8 @@ impl ModHost {
         for mod_entry in manifest.mods {
             self.load_mod(reader, &mod_entry, packs)?;
         }
+
+        self.finalize_biomes()?;
 
         Ok(())
     }
@@ -72,6 +83,7 @@ impl ModHost {
         let wasm_bytes = reader.read_bytes(&wasm_path)?;
         let mut ctx = ModLoadContext {
             registry: &mut self.registry,
+            biome_registry: &mut self.biome_registry,
             packs,
         };
         load_mod(&mut ctx, &wasm_bytes).map_err(ModError::Runtime)?;
@@ -128,6 +140,11 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         },
     });
 
+    let render_layer = json
+        .render_layer
+        .map(render_layer_from_sdk)
+        .unwrap_or_else(|| resolve_render_layer(json.transparent));
+
     reg.register_block(BlockDef {
         id,
         namespaced_id: json.namespaced_id,
@@ -143,10 +160,26 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         geometry: json
             .geometry
             .as_deref()
-            .or(json.shape.as_deref())
             .map(BlockGeometry::from_str)
             .unwrap_or_default(),
+        render_layer,
     });
+}
+
+fn resolve_render_layer(transparent: bool) -> stagcrest_protocol::ModelRenderLayer {
+    if transparent {
+        stagcrest_protocol::ModelRenderLayer::Cutout
+    } else {
+        stagcrest_protocol::ModelRenderLayer::Opaque
+    }
+}
+
+fn render_layer_from_sdk(layer: stagcrest_mod_sdk::RenderLayer) -> stagcrest_protocol::ModelRenderLayer {
+    match layer {
+        stagcrest_mod_sdk::RenderLayer::Opaque => stagcrest_protocol::ModelRenderLayer::Opaque,
+        stagcrest_mod_sdk::RenderLayer::Blend => stagcrest_protocol::ModelRenderLayer::Blend,
+        stagcrest_mod_sdk::RenderLayer::Cutout => stagcrest_protocol::ModelRenderLayer::Cutout,
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -160,6 +193,7 @@ pub fn load_mods(repo_root: &std::path::Path) -> Result<ModHost, ModError> {
     let mut host = ModHost::new();
     if let Some(packs) = packs.as_mut() {
         register_pack_fluid_textures(&mut host.registry, packs, &reader);
+        register_pack_plant_textures(&mut host.registry, packs, &reader);
     }
     host.load_all(&reader, packs.as_ref())?;
     Ok(host)
@@ -178,9 +212,38 @@ pub async fn load_mods_async() -> Result<ModHost, ModError> {
     let mut host = ModHost::new();
     if let Some(packs) = packs.as_mut() {
         register_pack_fluid_textures(&mut host.registry, packs, &reader);
+        register_pack_plant_textures(&mut host.registry, packs, &reader);
     }
     host.load_all_async(&reader, packs.as_ref()).await?;
     Ok(host)
+}
+
+fn register_pack_plant_textures(
+    registry: &mut BlockRegistry,
+    packs: &mut ResourcePackLoader,
+    reader: &dyn crate::assets::AssetReader,
+) {
+    for (namespaced_id, mc_name) in [
+        ("stagcrest:short_grass", "short_grass"),
+        ("stagcrest:tall_grass_bottom", "tall_grass_bottom"),
+        ("stagcrest:tall_grass_top", "tall_grass_top"),
+        ("stagcrest:dandelion", "dandelion"),
+        ("stagcrest:poppy", "poppy"),
+        ("stagcrest:dead_bush", "dead_bush"),
+        ("stagcrest:oak_leaves", "oak_leaves"),
+    ] {
+        packs.ensure_block_texture(reader, mc_name);
+        let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
+            continue;
+        };
+        registry.register_texture_with_animation(
+            namespaced_id.to_string(),
+            width,
+            height,
+            rgba,
+            None,
+        );
+    }
 }
 
 fn register_pack_fluid_textures(
@@ -224,6 +287,8 @@ impl ModHost {
             self.load_mod_async(reader, &mod_entry, packs).await?;
         }
 
+        self.finalize_biomes()?;
+
         Ok(())
     }
 
@@ -244,6 +309,7 @@ impl ModHost {
         let wasm_bytes = reader.read_bytes_async(&wasm_path).await?;
         let mut ctx = ModLoadContext {
             registry: &mut self.registry,
+            biome_registry: &mut self.biome_registry,
             packs,
         };
         load_mod(&mut ctx, &wasm_bytes).map_err(ModError::Runtime)?;

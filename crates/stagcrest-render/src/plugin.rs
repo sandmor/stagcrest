@@ -324,6 +324,10 @@ fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
         crate::voxel_material::ATTRIBUTE_OVERLAY_TINT,
         vertices.iter().map(|v| v.overlay_tint).collect::<Vec<_>>(),
     );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_TINT_MUL,
+        vertices.iter().map(|v| v.tint_mul).collect::<Vec<_>>(),
+    );
     mesh.insert_indices(Indices::U32(indices.clone()));
 
     let _ = voxel_vertex_layout();

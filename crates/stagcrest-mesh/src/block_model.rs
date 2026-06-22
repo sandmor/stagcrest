@@ -42,12 +42,16 @@ fn select_face_texture(textures: &BlockFaceTextures, slot: ModelTexture) -> Face
     }
 }
 
-fn layer_bucket(layer: ModelRenderLayer) -> MeshBucket {
+pub fn mesh_bucket_for_layer(layer: ModelRenderLayer) -> MeshBucket {
     match layer {
         ModelRenderLayer::Opaque => MeshBucket::Opaque,
         ModelRenderLayer::Blend => MeshBucket::Blend,
         ModelRenderLayer::Cutout => MeshBucket::Cutout,
     }
+}
+
+fn layer_bucket(layer: ModelRenderLayer) -> MeshBucket {
+    mesh_bucket_for_layer(layer)
 }
 
 #[derive(Clone, Copy)]
@@ -278,6 +282,7 @@ fn emit_model_face(
             overlay_uv: [ou, ov],
             tint,
             overlay_tint,
+            tint_mul: [1.0, 1.0, 1.0],
         });
     }
 
@@ -308,12 +313,17 @@ impl SelectionBounds {
             max: [1.0, FLAT_Y + EPS, 1.0],
         }
     }
+    pub fn cross() -> Self {
+        // Full-block bounds are intentional so cross plants are easy to target.
+        Self::cube()
+    }
 }
 
 pub fn block_selection_bounds(geometry: BlockGeometry, model: Option<&BlockModel>) -> SelectionBounds {
     match geometry {
         BlockGeometry::Cube => SelectionBounds::cube(),
         BlockGeometry::Flat => SelectionBounds::flat(),
+        BlockGeometry::Cross => SelectionBounds::cross(),
         BlockGeometry::Model(_) => model
             .map(model_bounds)
             .unwrap_or_else(SelectionBounds::cube),

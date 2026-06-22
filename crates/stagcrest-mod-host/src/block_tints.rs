@@ -11,6 +11,18 @@ pub fn apply_block_face_tints(
         return;
     }
 
+    if matches!(
+        block_id,
+        "stagcrest:short_grass"
+            | "stagcrest:tall_grass"
+            | "stagcrest:dandelion"
+            | "stagcrest:poppy"
+            | "stagcrest:oak_leaves"
+    ) {
+        apply_foliage_flat_tint(face_textures);
+        return;
+    }
+
     if block_id != "stagcrest:grass_block" {
         return;
     }
@@ -40,6 +52,12 @@ pub fn apply_block_face_tints(
     }
 }
 
+fn apply_foliage_flat_tint(face_textures: &mut BlockFaceTextures) {
+    face_textures.top.tint = TintKind::Foliage;
+    face_textures.bottom.tint = TintKind::Foliage;
+    face_textures.sides.tint = TintKind::Foliage;
+}
+
 fn apply_fluid_tints(face_textures: &mut BlockFaceTextures) {
     face_textures.top.tint = TintKind::Water;
     face_textures.bottom.tint = TintKind::Water;
@@ -64,7 +82,8 @@ mod tests {
     #[test]
     fn fluid_blocks_get_water_tint() {
         let mut registry = crate::registry::BlockRegistry::new();
-        let tex = registry.register_texture("stagcrest:water_still".into(), 16, 16, vec![0; 16 * 16 * 4]);
+        let tex =
+            registry.register_texture("stagcrest:water_still".into(), 16, 16, vec![0; 16 * 16 * 4]);
         let mut faces = BlockFaceTextures::uniform(tex);
         apply_block_face_tints("stagcrest:water", true, &mut faces, &registry);
         assert_eq!(faces.top.tint, TintKind::Water);

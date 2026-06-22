@@ -28,6 +28,19 @@ pub const DEFAULT_MC_BLOCK_TEXTURES: &[&str] = &[
     "repeater",
     "repeater_on",
     "smooth_stone",
+    "sand",
+    "iron_ore",
+    "oak_log",
+    "oak_log_top",
+    "oak_leaves",
+    "short_grass",
+    "tall_grass_top",
+    "tall_grass_bottom",
+    "dandelion",
+    "poppy",
+    "cactus_side",
+    "cactus_top",
+    "dead_bush",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -273,8 +286,8 @@ impl ResourcePackLoader {
                         } else {
                             None
                         };
-                        let animation = animation
-                            .or_else(|| Self::infer_vertical_strip_animation(w, h));
+                        let animation =
+                            animation.or_else(|| Self::infer_vertical_strip_animation(w, h));
                         self.block_textures.insert(
                             name.to_string(),
                             BlockTextureEntry {
@@ -315,8 +328,8 @@ impl ResourcePackLoader {
                         } else {
                             None
                         };
-                        let animation = animation
-                            .or_else(|| Self::infer_vertical_strip_animation(w, h));
+                        let animation =
+                            animation.or_else(|| Self::infer_vertical_strip_animation(w, h));
                         self.block_textures.insert(
                             name.to_string(),
                             BlockTextureEntry {

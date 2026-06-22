@@ -1,15 +1,15 @@
-use crate::{block_outline, debug_overlay, player, targeting};
 use crate::terrain_queue::{
-    terrain_apply, terrain_dispatch, terrain_poll_tasks, TerrainBlocks, TerrainGenQueue,
-    TerrainStreamState,
+    terrain_apply, terrain_dispatch, terrain_poll_tasks, TerrainBiomes, TerrainBlocks,
+    TerrainGenQueue, TerrainStreamState,
 };
+use crate::{block_outline, debug_overlay, player, targeting};
 use bevy::prelude::*;
+use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_host::{
     world_chunk_y_bounds, BlockRegistry, ModHost, ModelRegistry, TextureAtlas, WorldGenState,
     SEA_LEVEL,
 };
 use stagcrest_protocol::ChunkPos;
-use stagcrest_circuit::CircuitWorld;
 use stagcrest_render::{
     spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, VoxelCamera,
     VoxelRenderPlugin,
@@ -35,6 +35,9 @@ pub struct ModContext {
 
 #[derive(Resource)]
 pub struct StagcrestWorldResource(pub StagcrestWorld);
+
+#[derive(Resource, Clone)]
+pub struct WorldColormaps(pub stagcrest_mod_host::ColormapSet);
 
 #[derive(Resource, Default)]
 pub struct CircuitResource(pub CircuitWorld);
@@ -96,7 +99,11 @@ impl Plugin for GamePlugin {
             )
             .add_systems(
                 OnEnter(AppState::InGame),
-                (setup_game_camera, init_circuit_on_enter, setup_block_outline),
+                (
+                    setup_game_camera,
+                    init_circuit_on_enter,
+                    setup_block_outline,
+                ),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session);
     }
@@ -127,9 +134,11 @@ fn cleanup_game_session(
     commands.remove_resource::<BlockAtlasResource>();
     commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<LastStreamCenter>();
+    commands.remove_resource::<TerrainBiomes>();
     commands.remove_resource::<TerrainGenQueue>();
     commands.remove_resource::<TerrainStreamState>();
     commands.remove_resource::<TerrainBlocks>();
+    commands.remove_resource::<WorldColormaps>();
     commands.remove_resource::<targeting::BlockTarget>();
     // MeshCacheResource is re-inited by VoxelRenderPlugin; reset it for the next session.
     commands.insert_resource(MeshCacheResource::default());
@@ -212,9 +221,7 @@ fn chunk_streaming(
     world
         .0
         .load_area_3d(center, h_radius, v_radius, y_bounds.clone());
-    let removed = world
-        .0
-        .unload_far_chunks_3d(center, unload_h, unload_v);
+    let removed = world.0.unload_far_chunks_3d(center, unload_h, unload_v);
 
     for chunk_pos in removed {
         cache.0.remove(chunk_pos);
@@ -238,6 +245,8 @@ fn chunk_streaming(
 fn rebuild_meshes(
     mod_ctx: Option<Res<ModContext>>,
     circuit: Option<Res<CircuitResource>>,
+    terrain: Option<Res<TerrainGen>>,
+    colormaps: Option<Res<WorldColormaps>>,
     mut world: ResMut<StagcrestWorldResource>,
     mut cache: ResMut<MeshCacheResource>,
 ) {
@@ -247,7 +256,8 @@ fn rebuild_meshes(
         return;
     }
     let mut iter = dirty.into_iter();
-    let to_rebuild: std::collections::HashSet<_> = iter.by_ref().take(MESH_REBUILD_BUDGET).collect();
+    let to_rebuild: std::collections::HashSet<_> =
+        iter.by_ref().take(MESH_REBUILD_BUDGET).collect();
     world.0.dirty_chunks.extend(iter);
     if to_rebuild.is_empty() {
         return;
@@ -255,7 +265,24 @@ fn rebuild_meshes(
     let power = circuit
         .as_ref()
         .map(|r| &r.0 as &dyn stagcrest_mod_host::PowerLookup);
-    cache.0.rebuild_dirty(&world.0, &ctx.registry, &ctx.models, power, to_rebuild);
+    let climate = colormaps.as_ref().zip(terrain.as_ref()).map(|(maps, gen)| {
+        let generator = gen.0.generator();
+        stagcrest_mesh::MeshClimateTint {
+            colormaps: &maps.0,
+            config: &generator.config,
+            seed: generator.seed,
+            noise: generator.noise_bank(),
+        }
+    });
+    let climate_ref = climate.as_ref();
+    cache.0.rebuild_dirty(
+        &world.0,
+        &ctx.registry,
+        &ctx.models,
+        power,
+        climate_ref,
+        to_rebuild,
+    );
 }
 
 fn update_voxel_camera(

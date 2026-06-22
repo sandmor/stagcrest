@@ -482,6 +482,7 @@ pub struct BlockDef {
     pub placeable: bool,
     pub geometry: BlockGeometry,
     pub fluid: bool,
+    pub render_layer: ModelRenderLayer,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

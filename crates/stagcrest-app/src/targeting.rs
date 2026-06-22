@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use stagcrest_protocol::{BlockDef, BlockId};
+use stagcrest_protocol::{BlockDef, BlockGeometry, BlockId};
 use stagcrest_world::RaycastHit;
 
 #[derive(Resource, Default)]
@@ -8,7 +8,11 @@ pub struct BlockTarget {
 }
 
 pub fn is_targetable_block(id: BlockId, def: &BlockDef, air: BlockId) -> bool {
-    id != air && (def.solid || def.circuit.is_some())
+    id != air
+        && (def.solid
+            || def.placeable && matches!(def.geometry, BlockGeometry::Cube)
+            || def.circuit.is_some()
+            || matches!(def.geometry, BlockGeometry::Flat | BlockGeometry::Cross))
 }
 
 pub fn update_block_target(

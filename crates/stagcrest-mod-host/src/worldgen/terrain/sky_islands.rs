@@ -34,8 +34,9 @@ impl<'a> SkyIslandSampler<'a> {
         }
 
         let center_y = self.island_center_y(wx, wz);
+        let radius = self.island_radius(wx, wz);
         let dy = (y - center_y).abs();
-        if dy > self.config.island_vertical_radius {
+        if dy > radius {
             return false;
         }
 
@@ -61,5 +62,15 @@ impl<'a> SkyIslandSampler<'a> {
             .wrapping_mul(0x6C07_8965_E59B_D9AD);
         let span = (self.config.island_max_y - self.config.island_min_y).max(1) as u64;
         self.config.island_min_y + (h % span) as i32
+    }
+
+    fn island_radius(&self, wx: i32, wz: i32) -> i32 {
+        let h = self
+            .seed
+            .0
+            .wrapping_add((wx as u64).wrapping_mul(3))
+            .wrapping_add((wz as u64).wrapping_mul(7));
+        let span = 9i32;
+        8 + (h % span as u64) as i32
     }
 }

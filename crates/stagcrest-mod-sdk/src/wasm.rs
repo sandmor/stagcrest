@@ -1,4 +1,4 @@
-use crate::{RegisterBlockRequest, RegisterTextureRequest};
+use crate::{RegisterBlockRequest, RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterTextureRequest};
 use serde::Deserialize;
 
 const PACK_TEXTURE_BUF: usize = 256 * 1024;
@@ -18,6 +18,10 @@ extern "C" {
         out_ptr: i32,
         out_max: i32,
     ) -> i32;
+    #[link_name = "register_biome"]
+    fn host_register_biome(ptr: i32, len: i32) -> i32;
+    #[link_name = "register_biome_feature"]
+    fn host_register_biome_feature(ptr: i32, len: i32) -> i32;
 }
 
 fn with_utf8<F>(text: &str, f: F) -> i32
@@ -40,6 +44,16 @@ pub fn register_block(req: RegisterBlockRequest) -> i32 {
 pub fn register_texture(req: RegisterTextureRequest) -> i32 {
     let json = serde_json::to_string(&req).expect("serialize RegisterTextureRequest");
     unsafe { with_utf8(&json, |ptr, len| host_register_texture(ptr, len)) }
+}
+
+pub fn register_biome(req: RegisterBiomeRequest) -> i32 {
+    let json = serde_json::to_string(&req).expect("serialize RegisterBiomeRequest");
+    unsafe { with_utf8(&json, |ptr, len| host_register_biome(ptr, len)) }
+}
+
+pub fn register_biome_feature(req: RegisterBiomeFeatureRequest) -> i32 {
+    let json = serde_json::to_string(&req).expect("serialize RegisterBiomeFeatureRequest");
+    unsafe { with_utf8(&json, |ptr, len| host_register_biome_feature(ptr, len)) }
 }
 
 pub fn log(msg: &str) {

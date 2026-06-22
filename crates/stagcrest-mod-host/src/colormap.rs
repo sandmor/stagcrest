@@ -1,6 +1,7 @@
 use crate::assets::AssetReader;
 use crate::resourcepack::ResourcePackLoader;
 
+#[derive(Clone)]
 pub struct ColormapSet {
     pub grass: Vec<u8>,
     pub grass_w: u32,
@@ -227,4 +228,17 @@ fn default_water_colormap() -> (u32, u32, Vec<u8>) {
         }
     }
     (w, h, rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_temperature_maps_to_same_column() {
+        let (w, h, rgba) = default_grass_colormap();
+        let at_08 = sample_colormap_rgb(&rgba, w, h, 0.8, 0.4);
+        let at_20_scaled = sample_colormap_rgb(&rgba, w, h, 2.0 / 2.5, 0.4);
+        assert_eq!(at_08, at_20_scaled);
+    }
 }

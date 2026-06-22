@@ -3,6 +3,23 @@
 use crate::worldgen::seed::{TerrainLayer, WorldSeed};
 use noise::{NoiseFn, SuperSimplex};
 
+fn layer_index(layer: TerrainLayer) -> usize {
+    match layer {
+        TerrainLayer::ElevationLow => 0,
+        TerrainLayer::ElevationMid => 1,
+        TerrainLayer::ElevationHigh => 2,
+        TerrainLayer::Roughness => 3,
+        TerrainLayer::SkyIslandPlacement => 4,
+        TerrainLayer::SkyIslandShape => 5,
+        TerrainLayer::Temperature => 6,
+        TerrainLayer::Moisture => 7,
+        TerrainLayer::CaveCheese => 8,
+        TerrainLayer::CaveSpaghetti => 9,
+        TerrainLayer::CaveNoodle => 10,
+        TerrainLayer::OreIron => 11,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct NoiseSource {
     generator: SuperSimplex,
@@ -32,25 +49,13 @@ pub struct NoiseBank {
 impl NoiseBank {
     pub fn new(seed: WorldSeed) -> Self {
         let mut sources = [NoiseSource::from_seed(0); TerrainLayer::ALL.len()];
-        for (i, layer) in TerrainLayer::ALL.iter().enumerate() {
-            sources[i] = NoiseSource::from_seed(seed.layer_seed(*layer));
+        for layer in TerrainLayer::ALL {
+            sources[layer_index(layer)] = NoiseSource::from_seed(seed.layer_seed(layer));
         }
         Self { sources }
     }
 
     pub fn get(&self, layer: TerrainLayer) -> &NoiseSource {
         &self.sources[layer_index(layer)]
-    }
-}
-
-fn layer_index(layer: TerrainLayer) -> usize {
-    match layer {
-        TerrainLayer::ElevationLow => 0,
-        TerrainLayer::ElevationMid => 1,
-        TerrainLayer::ElevationHigh => 2,
-        TerrainLayer::Roughness => 3,
-        TerrainLayer::Density => 4,
-        TerrainLayer::SkyIslandPlacement => 5,
-        TerrainLayer::SkyIslandShape => 6,
     }
 }

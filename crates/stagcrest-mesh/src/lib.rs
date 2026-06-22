@@ -3,7 +3,8 @@ mod block_model;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_host::{
-    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for,
+    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for, sample_colormap_rgb,
+    ClimateSampler, ColormapSet, NoiseBank, TerrainConfig, WorldSeed,
     is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face,
     BlockRegistry, ModelRegistry, PowerLookup,
 };
@@ -15,7 +16,7 @@ use stagcrest_world::{Chunk, ChunkBlock, ChunkNeighborhood, World};
 use std::collections::{HashMap, HashSet};
 
 pub use block_model::{
-    block_selection_bounds, emit_block_model, MeshBucket, SelectionBounds,
+    block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
 
 #[repr(C)]
@@ -26,6 +27,7 @@ pub struct VoxelVertex {
     pub overlay_uv: [f32; 2],
     pub tint: f32,
     pub overlay_tint: f32,
+    pub tint_mul: [f32; 3],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,6 +47,14 @@ pub struct MeshCache {
     dirty: HashSet<ChunkPos>,
 }
 
+#[derive(Clone)]
+pub struct MeshClimateTint<'a> {
+    pub colormaps: &'a ColormapSet,
+    pub config: &'a TerrainConfig,
+    pub seed: WorldSeed,
+    pub noise: &'a NoiseBank,
+}
+
 impl MeshCache {
     pub fn get(&self, pos: ChunkPos) -> Option<&ChunkMesh> {
         self.meshes.get(&pos)
@@ -56,6 +66,7 @@ impl MeshCache {
         registry: &BlockRegistry,
         models: &ModelRegistry,
         power: Option<&dyn PowerLookup>,
+        climate: Option<&MeshClimateTint<'_>>,
         dirty: impl IntoIterator<Item = ChunkPos>,
     ) {
         let dirty: Vec<_> = dirty.into_iter().collect();
@@ -68,7 +79,15 @@ impl MeshCache {
                     world.chunk(pos).map(|chunk| {
                         (
                             pos,
-                            build_chunk_mesh(pos, chunk, world, registry, models, power),
+                            build_chunk_mesh(
+                                pos,
+                                chunk,
+                                world,
+                                registry,
+                                models,
+                                power,
+                                climate,
+                            ),
                         )
                     })
                 })
@@ -82,7 +101,7 @@ impl MeshCache {
         {
             for pos in dirty {
                 if let Some(chunk) = world.chunk(pos) {
-                    let mesh = build_chunk_mesh(pos, chunk, world, registry, models, power);
+                    let mesh = build_chunk_mesh(pos, chunk, world, registry, models, power, climate);
                     self.meshes.insert(pos, mesh);
                     self.dirty.insert(pos);
                 }
@@ -128,7 +147,7 @@ pub fn build_single_block_mesh_with_power(
     build_single_block_mesh_internal(registry, models, block_id, state, power, true)
 }
 
-/// Icon preview mesh: opaque cubes for glass; cutout geometry stays in the cutout bucket.
+/// Icon preview mesh: blend/cutout cubes render as opaque in the inventory.
 pub fn build_single_block_icon_mesh(
     registry: &BlockRegistry,
     models: &ModelRegistry,
@@ -158,11 +177,27 @@ fn build_single_block_mesh_internal(
 
     if def.namespaced_id == "stagcrest:redstone_dust" {
         let face_tex = resolve_dust_face(registry, Default::default(), power);
-        emit_flat(&mut mesh, [0.0, 0.0, 0.0], face_tex, power, registry);
+        emit_flat(
+            &mut mesh,
+            [0.0, 0.0, 0.0],
+            face_tex,
+            power,
+            registry,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+        );
         return mesh;
     }
 
-    let transparent = use_block_transparency && def.transparent;
+    let bucket = if use_block_transparency {
+        mesh_bucket_for_layer(def.render_layer)
+    } else {
+        MeshBucket::Opaque
+    };
 
     let face_textures = registry
         .block_face_textures_for_state(block_id, state)
@@ -174,11 +209,17 @@ fn build_single_block_mesh_internal(
         def.geometry,
         &def.namespaced_id,
         &face_textures,
-        transparent,
+        bucket,
         registry,
         models,
         power,
         state,
+        0,
+        0,
+        0,
+        0,
+        None,
+        None,
         |_| false,
         None,
     );
@@ -190,6 +231,7 @@ fn should_cull_face(
     neighbor: Option<ChunkBlock>,
     air: BlockId,
     registry: &BlockRegistry,
+    normal: Vec3,
 ) -> bool {
     let Some(neighbor) = neighbor else {
         return false;
@@ -198,12 +240,13 @@ fn should_cull_face(
         return false;
     }
     let neighbor_def = registry.block(neighbor.id);
-    neighbor_culls_face(block_def, neighbor_def)
+    neighbor_culls_face(block_def, neighbor_def, normal)
 }
 
 fn neighbor_culls_face(
     block_def: &stagcrest_protocol::BlockDef,
     neighbor_def: Option<&stagcrest_protocol::BlockDef>,
+    normal: Vec3,
 ) -> bool {
     let Some(neighbor) = neighbor_def else {
         return false;
@@ -211,7 +254,32 @@ fn neighbor_culls_face(
     if block_def.fluid && neighbor.fluid {
         return true;
     }
+    if normal.y > 0.5 && matches!(neighbor.geometry, BlockGeometry::Flat) {
+        return true;
+    }
     neighbor.opaque && neighbor.solid
+}
+
+/// Per-column grass and foliage tint multipliers for a chunk (indexed by local x, z).
+type ColumnTintCache = [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
+
+fn build_column_tint_cache(
+    base_x: i32,
+    base_z: i32,
+    climate: &MeshClimateTint<'_>,
+) -> ColumnTintCache {
+    let mut grid = [[([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
+    for lz in 0..CHUNK_SIZE as usize {
+        for lx in 0..CHUNK_SIZE as usize {
+            let wx = base_x + lx as i32;
+            let wz = base_z + lz as i32;
+            grid[lz][lx] = (
+                tint_mul_for_kind(TintKind::Grass, wx, wz, Some(climate)),
+                tint_mul_for_kind(TintKind::Foliage, wx, wz, Some(climate)),
+            );
+        }
+    }
+    grid
 }
 
 fn fluid_flow_textures(
@@ -237,6 +305,7 @@ fn build_chunk_mesh(
     registry: &BlockRegistry,
     models: &ModelRegistry,
     power: Option<&dyn PowerLookup>,
+    climate: Option<&MeshClimateTint<'_>>,
 ) -> ChunkMesh {
     let mut mesh = ChunkMesh::default();
     let base_x = chunk_pos.x * CHUNK_SIZE;
@@ -266,6 +335,8 @@ fn build_chunk_mesh(
         center: chunk,
         neighbors,
     };
+
+    let column_tints = climate.map(|ctx| build_column_tint_cache(base_x, base_z, ctx));
 
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
@@ -329,11 +400,17 @@ fn build_chunk_mesh(
                     def.geometry,
                     &def.namespaced_id,
                     &face_textures,
-                    def.transparent,
+                    mesh_bucket_for_layer(def.render_layer),
                     registry,
                     models,
                     block_power,
                     block.state,
+                    wx,
+                    wz,
+                    x as i32,
+                    z as i32,
+                    climate,
+                    column_tints.as_ref(),
                     |normal| should_cull_face(
                         def,
                         hood.get(
@@ -343,6 +420,7 @@ fn build_chunk_mesh(
                         ),
                         world.air(),
                         registry,
+                        normal,
                     ),
                     dust_face,
                 );
@@ -359,11 +437,17 @@ fn emit_block_geometry(
     geometry: BlockGeometry,
     namespaced_id: &str,
     face_textures: &stagcrest_protocol::BlockFaceTextures,
-    transparent: bool,
+    cube_bucket: MeshBucket,
     registry: &BlockRegistry,
     models: &ModelRegistry,
     power: u8,
     state: BlockState,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
     mut should_cull: impl FnMut(Vec3) -> bool,
     dust_face: Option<FaceTexture>,
 ) {
@@ -372,13 +456,46 @@ fn emit_block_geometry(
             mesh,
             origin,
             face_textures,
-            transparent,
+            cube_bucket,
             registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
             &mut should_cull,
         ),
         BlockGeometry::Flat => {
             let face_tex = dust_face.unwrap_or(face_textures.sides);
-            emit_flat(mesh, origin, face_tex, power, registry);
+            emit_flat(
+                mesh,
+                origin,
+                face_tex,
+                power,
+                registry,
+                wx,
+                wz,
+                lx,
+                lz,
+                climate,
+                column_tints,
+            );
+        }
+        BlockGeometry::Cross => {
+            emit_cross_plants(
+                mesh,
+                origin,
+                face_textures,
+                power,
+                registry,
+                wx,
+                wz,
+                lx,
+                lz,
+                climate,
+                column_tints,
+            );
         }
         BlockGeometry::Model(model_id) => {
             let model = resolve_block_model(models, model_id, namespaced_id, state);
@@ -392,15 +509,16 @@ fn emit_cube_faces(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
     face_textures: &stagcrest_protocol::BlockFaceTextures,
-    transparent: bool,
+    bucket: MeshBucket,
     registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
     mut should_cull: impl FnMut(Vec3) -> bool,
 ) {
-    let bucket = if transparent {
-        MeshBucket::Blend
-    } else {
-        MeshBucket::Opaque
-    };
     let faces: [(Vec3, FaceTexture); 6] = [
         (
             Vec3::new(0.0, -1.0, 0.0),
@@ -417,7 +535,21 @@ fn emit_cube_faces(
         if should_cull(normal) {
             continue;
         }
-        emit_face_from_texture(mesh, origin, normal, face_tex, 0, bucket, registry);
+        emit_face_from_texture(
+            mesh,
+            origin,
+            normal,
+            face_tex,
+            0,
+            bucket,
+            registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
+        );
     }
 }
 
@@ -427,6 +559,12 @@ fn emit_flat(
     face_tex: FaceTexture,
     power: u8,
     registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
 ) {
     let o = origin;
     let y = o[1] + block_model::FLAT_Y;
@@ -436,7 +574,196 @@ fn emit_flat(
         [o[0] + 1.0, y, o[2]],
         [o[0], y, o[2]],
     ];
-    emit_quad(mesh, top, face_tex, power, MeshBucket::Cutout, registry);
+    emit_quad(
+        mesh,
+        top,
+        face_tex,
+        power,
+        MeshBucket::Cutout,
+        registry,
+        wx,
+        wz,
+        lx,
+        lz,
+        climate,
+        column_tints,
+        false,
+    );
+}
+
+fn emit_cross_plants(
+    mesh: &mut ChunkMesh,
+    origin: [f32; 3],
+    face_textures: &stagcrest_protocol::BlockFaceTextures,
+    power: u8,
+    registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+) {
+    let uniform = face_textures.sides;
+    let layered = face_textures.top.texture != face_textures.bottom.texture;
+    if layered {
+        emit_cross_layer(
+            mesh,
+            origin,
+            0.0,
+            0.5,
+            face_textures.bottom,
+            power,
+            registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
+        );
+        emit_cross_layer(
+            mesh,
+            origin,
+            0.5,
+            1.0,
+            face_textures.top,
+            power,
+            registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
+        );
+    } else {
+        emit_cross_layer(
+            mesh,
+            origin,
+            0.0,
+            1.0,
+            uniform,
+            power,
+            registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
+        );
+    }
+}
+
+fn emit_cross_layer(
+    mesh: &mut ChunkMesh,
+    origin: [f32; 3],
+    y0: f32,
+    y1: f32,
+    face_tex: FaceTexture,
+    power: u8,
+    registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+) {
+    let o = origin;
+    let y_bottom = o[1] + y0;
+    let y_top = o[1] + y1;
+    let quad_x = [
+        [o[0], y_bottom, o[2]],
+        [o[0] + 1.0, y_bottom, o[2] + 1.0],
+        [o[0] + 1.0, y_top, o[2] + 1.0],
+        [o[0], y_top, o[2]],
+    ];
+    let quad_z = [
+        [o[0], y_bottom, o[2] + 1.0],
+        [o[0] + 1.0, y_bottom, o[2]],
+        [o[0] + 1.0, y_top, o[2]],
+        [o[0], y_top, o[2] + 1.0],
+    ];
+    for corners in [quad_x, quad_z] {
+        emit_quad(
+            mesh,
+            corners,
+            face_tex,
+            power,
+            MeshBucket::Cutout,
+            registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
+            true,
+        );
+    }
+}
+
+const WHITE_TINT_MUL: [f32; 3] = [1.0, 1.0, 1.0];
+
+fn face_tint_mul(
+    face_tex: &FaceTexture,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+) -> [f32; 3] {
+    let kind = if matches!(
+        face_tex.overlay_tint,
+        TintKind::Grass | TintKind::Foliage
+    ) {
+        face_tex.overlay_tint
+    } else {
+        face_tex.tint
+    };
+    if let Some(grid) = column_tints {
+        let (grass, foliage) = grid[lz as usize][lx as usize];
+        return match kind {
+            TintKind::Grass => grass,
+            TintKind::Foliage => foliage,
+            _ => WHITE_TINT_MUL,
+        };
+    }
+    tint_mul_for_kind(kind, wx, wz, climate)
+}
+
+fn tint_mul_for_kind(
+    kind: TintKind,
+    wx: i32,
+    wz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+) -> [f32; 3] {
+    let Some(ctx) = climate else {
+        return WHITE_TINT_MUL;
+    };
+    let sampler = ClimateSampler::new(ctx.config, ctx.noise);
+    let (temp, downfall) = sampler.at(wx, wz);
+    let norm_temp = (temp / ctx.config.temperature_scale).clamp(0.0, 1.0);
+    match kind {
+        TintKind::Grass => sample_colormap_rgb(
+            &ctx.colormaps.grass,
+            ctx.colormaps.grass_w,
+            ctx.colormaps.grass_h,
+            norm_temp,
+            downfall,
+        ),
+        TintKind::Foliage => sample_colormap_rgb(
+            &ctx.colormaps.foliage,
+            ctx.colormaps.foliage_w,
+            ctx.colormaps.foliage_h,
+            norm_temp,
+            downfall,
+        ),
+        _ => WHITE_TINT_MUL,
+    }
 }
 
 pub(crate) fn vertex_tint(face_tex: FaceTexture, power: u8) -> f32 {
@@ -497,6 +824,12 @@ fn emit_face_from_texture(
     power: u8,
     bucket: MeshBucket,
     registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
 ) {
     let uv_rect = registry.atlas_uv(face_tex.texture);
     let overlay_uv = face_tex
@@ -508,6 +841,7 @@ fn emit_face_from_texture(
             w: 0,
             h: 0,
         });
+    let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
     emit_face(
         mesh,
         origin,
@@ -518,6 +852,7 @@ fn emit_face_from_texture(
         overlay_uv,
         vertex_tint(face_tex, power),
         face_tex.overlay_tint.as_f32(),
+        tint_mul,
         bucket,
         registry,
     );
@@ -530,6 +865,13 @@ fn emit_quad(
     power: u8,
     bucket: MeshBucket,
     registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+    double_sided: bool,
 ) {
     let uv_rect = registry.atlas_uv(face_tex.texture);
     let overlay_uv = face_tex
@@ -554,6 +896,7 @@ fn emit_quad(
     let uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)];
     let overlay_uvs = [(ou0, ov1), (ou1, ov1), (ou1, ov0), (ou0, ov0)];
     let tint = vertex_tint(face_tex, power);
+    let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
 
     for (i, pos) in corners.iter().enumerate() {
         verts.push(VoxelVertex {
@@ -562,10 +905,14 @@ fn emit_quad(
             overlay_uv: [overlay_uvs[i].0, overlay_uvs[i].1],
             tint,
             overlay_tint: face_tex.overlay_tint.as_f32(),
+            tint_mul,
         });
     }
 
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    if double_sided {
+        indices.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
 }
 
 fn emit_face(
@@ -578,6 +925,7 @@ fn emit_face(
     overlay_uv_rect: stagcrest_protocol::AtlasRect,
     tint: f32,
     overlay_tint: f32,
+    tint_mul: [f32; 3],
     bucket: MeshBucket,
     registry: &BlockRegistry,
 ) {
@@ -609,6 +957,7 @@ fn emit_face(
             overlay_uv: [ou, ov],
             tint,
             overlay_tint,
+            tint_mul,
         });
     }
 
@@ -665,7 +1014,7 @@ fn face_corners(origin: [f32; 3], normal: glam::Vec3) -> [[f32; 3]; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stagcrest_protocol::{BlockDef, TextureId};
+    use stagcrest_protocol::{BlockDef, ModelRenderLayer, TextureId};
 
     fn def(fluid: bool, opaque: bool, solid: bool) -> BlockDef {
         BlockDef {
@@ -681,24 +1030,74 @@ mod tests {
             placeable: false,
             geometry: BlockGeometry::Cube,
             circuit: None,
+            render_layer: if fluid {
+                ModelRenderLayer::Blend
+            } else if !opaque {
+                ModelRenderLayer::Cutout
+            } else {
+                ModelRenderLayer::Opaque
+            },
         }
     }
 
     #[test]
     fn fluid_fluid_faces_culled() {
         let water = def(true, false, false);
-        assert!(neighbor_culls_face(&water, Some(&def(true, false, false))));
+        assert!(neighbor_culls_face(
+            &water,
+            Some(&def(true, false, false)),
+            Vec3::Y
+        ));
     }
 
     #[test]
     fn fluid_air_faces_not_culled() {
         let water = def(true, false, false);
-        assert!(!neighbor_culls_face(&water, None));
+        assert!(!neighbor_culls_face(&water, None, Vec3::Y));
     }
 
     #[test]
     fn stone_stone_opaque_solid_culled() {
         let stone = def(false, true, true);
-        assert!(neighbor_culls_face(&stone, Some(&def(false, true, true))));
+        assert!(neighbor_culls_face(
+            &stone,
+            Some(&def(false, true, true)),
+            Vec3::Y
+        ));
+    }
+
+    #[test]
+    fn grass_top_culled_under_flat_decoration() {
+        let grass = def(false, true, true);
+        let mut plant = def(false, false, false);
+        plant.geometry = BlockGeometry::Flat;
+        plant.transparent = true;
+        assert!(neighbor_culls_face(&grass, Some(&plant), Vec3::Y));
+    }
+
+    #[test]
+    fn grass_top_not_culled_under_cross_plant() {
+        let grass = def(false, true, true);
+        let mut plant = def(false, false, false);
+        plant.geometry = BlockGeometry::Cross;
+        plant.transparent = true;
+        assert!(!neighbor_culls_face(&grass, Some(&plant), Vec3::Y));
+    }
+
+    #[test]
+    fn mesh_bucket_matches_render_layer() {
+        use stagcrest_protocol::ModelRenderLayer;
+        assert!(matches!(
+            mesh_bucket_for_layer(ModelRenderLayer::Cutout),
+            MeshBucket::Cutout
+        ));
+        assert!(matches!(
+            mesh_bucket_for_layer(ModelRenderLayer::Blend),
+            MeshBucket::Blend
+        ));
+        assert!(matches!(
+            mesh_bucket_for_layer(ModelRenderLayer::Opaque),
+            MeshBucket::Opaque
+        ));
     }
 }

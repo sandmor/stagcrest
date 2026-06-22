@@ -11,6 +11,9 @@ const APPLY_CHUNKS_PER_FRAME: usize = 12;
 #[derive(Resource, Clone, Copy)]
 pub struct TerrainBlocks(pub ColumnBlocks);
 
+#[derive(Resource, Clone)]
+pub struct TerrainBiomes(pub stagcrest_mod_host::BiomeRegistry);
+
 #[derive(Resource, Default)]
 pub struct TerrainStreamState {
     pub center_x: i32,
@@ -167,9 +170,9 @@ pub fn terrain_apply(
     mut world: ResMut<crate::game::StagcrestWorldResource>,
     stream: Option<Res<TerrainStreamState>>,
     config: Option<Res<crate::game::GameConfig>>,
-    blocks: Option<Res<TerrainBlocks>>,
+    blocks: Res<TerrainBlocks>,
+    biomes: Res<TerrainBiomes>,
 ) {
-    let Some(blocks) = blocks else { return };
     let h_radius = config.as_ref().map(|c| c.render_distance).unwrap_or(i32::MAX);
     let v_radius = config
         .as_ref()
@@ -218,7 +221,7 @@ pub fn terrain_apply(
             continue;
         }
 
-        let entries = generator.decorate_chunk(&world.0, blocks.0, &data);
+        let entries = generator.decorate_chunk(&world.0, blocks.0, &biomes.0, &data);
         world.0.set_blocks(entries);
     }
 

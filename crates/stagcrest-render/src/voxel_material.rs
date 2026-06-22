@@ -74,6 +74,7 @@ impl Material for VoxelMaterial {
             ATTRIBUTE_OVERLAY_UV.at_shader_location(2),
             ATTRIBUTE_BLOCK_TINT.at_shader_location(3),
             ATTRIBUTE_OVERLAY_TINT.at_shader_location(4),
+            ATTRIBUTE_TINT_MUL.at_shader_location(5),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -86,6 +87,8 @@ pub const ATTRIBUTE_BLOCK_TINT: MeshVertexAttribute =
     MeshVertexAttribute::new("BlockTint", 988301002, VertexFormat::Float32);
 pub const ATTRIBUTE_OVERLAY_TINT: MeshVertexAttribute =
     MeshVertexAttribute::new("OverlayTint", 988301003, VertexFormat::Float32);
+pub const ATTRIBUTE_TINT_MUL: MeshVertexAttribute =
+    MeshVertexAttribute::new("TintMul", 988301004, VertexFormat::Float32x3);
 
 pub fn voxel_vertex_layout() -> VertexBufferLayout {
     VertexBufferLayout {
@@ -116,6 +119,11 @@ pub fn voxel_vertex_layout() -> VertexBufferLayout {
                 format: VertexFormat::Float32,
                 offset: 32,
                 shader_location: 4,
+            },
+            VertexAttribute {
+                format: VertexFormat::Float32x3,
+                offset: 36,
+                shader_location: 5,
             },
         ],
     }

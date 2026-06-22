@@ -7,28 +7,41 @@ pub struct ColumnBlocks {
     pub stone: BlockId,
     pub dirt: BlockId,
     pub grass: BlockId,
+    pub sand: BlockId,
+    pub iron_ore: BlockId,
+    pub oak_log: BlockId,
+    pub oak_leaves: BlockId,
+    pub short_grass: BlockId,
+    pub tall_grass: BlockId,
+    pub dandelion: BlockId,
+    pub poppy: BlockId,
+    pub cactus: BlockId,
+    pub dead_bush: BlockId,
     pub water: BlockId,
     pub air: BlockId,
 }
 
 impl ColumnBlocks {
     pub fn resolve(registry: &BlockRegistry, air: BlockId) -> Self {
+        fn block(registry: &BlockRegistry, name: &str) -> BlockId {
+            registry.block_by_name(name).unwrap_or(BlockId(0))
+        }
         Self {
-            bedrock: registry
-                .block_by_name("stagcrest:bedrock")
-                .unwrap_or(BlockId(0)),
-            stone: registry
-                .block_by_name("stagcrest:stone")
-                .unwrap_or(BlockId(0)),
-            dirt: registry
-                .block_by_name("stagcrest:dirt")
-                .unwrap_or(BlockId(0)),
-            grass: registry
-                .block_by_name("stagcrest:grass_block")
-                .unwrap_or(BlockId(0)),
-            water: registry
-                .block_by_name("stagcrest:water")
-                .unwrap_or(BlockId(0)),
+            bedrock: block(registry, "stagcrest:bedrock"),
+            stone: block(registry, "stagcrest:stone"),
+            dirt: block(registry, "stagcrest:dirt"),
+            grass: block(registry, "stagcrest:grass_block"),
+            sand: block(registry, "stagcrest:sand"),
+            iron_ore: block(registry, "stagcrest:iron_ore"),
+            oak_log: block(registry, "stagcrest:oak_log"),
+            oak_leaves: block(registry, "stagcrest:oak_leaves"),
+            short_grass: block(registry, "stagcrest:short_grass"),
+            tall_grass: block(registry, "stagcrest:tall_grass"),
+            dandelion: block(registry, "stagcrest:dandelion"),
+            poppy: block(registry, "stagcrest:poppy"),
+            cactus: block(registry, "stagcrest:cactus"),
+            dead_bush: block(registry, "stagcrest:dead_bush"),
+            water: block(registry, "stagcrest:water"),
             air,
         }
     }
