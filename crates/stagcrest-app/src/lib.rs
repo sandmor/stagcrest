@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use stagcrest_render::{VoxelMaterial, VoxelMaterialPlugin};
 
+#[cfg(target_arch = "wasm32")]
+mod wasm_gpu;
+
 pub mod block_icons;
 pub mod block_outline;
 pub mod debug_overlay;
@@ -16,21 +19,62 @@ pub mod ui;
 
 pub use game::AppState;
 
+fn window_plugin() -> WindowPlugin {
+    WindowPlugin {
+        primary_window: Some(Window {
+            title: "Stagcrest".into(),
+            resolution: (1280.0, 720.0).into(),
+            ..default()
+        }),
+        ..default()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn default_plugins() -> bevy::app::PluginGroupBuilder {
+    use bevy::render::settings::{Backends, RenderCreation, WgpuSettings, WgpuSettingsPriority};
+    use bevy::render::RenderPlugin;
+
+    let backends = crate::wasm_gpu::web_backends();
+    let priority = if backends.contains(Backends::BROWSER_WEBGPU) {
+        WgpuSettingsPriority::Functionality
+    } else {
+        WgpuSettingsPriority::WebGL2
+    };
+    let webgl2_limits = matches!(priority, WgpuSettingsPriority::WebGL2);
+    DefaultPlugins
+        .set(window_plugin())
+        .set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(WgpuSettings {
+                backends: Some(backends),
+                priority,
+                limits: if webgl2_limits {
+                    bevy::render::settings::WgpuLimits::downlevel_webgl2_defaults()
+                } else {
+                    bevy::render::settings::WgpuLimits::default()
+                },
+                ..default()
+            }),
+            ..default()
+        })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn default_plugins() -> bevy::app::PluginGroupBuilder {
+    DefaultPlugins.set(window_plugin())
+}
+
 pub fn run_app() {
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+
     #[cfg(not(target_arch = "wasm32"))]
     {
         tracing_subscriber::fmt::init();
     }
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Stagcrest".into(),
-                resolution: (1280.0, 720.0).into(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(default_plugins())
         .init_state::<AppState>()
         .add_plugins(VoxelMaterialPlugin)
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
@@ -68,14 +112,4 @@ fn setup_ui_camera(mut commands: Commands) {
             ..default()
         },
     ));
-}
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(start)]
-pub fn wasm_start() {
-    console_error_panic_hook::set_once();
-    run_app();
 }

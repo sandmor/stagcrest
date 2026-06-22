@@ -3781,6 +3781,7 @@ dependencies = [
  "console_error_panic_hook",
  "futures-lite",
  "glam",
+ "js-sys",
  "serde_json",
  "stagcrest-circuit",
  "stagcrest-mesh",
@@ -3791,6 +3792,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

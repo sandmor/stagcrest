@@ -2,7 +2,7 @@ use crate::game::{AppState, GameConfig, ModContext, StagcrestWorldResource, Terr
 use crate::game::WorldColormaps;
 use crate::terrain_queue::{TerrainBlocks, TerrainBiomes, TerrainGenQueue, TerrainStreamState};
 #[cfg(target_arch = "wasm32")]
-use crate::terrain_queue::{terrain_apply, terrain_dispatch, terrain_poll_tasks};
+use crate::terrain_queue::poll_future_now;
 use bevy::prelude::*;
 use stagcrest_mesh::MeshCache;
 use stagcrest_mod_host::{
@@ -46,17 +46,6 @@ impl Plugin for LoadingPlugin {
                 load_mods_system,
                 loading_ui,
                 loading_button_system,
-            )
-                .run_if(in_state(AppState::Loading)),
-        );
-
-        #[cfg(target_arch = "wasm32")]
-        app.add_systems(
-            Update,
-            (
-                terrain_dispatch,
-                terrain_poll_tasks,
-                terrain_apply,
             )
                 .run_if(in_state(AppState::Loading)),
         );
@@ -248,7 +237,7 @@ fn poll_web_load_system(
         return;
     };
 
-    match futures_lite::future::block_on(futures_lite::future::poll_once(&mut running)) {
+    match poll_future_now(&mut running) {
         Some(Ok((host, colormaps))) => {
             apply_loaded_content(&mut commands, &config, host, colormaps);
             state.done = true;

@@ -11,10 +11,9 @@
 @group(2) @binding(3) var<uniform> foliage_tint: vec4<f32>;
 @group(2) @binding(4) var<uniform> power_tint_dark: vec4<f32>;
 @group(2) @binding(5) var<uniform> power_tint_bright: vec4<f32>;
-@group(2) @binding(6) var<uniform> alpha_cutout: u32;
+@group(2) @binding(6) var<uniform> material_flags: vec4<f32>;
 @group(2) @binding(7) var<uniform> water_tint: vec4<f32>;
-@group(2) @binding(8) var<uniform> fluid_time: f32;
-@group(2) @binding(9) var<uniform> fluid_anim: vec4<f32>;
+@group(2) @binding(8) var<uniform> fluid_anim: vec4<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -83,7 +82,7 @@ fn apply_tint(rgb: vec3<f32>, tint: f32, tint_mul: vec3<f32>) -> vec3<f32> {
 
 fn animated_uv(uv: vec2<f32>, tint: f32) -> vec2<f32> {
     if is_water(tint) && fluid_anim.x > 1.0 {
-        let frame = floor(fluid_time / fluid_anim.z) % fluid_anim.x;
+        let frame = floor(fluid_anim.w / fluid_anim.z) % fluid_anim.x;
         return vec2<f32>(uv.x, uv.y + frame * fluid_anim.y);
     }
     return uv;
@@ -102,7 +101,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     }
     let uv = animated_uv(in.uv, in.tint);
     var base = textureSample(atlas_tex, atlas_s, uv);
-    if alpha_cutout != 0u && base.a < 0.5 {
+    if material_flags.x > 0.5 && base.a < 0.5 {
         discard;
     }
     var rgb = apply_tint(base.rgb, in.tint, in.tint_mul);
@@ -110,7 +109,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     if in.overlay_tint >= 0.5 {
         let ov_uv = animated_uv(in.overlay_uv, in.overlay_tint);
         let ov = textureSample(atlas_tex, atlas_s, ov_uv);
-        if alpha_cutout != 0u && ov.a < 0.5 {
+        if material_flags.x > 0.5 && ov.a < 0.5 {
             discard;
         }
         let tinted_overlay = apply_tint(ov.rgb, in.overlay_tint, in.tint_mul);

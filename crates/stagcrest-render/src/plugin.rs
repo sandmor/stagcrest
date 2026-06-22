@@ -17,7 +17,7 @@ pub struct BlockAtlasResource {
     pub grass_tint: Color,
     pub foliage_tint: Color,
     pub water_tint: Color,
-    /// (frame_count, frame_uv_step, frametime_secs, unused)
+    /// (frame_count, frame_uv_step, frametime_secs, elapsed_secs) — `.w` updated each frame
     pub fluid_anim: Vec4,
 }
 
@@ -84,8 +84,9 @@ fn sync_chunk_meshes(
     let grass = atlas_res.grass_tint.to_linear();
     let foliage = atlas_res.foliage_tint.to_linear();
     let water = atlas_res.water_tint.to_linear();
-    let fluid_anim = atlas_res.fluid_anim;
     let fluid_time = time.elapsed_secs();
+    let mut fluid_anim = atlas_res.fluid_anim;
+    fluid_anim.w = fluid_time;
     let atlas_key = [
         atlas_res.atlas.width,
         atlas_res.atlas.height,
@@ -114,17 +115,17 @@ fn sync_chunk_meshes(
 
     if let Some(handle) = opaque_mat.as_ref() {
         if let Some(mat) = materials.get_mut(handle) {
-            mat.fluid_time = fluid_time;
+            mat.fluid_anim.w = fluid_time;
         }
     }
     if let Some(handle) = blend_mat.as_ref() {
         if let Some(mat) = materials.get_mut(handle) {
-            mat.fluid_time = fluid_time;
+            mat.fluid_anim.w = fluid_time;
         }
     }
     if let Some(handle) = cutout_mat.as_ref() {
         if let Some(mat) = materials.get_mut(handle) {
-            mat.fluid_time = fluid_time;
+            mat.fluid_anim.w = fluid_time;
         }
     }
 
@@ -148,9 +149,8 @@ fn sync_chunk_meshes(
         foliage_tint: foliage,
         power_tint_dark: LinearRgba::new(0.4, 0.0, 0.0, 1.0),
         power_tint_bright: LinearRgba::new(1.0, 0.0, 0.0, 1.0),
-        alpha_cutout: 0,
+        material_flags: Vec4::ZERO,
         water_tint: water,
-        fluid_time,
         fluid_anim,
         alpha_mode: AlphaMode::Opaque,
     };
@@ -164,7 +164,7 @@ fn sync_chunk_meshes(
     });
     let cutout_handle = cutout_mat.get_or_insert_with(|| {
         materials.add(VoxelMaterial {
-            alpha_cutout: 1,
+            material_flags: Vec4::new(1.0, 0.0, 0.0, 0.0),
             alpha_mode: AlphaMode::Mask(0.5),
             ..base_tints()
         })

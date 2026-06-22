@@ -57,7 +57,7 @@ Open the URL Trunk prints (usually `http://127.0.0.1:8080`). Trunk serves:
 - `assets/` — bundled colormaps and shaders
 - `resourcepacks/` — local Minecraft-format resource packs (if configured)
 
-Requires a WebGPU-capable browser.
+Requires a modern browser with WebGPU (preferred) or WebGL2 fallback.
 
 ## Build (web release)
 

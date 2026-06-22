@@ -39,12 +39,10 @@ pub struct VoxelMaterial {
     #[uniform(5)]
     pub power_tint_bright: LinearRgba,
     #[uniform(6)]
-    pub alpha_cutout: u32,
+    pub material_flags: Vec4,
     #[uniform(7)]
     pub water_tint: LinearRgba,
     #[uniform(8)]
-    pub fluid_time: f32,
-    #[uniform(9)]
     pub fluid_anim: Vec4,
     pub alpha_mode: AlphaMode,
 }

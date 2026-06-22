@@ -189,6 +189,17 @@ impl ResourcePackLoader {
         names: &[&str],
     ) {
         for name in names {
+            self.ensure_block_texture_async(reader, name).await;
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn ensure_block_texture_async(
+        &mut self,
+        reader: &crate::assets::HttpAssetReader,
+        name: &str,
+    ) {
+        if !self.block_textures.contains_key(name) {
             self.try_load_block_texture_async(reader, name).await;
         }
     }

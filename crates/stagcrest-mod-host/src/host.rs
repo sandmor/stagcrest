@@ -211,13 +211,14 @@ pub async fn load_mods_async() -> Result<ModHost, ModError> {
     }
     let mut host = ModHost::new();
     if let Some(packs) = packs.as_mut() {
-        register_pack_fluid_textures(&mut host.registry, packs, &reader);
-        register_pack_plant_textures(&mut host.registry, packs, &reader);
+        register_pack_fluid_textures_async(&mut host.registry, packs, &reader).await;
+        register_pack_plant_textures_async(&mut host.registry, packs, &reader).await;
     }
     host.load_all_async(&reader, packs.as_ref()).await?;
     Ok(host)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn register_pack_plant_textures(
     registry: &mut BlockRegistry,
     packs: &mut ResourcePackLoader,
@@ -246,6 +247,7 @@ fn register_pack_plant_textures(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn register_pack_fluid_textures(
     registry: &mut BlockRegistry,
     packs: &mut ResourcePackLoader,
@@ -256,6 +258,60 @@ fn register_pack_fluid_textures(
         ("stagcrest:water_flow", "water_flow"),
     ] {
         packs.ensure_block_texture(reader, mc_name);
+        let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
+            continue;
+        };
+        let animation = packs.animation_for_mc_texture(mc_name);
+        registry.register_texture_with_animation(
+            namespaced_id.to_string(),
+            width,
+            height,
+            rgba,
+            animation,
+        );
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn register_pack_plant_textures_async(
+    registry: &mut BlockRegistry,
+    packs: &mut ResourcePackLoader,
+    reader: &crate::assets::HttpAssetReader,
+) {
+    for (namespaced_id, mc_name) in [
+        ("stagcrest:short_grass", "short_grass"),
+        ("stagcrest:tall_grass_bottom", "tall_grass_bottom"),
+        ("stagcrest:tall_grass_top", "tall_grass_top"),
+        ("stagcrest:dandelion", "dandelion"),
+        ("stagcrest:poppy", "poppy"),
+        ("stagcrest:dead_bush", "dead_bush"),
+        ("stagcrest:oak_leaves", "oak_leaves"),
+    ] {
+        packs.ensure_block_texture_async(reader, mc_name).await;
+        let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
+            continue;
+        };
+        registry.register_texture_with_animation(
+            namespaced_id.to_string(),
+            width,
+            height,
+            rgba,
+            None,
+        );
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn register_pack_fluid_textures_async(
+    registry: &mut BlockRegistry,
+    packs: &mut ResourcePackLoader,
+    reader: &crate::assets::HttpAssetReader,
+) {
+    for (namespaced_id, mc_name) in [
+        ("stagcrest:water_still", "water_still"),
+        ("stagcrest:water_flow", "water_flow"),
+    ] {
+        packs.ensure_block_texture_async(reader, mc_name).await;
         let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
             continue;
         };

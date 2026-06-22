@@ -3,6 +3,25 @@ use bevy::tasks::Task;
 use stagcrest_mod_host::{ChunkGenData, ColumnBlocks, WorldGenState};
 use stagcrest_protocol::{BlockPos, ChunkPos};
 use std::collections::{HashSet, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
+
+/// Poll a future once without blocking the browser event loop (required on wasm).
+pub(crate) fn poll_future_now<T>(future: &mut (impl Future<Output = T> + Unpin)) -> Option<T> {
+    struct NoopWaker;
+    impl Wake for NoopWaker {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    let waker = Waker::from(Arc::new(NoopWaker));
+    let mut cx = Context::from_waker(&waker);
+    match Pin::new(future).poll(&mut cx) {
+        Poll::Ready(val) => Some(val),
+        Poll::Pending => None,
+    }
+}
 
 const MAX_IN_FLIGHT: usize = 64;
 const DISPATCH_PER_FRAME: usize = 32;
@@ -140,14 +159,14 @@ pub fn terrain_poll_tasks(mut queue: ResMut<TerrainGenQueue>) {
     let mut dropped = 0usize;
     let mut results = Vec::new();
     queue.tasks.retain_mut(|task| {
-        if !task.is_finished() {
-            return true;
+        match poll_future_now(task) {
+            Some(data) => {
+                dropped += 1;
+                results.push(data);
+                false
+            }
+            None => true,
         }
-        dropped += 1;
-        if let Some(data) = futures_lite::future::block_on(futures_lite::future::poll_once(task)) {
-            results.push(data);
-        }
-        false
     });
     queue.in_flight = queue.in_flight.saturating_sub(dropped);
 
