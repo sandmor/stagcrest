@@ -6,10 +6,12 @@ use stagcrest_protocol::{
 };
 use stagcrest_world::RaycastHit;
 
+use crate::environment::PlayerEnvironment;
 use crate::game::{
     AppState, CircuitResource, GameConfig, ModContext, StagcrestWorldResource,
 };
 use crate::player::{FlyCamera, SelectedBlock};
+use crate::streaming_pipeline::{StreamingPipeline, TerrainStreamState};
 use crate::targeting::BlockTarget;
 
 const LABEL_WIDTH: usize = 7;
@@ -98,6 +100,9 @@ fn update_debug_overlay(
     world: Option<Res<StagcrestWorldResource>>,
     circuit: Option<Res<CircuitResource>>,
     config: Res<GameConfig>,
+    env: Res<PlayerEnvironment>,
+    stream: Option<Res<TerrainStreamState>>,
+    pipeline: Option<Res<StreamingPipeline>>,
     target: Res<BlockTarget>,
     selected: Res<SelectedBlock>,
     camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
@@ -132,6 +137,9 @@ fn update_debug_overlay(
         world.as_deref(),
         circuit.as_deref(),
         &config,
+        &env,
+        stream.as_deref(),
+        pipeline.as_deref(),
         &target,
         selected.0,
         *fps_smooth,
@@ -145,6 +153,9 @@ fn format_debug_text(
     world: Option<&StagcrestWorldResource>,
     circuit: Option<&CircuitResource>,
     config: &GameConfig,
+    env: &PlayerEnvironment,
+    stream: Option<&TerrainStreamState>,
+    pipeline: Option<&StreamingPipeline>,
     target: &BlockTarget,
     selected_id: stagcrest_protocol::BlockId,
     fps: f32,
@@ -191,6 +202,9 @@ fn format_debug_text(
         String::new(),
     ];
 
+    lines.extend(format_environment_section(env, config, stream, pipeline));
+    lines.push(String::new());
+
     lines.extend(format_target_section(
         target.hit,
         mod_ctx,
@@ -217,6 +231,39 @@ fn format_debug_text(
     ));
 
     lines.join("\n")
+}
+
+fn format_environment_section(
+    env: &PlayerEnvironment,
+    config: &GameConfig,
+    stream: Option<&TerrainStreamState>,
+    pipeline: Option<&StreamingPipeline>,
+) -> Vec<String> {
+    let biome = env.biome_id.as_deref().unwrap_or("-");
+    let submerged = if env.submerged { "yes" } else { "no" };
+    let stream_line = match stream {
+        Some(s) if s.valid => format!("({}, {}, {})", s.center_x, s.center_y, s.center_z),
+        _ => "-".to_string(),
+    };
+    let gen_backlog = pipeline.map(|p| p.generation_backlog()).unwrap_or(0);
+
+    vec![
+        format!("{} {biome}", pad_label("Biome")),
+        format!(
+            "{} temp {:.2}  rain {:.2}",
+            pad_label("Climate"),
+            env.temperature,
+            env.downfall
+        ),
+        format!(
+            "{} {submerged}  {:.0}%",
+            pad_label("Water"),
+            env.submersion * 100.0
+        ),
+        format!("{} {}", pad_label("Seed"), config.world_seed),
+        format!("{} {stream_line}", pad_label("Stream")),
+        format!("{} {gen_backlog}", pad_label("GenQ")),
+    ]
 }
 
 fn format_target_section(

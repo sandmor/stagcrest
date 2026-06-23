@@ -7,9 +7,11 @@ mod wasm_gpu;
 pub mod block_icons;
 pub mod block_outline;
 pub mod debug_overlay;
+pub mod environment;
 pub mod game;
 pub mod inventory;
 pub mod loading;
+pub mod logging;
 pub mod menu;
 pub mod pause;
 pub mod player;
@@ -70,16 +72,14 @@ pub fn run_app() {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook::set_once();
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        tracing_subscriber::fmt::init();
-    }
+    crate::logging::init();
 
     App::new()
         .add_plugins(default_plugins())
         .init_state::<AppState>()
         .add_plugins(VoxelMaterialPlugin)
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
+        .add_plugins(stagcrest_render::UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<VoxelMaterial>::default())
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
         .add_plugins((

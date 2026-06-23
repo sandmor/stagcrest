@@ -411,7 +411,7 @@ fn cpu_pool() -> &'static bevy::tasks::TaskPool {
     }
 }
 
-pub fn pipeline_streaming(
+pub(crate) fn pipeline_streaming(
     mod_ctx: Option<Res<crate::game::ModContext>>,
     config: Res<crate::game::GameConfig>,
     session: Option<ResMut<crate::session::WorldSession>>,

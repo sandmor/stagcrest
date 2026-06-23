@@ -3825,6 +3825,7 @@ dependencies = [
  "stagcrest-world",
  "tracing",
  "tracing-subscriber",
+ "tracing-wasm",
  "wasm-bindgen",
  "web-sys",
 ]

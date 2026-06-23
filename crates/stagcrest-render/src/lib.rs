@@ -1,5 +1,6 @@
 mod plugin;
 mod outline;
+mod underwater;
 mod voxel_material;
 
 pub use outline::{
@@ -10,4 +11,5 @@ pub use plugin::{
     despawn_chunk_entities, sync_chunk_meshes, BlockAtlasResource, ChunkEntityMarker,
     MeshCacheResource, VoxelCamera, VoxelRenderPlugin,
 };
+pub use underwater::{UnderwaterEffect, UnderwaterPlugin};
 pub use voxel_material::{VoxelMaterial, VoxelMaterialPlugin};

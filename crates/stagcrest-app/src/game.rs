@@ -1,3 +1,4 @@
+use crate::environment::{self, PlayerEnvironment};
 use crate::mesh_scheduler::{
     circuit_flush_mesh, mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll,
     mesh_recover_unmeshed, MeshScheduler,
@@ -7,6 +8,7 @@ use crate::streaming_pipeline::{
     TerrainBiomes, TerrainBlocks, TerrainStreamState,
 };
 use crate::{block_outline, debug_overlay, player, targeting};
+use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_host::{
@@ -14,8 +16,8 @@ use stagcrest_mod_host::{
 };
 use stagcrest_protocol::ChunkPos;
 use stagcrest_render::{
-    spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, VoxelCamera,
-    VoxelRenderPlugin,
+    spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, UnderwaterEffect,
+    VoxelCamera, VoxelRenderPlugin,
 };
 use stagcrest_world::World as StagcrestWorld;
 
@@ -85,12 +87,16 @@ impl Default for GameConfig {
 
 pub struct GamePlugin;
 
+const DRY_AMBIENT_BRIGHTNESS: f32 = 800.0;
+const WET_AMBIENT_BRIGHTNESS: f32 = 520.0;
+
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameConfig>()
             .init_resource::<CircuitSimConfig>()
             .init_resource::<CircuitResource>()
             .init_resource::<TerrainGen>()
+            .init_resource::<PlayerEnvironment>()
             .init_resource::<LastStreamCenter>()
             .init_resource::<StreamingPipeline>()
             .init_resource::<MeshScheduler>()
@@ -127,6 +133,12 @@ impl Plugin for GamePlugin {
                         .before(mesh_dispatch)
                         .run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
+                    environment::update_player_environment
+                        .after(update_voxel_camera)
+                        .run_if(in_state(AppState::InGame)),
+                    sync_underwater_vision
+                        .after(environment::update_player_environment)
+                        .run_if(in_state(AppState::InGame)),
                 ),
             )
             .add_systems(
@@ -175,6 +187,7 @@ fn cleanup_game_session(
     commands.remove_resource::<WorldColormaps>();
     commands.remove_resource::<crate::session::WorldSession>();
     commands.remove_resource::<targeting::BlockTarget>();
+    commands.remove_resource::<PlayerEnvironment>();
     // MeshCacheResource is re-inited by VoxelRenderPlugin; reset it for the next session.
     commands.insert_resource(MeshCacheResource::default());
 }
@@ -209,6 +222,15 @@ fn setup_game_camera(mut commands: Commands) {
         },
         transform,
         player::FlyCamera::default(),
+        UnderwaterEffect::default(),
+        DistanceFog {
+            color: Color::srgba(0.1, 0.3, 0.5, 0.0),
+            falloff: FogFalloff::Linear {
+                start: 4.0,
+                end: 24.0,
+            },
+            ..default()
+        },
     ));
 }
 
@@ -254,6 +276,28 @@ fn update_voxel_camera(
         transform.translation.y,
         transform.translation.z,
     );
+}
+
+fn sync_underwater_vision(
+    env: Res<PlayerEnvironment>,
+    mut ambient: ResMut<AmbientLight>,
+    mut camera: Query<(&mut UnderwaterEffect, &mut DistanceFog), With<player::FlyCamera>>,
+) {
+    let Ok((mut effect, mut fog)) = camera.single_mut() else {
+        return;
+    };
+
+    let s = env.submersion;
+    effect.set(env.water_tint, s);
+
+    fog.color = Color::srgba(
+        env.water_tint[0],
+        env.water_tint[1],
+        env.water_tint[2],
+        s * 0.85,
+    );
+
+    ambient.brightness = DRY_AMBIENT_BRIGHTNESS * (1.0 - s) + WET_AMBIENT_BRIGHTNESS * s;
 }
 
 fn circuit_tick(
