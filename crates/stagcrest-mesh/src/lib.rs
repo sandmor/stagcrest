@@ -12,7 +12,7 @@ use stagcrest_protocol::{
     fluid_flowing, BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TextureId,
     TintKind, CHUNK_SIZE,
 };
-use stagcrest_world::{Chunk, ChunkBlock, ChunkNeighborhood, World};
+use stagcrest_world::{ChunkBlock, ChunkView, World};
 use std::collections::{HashMap, HashSet};
 
 pub use block_model::{
@@ -76,12 +76,11 @@ impl MeshCache {
             let built: Vec<_> = dirty
                 .par_iter()
                 .filter_map(|&pos| {
-                    world.chunk(pos).map(|chunk| {
+                    world.chunk_view(pos).map(|_| {
                         (
                             pos,
                             build_chunk_mesh(
                                 pos,
-                                chunk,
                                 world,
                                 registry,
                                 models,
@@ -100,8 +99,8 @@ impl MeshCache {
         #[cfg(not(feature = "parallel"))]
         {
             for pos in dirty {
-                if let Some(chunk) = world.chunk(pos) {
-                    let mesh = build_chunk_mesh(pos, chunk, world, registry, models, power, climate);
+                if world.chunk_view(pos).is_some() {
+                    let mesh = build_chunk_mesh(pos, world, registry, models, power, climate);
                     self.meshes.insert(pos, mesh);
                     self.dirty.insert(pos);
                 }
@@ -300,41 +299,29 @@ fn fluid_flow_textures(
 
 fn build_chunk_mesh(
     chunk_pos: ChunkPos,
-    chunk: &Chunk,
     world: &World,
     registry: &BlockRegistry,
     models: &ModelRegistry,
     power: Option<&dyn PowerLookup>,
     climate: Option<&MeshClimateTint<'_>>,
 ) -> ChunkMesh {
+    let Some(center) = world.chunk_view(chunk_pos) else {
+        return ChunkMesh::default();
+    };
+
     let mut mesh = ChunkMesh::default();
     let base_x = chunk_pos.x * CHUNK_SIZE;
     let base_y = chunk_pos.y * CHUNK_SIZE;
     let base_z = chunk_pos.z * CHUNK_SIZE;
 
-    let mut neighbors = HashMap::new();
-    for dx in -1..=1 {
-        for dy in -1..=1 {
-            for dz in -1..=1 {
-                if dx == 0 && dy == 0 && dz == 0 {
-                    continue;
-                }
-                let npos = ChunkPos {
-                    x: chunk_pos.x + dx,
-                    y: chunk_pos.y + dy,
-                    z: chunk_pos.z + dz,
-                };
-                if let Some(c) = world.chunk(npos) {
-                    neighbors.insert((dx, dy, dz), c);
-                }
-            }
-        }
-    }
-
-    let hood = ChunkNeighborhood {
-        center: chunk,
-        neighbors,
-    };
+    let neighbor_at =
+        |lx: i32, ly: i32, lz: i32| -> Option<ChunkBlock> {
+            world.get_block_if_loaded(BlockPos::new(
+                base_x + lx,
+                base_y + ly,
+                base_z + lz,
+            ))
+        };
 
     let column_tints = climate.map(|ctx| build_column_tint_cache(base_x, base_z, ctx));
 
@@ -346,7 +333,7 @@ fn build_chunk_mesh(
                     y: y as u8,
                     z: z as u8,
                 };
-                let block = chunk.get(local);
+                let block = center.get(local);
                 if block.id == world.air() {
                     continue;
                 }
@@ -377,7 +364,7 @@ fn build_chunk_mesh(
 
                 let dust_face = if def.namespaced_id == "stagcrest:redstone_dust" {
                     let connections = dust_connections_from_neighbors(|dx, _, dz| {
-                        let Some(neighbor) = hood.get(x + dx, y, z + dz) else {
+                        let Some(neighbor) = neighbor_at(x + dx, y, z + dz) else {
                             return false;
                         };
                         neighbor.id != world.air()
@@ -413,7 +400,7 @@ fn build_chunk_mesh(
                     column_tints.as_ref(),
                     |normal| should_cull_face(
                         def,
-                        hood.get(
+                        neighbor_at(
                             x + normal.x as i32,
                             y + normal.y as i32,
                             z + normal.z as i32,

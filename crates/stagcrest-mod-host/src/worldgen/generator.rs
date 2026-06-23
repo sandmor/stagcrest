@@ -257,10 +257,19 @@ mod tests {
 
         let stone = registry.block_by_name("stagcrest:stone").unwrap();
         let mut solid_count = 0;
-        for (_, chunk) in world.chunks() {
-            for &bid in chunk.palette() {
-                if bid == stone {
-                    solid_count += 1;
+        for cpos in world.loaded_chunk_positions() {
+            for y in 0..stagcrest_protocol::CHUNK_SIZE {
+                for z in 0..stagcrest_protocol::CHUNK_SIZE {
+                    for x in 0..stagcrest_protocol::CHUNK_SIZE {
+                        let (bid, _) = world.get_block(stagcrest_protocol::BlockPos::new(
+                            cpos.x * stagcrest_protocol::CHUNK_SIZE + x,
+                            cpos.y * stagcrest_protocol::CHUNK_SIZE + y,
+                            cpos.z * stagcrest_protocol::CHUNK_SIZE + z,
+                        ));
+                        if bid == stone {
+                            solid_count += 1;
+                        }
+                    }
                 }
             }
         }

@@ -1,3 +1,4 @@
+use crate::session::WorldSession;
 use crate::terrain_queue::{
     terrain_apply, terrain_dispatch, terrain_poll_tasks, TerrainBiomes, TerrainBlocks,
     TerrainGenQueue, TerrainStreamState,
@@ -139,6 +140,7 @@ fn cleanup_game_session(
     commands.remove_resource::<TerrainStreamState>();
     commands.remove_resource::<TerrainBlocks>();
     commands.remove_resource::<WorldColormaps>();
+    commands.remove_resource::<crate::session::WorldSession>();
     commands.remove_resource::<targeting::BlockTarget>();
     // MeshCacheResource is re-inited by VoxelRenderPlugin; reset it for the next session.
     commands.insert_resource(MeshCacheResource::default());
@@ -190,6 +192,7 @@ fn init_circuit_on_enter(
 fn chunk_streaming(
     mod_ctx: Option<Res<ModContext>>,
     config: Res<GameConfig>,
+    session: Option<Res<WorldSession>>,
     mut world: ResMut<StagcrestWorldResource>,
     mut terrain: ResMut<TerrainGen>,
     mut last_center: ResMut<LastStreamCenter>,
@@ -199,6 +202,7 @@ fn chunk_streaming(
     camera: Query<&Transform, With<player::FlyCamera>>,
 ) {
     let Some(_ctx) = mod_ctx else { return };
+    let Some(session) = session else { return };
     let Ok(cam) = camera.single() else { return };
     let pos = cam.translation;
     let player_block = stagcrest_protocol::BlockPos::new(
@@ -218,27 +222,63 @@ fn chunk_streaming(
     stream.center_z = center.z;
     stream.valid = true;
 
-    world
-        .0
-        .load_area_3d(center, h_radius, v_radius, y_bounds.clone());
-    let removed = world.0.unload_far_chunks_3d(center, unload_h, unload_v);
-
-    for chunk_pos in removed {
-        cache.0.remove(chunk_pos);
-        terrain.0.clear_chunk(chunk_pos);
-        queue.cancel_chunk(chunk_pos);
+    if let Ok(loaded) = world.0.load_area_from_storage(
+        session.storage.as_ref(),
+        center,
+        h_radius,
+        v_radius,
+        y_bounds.clone(),
+    ) {
+        for pos in loaded {
+            terrain.0.mark_chunk_generated(pos);
+        }
     }
 
-    if last_center.0 != Some(center) {
+    let (evicted, _, _) = world
+        .0
+        .unload_far_chunks_3d(center, unload_h, unload_v);
+
+    for evicted_chunk in evicted {
+        let pos = evicted_chunk.pos;
+        if evicted_chunk.meta.generated {
+            if let Err(err) = world.0.persist_and_evict(session.storage.as_ref(), evicted_chunk) {
+                tracing::error!("failed to persist chunk {pos:?}: {err}");
+            }
+            cache.0.remove(pos);
+            queue.cancel_chunk(pos);
+            continue;
+        }
+        cache.0.remove(pos);
+        #[cfg(target_arch = "wasm32")]
+        terrain.0.clear_chunk(pos);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if !session.storage.contains(pos) {
+                terrain.0.clear_chunk(pos);
+            }
+        }
+        queue.cancel_chunk(pos);
+    }
+
+    let center_changed = last_center.0 != Some(center);
+    if center_changed {
+        queue.prune_out_of_stream(&stream, h_radius, v_radius);
+    }
+    let (pending_len, _, _, _) = queue.stats();
+    if center_changed || pending_len < crate::terrain_queue::TERRAIN_QUEUE_REFILL {
         queue.enqueue_area(
             &terrain.0,
+            &session.storage,
+            &world.0,
             center,
             h_radius,
             v_radius,
             y_bounds,
             player_block,
         );
-        last_center.0 = Some(center);
+        if center_changed {
+            last_center.0 = Some(center);
+        }
     }
 }
 

@@ -1,0 +1,14 @@
+[package]
+name = "stagcrest-storage"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+stagcrest-protocol.workspace = true
+thiserror.workspace = true
+lz4_flex.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+redb.workspace = true
+
+[dev-dependencies]

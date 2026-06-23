@@ -23,9 +23,11 @@ pub(crate) fn poll_future_now<T>(future: &mut (impl Future<Output = T> + Unpin))
     }
 }
 
-const MAX_IN_FLIGHT: usize = 64;
-const DISPATCH_PER_FRAME: usize = 32;
-const APPLY_CHUNKS_PER_FRAME: usize = 12;
+const MAX_IN_FLIGHT: usize = 96;
+const DISPATCH_PER_FRAME: usize = 48;
+const APPLY_CHUNKS_PER_FRAME: usize = 32;
+pub(crate) const TERRAIN_QUEUE_REFILL: usize = 256;
+const STALE_COMPLETED_DRAIN: usize = 512;
 
 #[derive(Resource, Clone, Copy)]
 pub struct TerrainBlocks(pub ColumnBlocks);
@@ -66,6 +68,8 @@ impl TerrainGenQueue {
     pub fn enqueue_area(
         &mut self,
         terrain: &WorldGenState,
+        storage: &dyn stagcrest_storage::ChunkStorage,
+        world: &stagcrest_world::World,
         center: ChunkPos,
         horizontal_radius: i32,
         vertical_radius: i32,
@@ -79,7 +83,7 @@ impl TerrainGenQueue {
             for cz in (center.z - horizontal_radius)..=(center.z + horizontal_radius) {
                 for cy in y_min..=y_max {
                     let pos = ChunkPos { x: cx, y: cy, z: cz };
-                    if self.enqueue_chunk_prepare(pos, terrain) {
+                    if self.enqueue_chunk_prepare(pos, terrain, storage, world) {
                         let chunk_center_x = cx * stagcrest_protocol::CHUNK_SIZE + 8;
                         let chunk_center_y = cy * stagcrest_protocol::CHUNK_SIZE + 8;
                         let chunk_center_z = cz * stagcrest_protocol::CHUNK_SIZE + 8;
@@ -97,8 +101,14 @@ impl TerrainGenQueue {
         }
     }
 
-    fn enqueue_chunk_prepare(&self, pos: ChunkPos, terrain: &WorldGenState) -> bool {
-        !terrain.is_chunk_generated(pos)
+    fn enqueue_chunk_prepare(
+        &self,
+        pos: ChunkPos,
+        terrain: &WorldGenState,
+        storage: &dyn stagcrest_storage::ChunkStorage,
+        world: &stagcrest_world::World,
+    ) -> bool {
+        !crate::session::chunk_known_generated(world, terrain, storage, pos)
             && !self.in_progress.contains(&pos)
             && !self.pending.iter().any(|&p| p == pos)
     }
@@ -107,11 +117,44 @@ impl TerrainGenQueue {
         self.pending.len() + self.in_flight + self.completed.len()
     }
 
+    pub fn stats(&self) -> (usize, usize, usize, usize) {
+        (
+            self.pending.len(),
+            self.in_flight,
+            self.completed.len(),
+            self.in_progress.len(),
+        )
+    }
+
+    /// True when `pos` is queued, computing, or waiting to apply.
+    pub fn chunk_in_pipeline(&self, pos: ChunkPos) -> bool {
+        self.in_progress.contains(&pos)
+            || self.pending.iter().any(|&p| p == pos)
+            || self.completed.iter().any(|d| d.pos == pos)
+    }
+
     pub fn cancel_chunk(&mut self, pos: ChunkPos) {
         self.pending.retain(|&p| p != pos);
         self.in_progress.remove(&pos);
         self.completed.retain(|d| d.pos != pos);
         self.discarded.insert(pos);
+    }
+
+    pub fn prune_out_of_stream(
+        &mut self,
+        stream: &TerrainStreamState,
+        horizontal_radius: i32,
+        vertical_radius: i32,
+    ) {
+        if !stream.valid {
+            return;
+        }
+        self.pending.retain(|&pos| {
+            chunk_in_stream(pos, stream, horizontal_radius, vertical_radius)
+        });
+        self.completed.retain(|data| {
+            chunk_in_stream(data.pos, stream, horizontal_radius, vertical_radius)
+        });
     }
 }
 
@@ -199,10 +242,20 @@ pub fn terrain_apply(
         .unwrap_or(i32::MAX);
 
     let mut batch: Vec<ChunkGenData> = Vec::new();
+    let mut stale_drained = 0usize;
     while batch.len() < APPLY_CHUNKS_PER_FRAME {
         let Some(data) = queue.completed.pop_front() else {
             break;
         };
+        if let Some(stream) = stream.as_ref() {
+            if stream.valid && !chunk_in_stream(data.pos, stream, h_radius, v_radius) {
+                stale_drained += 1;
+                if stale_drained >= STALE_COMPLETED_DRAIN {
+                    break;
+                }
+                continue;
+            }
+        }
         batch.push(data);
     }
     batch.sort_by_key(|d| std::cmp::Reverse(d.pos.y));
@@ -215,22 +268,13 @@ pub fn terrain_apply(
         let pos = data.pos;
         queue.in_progress.remove(&pos);
 
-        if let Some(stream) = stream.as_ref() {
-            if stream.valid && !chunk_in_stream(pos, stream, h_radius, v_radius) {
-                deferred.push(data);
-                continue;
-            }
-        }
-
         if pos.y < *y_bounds.end() {
             let above = ChunkPos {
                 x: pos.x,
                 y: pos.y + 1,
                 z: pos.z,
             };
-            // Only wait for the chunk above when it is loaded in the world (inside vertical
-            // stream). Otherwise we'd deadlock: cy=9 needs cy=10, but cy=10 is outside v_radius.
-            if world.0.chunk(above).is_some() && !terrain.0.is_chunk_generated(above) {
+            if queue.chunk_in_pipeline(above) && !terrain.0.is_chunk_generated(above) {
                 deferred.push(data);
                 continue;
             }
@@ -242,6 +286,7 @@ pub fn terrain_apply(
 
         let entries = generator.decorate_chunk(&world.0, blocks.0, &biomes.0, &data);
         world.0.set_blocks(entries);
+        world.0.finalize_generated_chunk(pos);
     }
 
     deferred.sort_by_key(|d| std::cmp::Reverse(d.pos.y));

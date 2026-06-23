@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/stagcrest-protocol",
+    "crates/stagcrest-storage",
     "crates/stagcrest-world",
     "crates/stagcrest-mesh",
     "crates/stagcrest-circuit",
@@ -49,8 +50,13 @@ rayon = "1.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
 noise = "0.9"
 bytemuck = { version = "1", features = ["derive"] }
+redb = "2"
+lz4_flex = "0.11"
+slab = "0.4"
+lru = "0.12"
 
 stagcrest-protocol = { path = "crates/stagcrest-protocol" }
+stagcrest-storage = { path = "crates/stagcrest-storage" }
 stagcrest-world = { path = "crates/stagcrest-world" }
 stagcrest-mesh = { path = "crates/stagcrest-mesh" }
 stagcrest-circuit = { path = "crates/stagcrest-circuit" }

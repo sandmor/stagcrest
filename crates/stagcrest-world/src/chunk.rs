@@ -1,4 +1,5 @@
 use stagcrest_protocol::{BlockId, BlockState, LocalBlockPos, CHUNK_SIZE, CHUNK_VOLUME};
+use stagcrest_storage::{InactiveChunk, InactiveChunkReader, StorageFormatError};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,6 +15,10 @@ impl Default for ChunkBlock {
             state: BlockState(0),
         }
     }
+}
+
+pub trait ChunkView {
+    fn get(&self, local: LocalBlockPos) -> ChunkBlock;
 }
 
 #[derive(Debug, Clone)]
@@ -75,12 +80,42 @@ impl Chunk {
     pub fn is_empty(&self, air: BlockId) -> bool {
         self.palette.len() == 1 && self.palette[0] == air
     }
+
+    pub fn to_inactive(&self) -> Result<InactiveChunk, StorageFormatError> {
+        InactiveChunk::from_indices(
+            self.palette.clone(),
+            self.states.clone(),
+            &self.indices,
+        )
+    }
+
+    pub fn from_inactive(chunk: &InactiveChunk) -> Result<Self, StorageFormatError> {
+        let indices = chunk.to_indices()?;
+        Ok(Self {
+            palette: chunk.palette_ids.clone(),
+            states: chunk.palette_states.clone(),
+            indices,
+        })
+    }
+}
+
+impl ChunkView for Chunk {
+    fn get(&self, local: LocalBlockPos) -> ChunkBlock {
+        Chunk::get(self, local)
+    }
+}
+
+impl ChunkView for InactiveChunkReader<'_> {
+    fn get(&self, local: LocalBlockPos) -> ChunkBlock {
+        let (id, state) = InactiveChunkReader::block_at(self, local);
+        ChunkBlock { id, state }
+    }
 }
 
 /// Resolve block id at local position using neighbor chunk data when on boundary.
 pub struct ChunkNeighborhood<'a> {
-    pub center: &'a Chunk,
-    pub neighbors: HashMap<(i32, i32, i32), &'a Chunk>,
+    pub center: &'a dyn ChunkView,
+    pub neighbors: HashMap<(i32, i32, i32), &'a dyn ChunkView>,
 }
 
 impl ChunkNeighborhood<'_> {
@@ -89,10 +124,10 @@ impl ChunkNeighborhood<'_> {
         let (cy, ly) = div_rem(y, CHUNK_SIZE);
         let (cz, lz) = div_rem(z, CHUNK_SIZE);
 
-        let chunk = if cx == 0 && cy == 0 && cz == 0 {
+        let chunk: &dyn ChunkView = if cx == 0 && cy == 0 && cz == 0 {
             self.center
         } else {
-            self.neighbors.get(&(cx, cy, cz))?
+            *self.neighbors.get(&(cx, cy, cz))?
         };
 
         Some(chunk.get(LocalBlockPos {

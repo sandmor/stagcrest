@@ -5,8 +5,12 @@ edition.workspace = true
 
 [dependencies]
 stagcrest-protocol.workspace = true
+stagcrest-storage.workspace = true
 glam.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+slab.workspace = true
+lru.workspace = true
 
 [dev-dependencies]
+stagcrest-storage = { workspace = true }

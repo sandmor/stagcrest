@@ -106,6 +106,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2219,6 +2225,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
  "equivalent",
  "foldhash",
  "serde",
@@ -2521,6 +2528,24 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "lru"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+dependencies = [
+ "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "lz4_flex"
+version = "0.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "malloc_buf"
@@ -3376,6 +3401,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0d463f2884048e7153449a55166f91028d5b0ea53c79377099ce4e8cf0cf9bb"
 
 [[package]]
+name = "redb"
+version = "2.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eca1e9d98d5a7e9002d0013e18d5a9b000aee942eb134883a82f06ebffb6c01"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3782,12 +3816,12 @@ dependencies = [
  "futures-lite",
  "glam",
  "js-sys",
- "serde_json",
  "stagcrest-circuit",
  "stagcrest-mesh",
  "stagcrest-mod-host",
  "stagcrest-protocol",
  "stagcrest-render",
+ "stagcrest-storage",
  "stagcrest-world",
  "tracing",
  "tracing-subscriber",
@@ -3871,12 +3905,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "stagcrest-storage"
+version = "0.1.0"
+dependencies = [
+ "lz4_flex",
+ "redb",
+ "stagcrest-protocol",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "stagcrest-world"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "lru",
  "serde",
+ "slab",
  "stagcrest-protocol",
+ "stagcrest-storage",
  "thiserror 2.0.18",
 ]
 

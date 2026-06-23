@@ -101,5 +101,13 @@ pub fn terrain_chunk_y_range(config: &TerrainConfig) -> RangeInclusive<i32> {
 }
 
 pub fn world_chunk_y_bounds(config: &TerrainConfig) -> RangeInclusive<i32> {
-    0..=(config.world_max_y / CHUNK_SIZE)
+    floor_div(config.world_min_y, CHUNK_SIZE)..=floor_div(config.world_max_y, CHUNK_SIZE)
+}
+
+fn floor_div(a: i32, b: i32) -> i32 {
+    if a >= 0 {
+        a / b
+    } else {
+        (a - (b - 1)) / b
+    }
 }
