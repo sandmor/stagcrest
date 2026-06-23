@@ -7,18 +7,43 @@ use std::num::NonZeroUsize;
 
 use crate::chunk::Chunk;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChunkGenPhase {
+    #[default]
+    Empty,
+    TerrainGenerated,
+    Populated,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkMeta {
-    pub generated: bool,
+    pub phase: ChunkGenPhase,
     pub modified: bool,
 }
 
 impl Default for ChunkMeta {
     fn default() -> Self {
         Self {
-            generated: false,
+            phase: ChunkGenPhase::Empty,
             modified: false,
         }
+    }
+}
+
+impl ChunkMeta {
+    pub fn is_populated(&self) -> bool {
+        self.phase == ChunkGenPhase::Populated
+    }
+
+    pub fn is_terrain_ready(&self) -> bool {
+        matches!(
+            self.phase,
+            ChunkGenPhase::TerrainGenerated | ChunkGenPhase::Populated
+        )
+    }
+
+    pub fn generated(&self) -> bool {
+        self.is_populated()
     }
 }
 
@@ -52,11 +77,22 @@ impl ChunkArena {
     }
 
     pub fn is_generated(&self, pos: ChunkPos) -> bool {
-        self.meta.get(&pos).is_some_and(|m| m.generated)
+        self.meta.get(&pos).is_some_and(|m| m.is_populated())
+    }
+
+    pub fn is_terrain_ready(&self, pos: ChunkPos) -> bool {
+        self.meta.get(&pos).is_some_and(|m| m.is_terrain_ready())
+    }
+
+    pub fn mark_terrain_ready(&mut self, pos: ChunkPos) {
+        let entry = self.meta.entry(pos).or_default();
+        if entry.phase == ChunkGenPhase::Empty {
+            entry.phase = ChunkGenPhase::TerrainGenerated;
+        }
     }
 
     pub fn mark_generated(&mut self, pos: ChunkPos) {
-        self.meta.entry(pos).or_default().generated = true;
+        self.meta.entry(pos).or_default().phase = ChunkGenPhase::Populated;
     }
 
     pub fn mark_modified(&mut self, pos: ChunkPos) {

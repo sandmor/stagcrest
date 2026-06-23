@@ -59,8 +59,20 @@ impl World {
         self.arena.is_generated(pos)
     }
 
+    pub fn is_terrain_ready(&self, pos: ChunkPos) -> bool {
+        self.arena.is_terrain_ready(pos)
+    }
+
+    pub fn mark_chunk_terrain_ready(&mut self, pos: ChunkPos) {
+        self.arena.mark_terrain_ready(pos);
+    }
+
     pub fn mark_chunk_generated(&mut self, pos: ChunkPos) {
         self.arena.mark_generated(pos);
+    }
+
+    pub fn is_populated(&self, pos: ChunkPos) -> bool {
+        self.is_generated(pos)
     }
 
     pub fn ensure_chunk(&mut self, pos: ChunkPos) {
@@ -295,7 +307,7 @@ impl World {
         storage: &dyn ChunkStorage,
         evicted: EvictedChunk,
     ) -> Result<(), stagcrest_storage::StorageError> {
-        if evicted.meta.generated {
+        if evicted.meta.is_populated() {
             if let Some(inactive) = evicted.inactive {
                 store_inactive_chunk(storage, evicted.pos, &inactive)?;
             }

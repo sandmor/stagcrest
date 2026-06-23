@@ -12,6 +12,9 @@ pub fn init_circuit_blocks(circuit: &mut CircuitWorld, world: &World, registry: 
 fn find_circuit_blocks(world: &World, registry: &BlockRegistry) -> Vec<stagcrest_protocol::BlockPos> {
     let mut out = Vec::new();
     for cpos in world.loaded_chunk_positions() {
+        if !world.is_generated(cpos) {
+            continue;
+        }
         let base_x = cpos.x * stagcrest_protocol::CHUNK_SIZE;
         let base_y = cpos.y * stagcrest_protocol::CHUNK_SIZE;
         let base_z = cpos.z * stagcrest_protocol::CHUNK_SIZE;

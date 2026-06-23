@@ -4,9 +4,9 @@ use bevy::tasks::{IoTaskPool, Task};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::tasks::AsyncComputeTaskPool;
 use stagcrest_mod_host::{ChunkGenData, ColumnBlocks, DecorateSnapshot, WorldGenState};
-use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos};
+use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
 use stagcrest_storage::{compress_stored, load_inactive_chunk, InactiveChunk, StorageError};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const MAX_GEN_IN_FLIGHT: usize = 80;
 const MAX_IO_IN_FLIGHT: usize = 8;
@@ -44,11 +44,14 @@ pub struct StreamingPipeline {
     pending_load: VecDeque<ChunkPos>,
     pending_persist: VecDeque<(ChunkPos, Vec<u8>)>,
     deferred_decorate: VecDeque<ChunkGenData>,
+    /// Pass-1 density retained until Pass-2 populate completes (survives queue pruning).
+    pass2_pending: HashMap<ChunkPos, ChunkGenData>,
     in_progress: HashSet<ChunkPos>,
     gen_in_flight: usize,
     io_in_flight: usize,
     tasks: Vec<InFlight>,
     discarded: HashSet<ChunkPos>,
+    integrate_terrain: Vec<ChunkGenData>,
     integrate_decorate: Vec<(ChunkPos, Vec<(BlockPos, BlockId, BlockState)>)>,
     integrate_load: Vec<(ChunkPos, Result<Option<InactiveChunk>, StorageError>)>,
     integrate_persist: Vec<(ChunkPos, Result<(), StorageError>)>,
@@ -57,6 +60,7 @@ pub struct StreamingPipeline {
 impl StreamingPipeline {
     pub fn enqueue_generate(&mut self, pos: ChunkPos, terrain: &WorldGenState) -> bool {
         if terrain.is_chunk_generated(pos)
+            || terrain.is_chunk_terrain_ready(pos)
             || self.in_progress.contains(&pos)
             || self.pending_generate.iter().any(|&p| p == pos)
             || self.deferred_decorate.iter().any(|d| d.pos == pos)
@@ -80,10 +84,90 @@ impl StreamingPipeline {
     pub fn clear_generation_work(&mut self, pos: ChunkPos) {
         self.pending_generate.retain(|&p| p != pos);
         self.deferred_decorate.retain(|d| d.pos != pos);
+        self.integrate_terrain.retain(|d| d.pos != pos);
+        self.pass2_pending.remove(&pos);
+    }
+
+    fn pass2_in_flight(&self, pos: ChunkPos) -> bool {
+        self.tasks.iter().any(|t| {
+            t.pos == pos && matches!(t.task, ErasedTask::Decorate(_))
+        })
+    }
+
+    /// Re-queue terrain-ready chunks that lost their Pass-2 slot (e.g. after stream pruning).
+    pub fn requeue_pass2_in_stream(
+        &mut self,
+        world: &stagcrest_world::World,
+        stream: &TerrainStreamState,
+        horizontal_radius: i32,
+        vertical_radius: i32,
+        y_bounds: std::ops::RangeInclusive<i32>,
+        air: BlockId,
+    ) -> usize {
+        let candidates: Vec<ChunkPos> = self
+            .pass2_pending
+            .keys()
+            .copied()
+            .filter(|pos| {
+                chunk_in_stream(*pos, stream, horizontal_radius, vertical_radius)
+                    && world.is_terrain_ready(*pos)
+                    && !world.is_generated(*pos)
+                    && !self.deferred_decorate.iter().any(|d| d.pos == *pos)
+                    && !self.pass2_in_flight(*pos)
+            })
+            .collect();
+        let mut requeued = 0usize;
+        for pos in candidates {
+            let Some(data) = self.pass2_pending.get(&pos).cloned() else {
+                continue;
+            };
+            self.deferred_decorate.push_back(data);
+            requeued += 1;
+        }
+        // Recover chunks that have terrain in world but no cached density (e.g. after reload).
+        if requeued == 0 {
+            let y_min = (stream.center_y - vertical_radius).max(*y_bounds.start());
+            let y_max = (stream.center_y + vertical_radius).min(*y_bounds.end());
+            for cy in y_min..=y_max {
+                for cx in (stream.center_x - horizontal_radius)..=(stream.center_x + horizontal_radius)
+                {
+                    for cz in (stream.center_z - horizontal_radius)
+                        ..=(stream.center_z + horizontal_radius)
+                    {
+                        let pos = ChunkPos { x: cx, y: cy, z: cz };
+                        if !world.is_terrain_ready(pos)
+                            || world.is_generated(pos)
+                            || self.pass2_pending.contains_key(&pos)
+                            || self.deferred_decorate.iter().any(|d| d.pos == pos)
+                            || self.pass2_in_flight(pos)
+                        {
+                            continue;
+                        }
+                        let captured = capture_density_from_world(world, pos, air);
+                        self.pass2_pending.insert(pos, captured.clone());
+                        self.deferred_decorate.push_back(captured);
+                        requeued += 1;
+                    }
+                }
+            }
+        }
+        requeued
+    }
+
+    pub fn needs_pass2_requeue(&self, world: &stagcrest_world::World) -> bool {
+        self.pass2_pending.keys().any(|pos| {
+            world.is_terrain_ready(*pos)
+                && !world.is_generated(*pos)
+                && !self.deferred_decorate.iter().any(|d| d.pos == *pos)
+                && !self.pass2_in_flight(*pos)
+        })
     }
 
     pub fn generation_backlog(&self) -> usize {
-        self.pending_generate.len() + self.deferred_decorate.len() + self.pending_load.len()
+        self.pending_generate.len()
+            + self.deferred_decorate.len()
+            + self.pending_load.len()
+            + self.pass2_pending.len()
     }
 
     pub fn enqueue_area(
@@ -140,7 +224,9 @@ impl StreamingPipeline {
         world: &stagcrest_world::World,
     ) -> bool {
         if world.is_generated(pos)
+            || world.is_terrain_ready(pos)
             || terrain.is_chunk_generated(pos)
+            || terrain.is_chunk_terrain_ready(pos)
             || self.in_progress.contains(&pos)
             || self.pending_generate.iter().any(|&p| p == pos)
             || self.deferred_decorate.iter().any(|d| d.pos == pos)
@@ -182,6 +268,9 @@ impl StreamingPipeline {
             || self.pending_generate.iter().any(|&p| p == pos)
             || self.pending_load.iter().any(|&p| p == pos)
             || self.deferred_decorate.iter().any(|d| d.pos == pos)
+            || self.integrate_terrain.iter().any(|d| d.pos == pos)
+            || self.pass2_pending.contains_key(&pos)
+            || self.pass2_in_flight(pos)
     }
 
     pub fn cancel_chunk(&mut self, pos: ChunkPos) {
@@ -189,6 +278,7 @@ impl StreamingPipeline {
         self.pending_load.retain(|&p| p != pos);
         self.pending_persist.retain(|&(p, _)| p != pos);
         self.deferred_decorate.retain(|d| d.pos != pos);
+        self.pass2_pending.remove(&pos);
         self.in_progress.remove(&pos);
         let mut dropped_io = 0usize;
         let mut dropped_gen = 0usize;
@@ -227,7 +317,33 @@ impl StreamingPipeline {
         self.deferred_decorate.retain(|data| {
             chunk_in_stream(data.pos, stream, horizontal_radius, vertical_radius)
         });
+        self.pass2_pending.retain(|pos, _| {
+            chunk_in_stream(*pos, stream, horizontal_radius, vertical_radius)
+        });
     }
+}
+
+fn capture_density_from_world(
+    world: &stagcrest_world::World,
+    pos: ChunkPos,
+    air: BlockId,
+) -> ChunkGenData {
+    let base_x = pos.x * CHUNK_SIZE;
+    let base_y = pos.y * CHUNK_SIZE;
+    let base_z = pos.z * CHUNK_SIZE;
+    let mut entries = Vec::new();
+    for ly in 0..CHUNK_SIZE {
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let block_pos = BlockPos::new(base_x + lx, base_y + ly, base_z + lz);
+                let (id, state) = world.get_block(block_pos);
+                if id != air {
+                    entries.push((block_pos, id, state));
+                }
+            }
+        }
+    }
+    ChunkGenData { pos, entries }
 }
 
 fn chunk_in_stream(
@@ -293,7 +409,7 @@ pub fn pipeline_streaming(
 
     for evicted_chunk in evicted {
         let pos = evicted_chunk.pos;
-        if evicted_chunk.meta.generated {
+        if evicted_chunk.meta.is_populated() {
             if let Some(inactive) = evicted_chunk.inactive {
                 let wire = inactive.encode_wire();
                 let compressed = compress_stored(&wire);
@@ -338,12 +454,23 @@ pub fn pipeline_streaming(
             center,
             h_radius,
             v_radius,
-            y_bounds,
+            y_bounds.clone(),
             player_block,
         );
         if center_changed {
             last_center.0 = Some(center);
         }
+    }
+
+    if center_changed || pipeline.needs_pass2_requeue(&world.0) {
+        pipeline.requeue_pass2_in_stream(
+            &world.0,
+            &stream,
+            h_radius,
+            v_radius,
+            y_bounds.clone(),
+            world.0.air(),
+        );
     }
 }
 
@@ -419,64 +546,157 @@ fn dispatch_one(
     }
 
     if pipeline.gen_in_flight < MAX_GEN_IN_FLIGHT {
-        if let Some(data) = take_decorate_candidate(pipeline, terrain) {
-            let pos = data.pos;
-            let snapshot = DecorateSnapshot::capture(&world.0, pos, world.0.air());
+        let density_backlog = pipeline.pending_generate.len();
+        let decorate_backlog = pipeline.deferred_decorate.len();
+        let prefer_density =
+            density_backlog > 128 && density_backlog > decorate_backlog.saturating_mul(2);
+
+        if !prefer_density {
+            if let Some(data) = take_decorate_candidate(pipeline, terrain, &world.0) {
+                let pos = data.pos;
+                let snapshot = DecorateSnapshot::capture(&world.0, pos, world.0.air());
+                pipeline.in_progress.insert(pos);
+                pipeline.gen_in_flight += 1;
+                let gen = generator.clone();
+                let column_blocks = blocks.0;
+                let biome_registry = biomes.0.clone();
+                pipeline.tasks.push(InFlight {
+                    pos,
+                    task: ErasedTask::Decorate(cpu_pool().spawn(async move {
+                        gen.decorate_chunk_offline(column_blocks, &biome_registry, &data, &snapshot)
+                    })),
+                });
+                return true;
+            }
+        }
+
+        if let Some(pos) = pipeline.pending_generate.pop_front() {
+            if terrain.0.is_chunk_generated(pos)
+                || world.0.is_generated(pos)
+                || terrain.0.is_chunk_terrain_ready(pos)
+                || world.0.is_terrain_ready(pos)
+            {
+                return true;
+            }
             pipeline.in_progress.insert(pos);
             pipeline.gen_in_flight += 1;
             let gen = generator.clone();
             let column_blocks = blocks.0;
-            let biome_registry = biomes.0.clone();
             pipeline.tasks.push(InFlight {
                 pos,
-                task: ErasedTask::Decorate(cpu_pool().spawn(async move {
-                    gen.decorate_chunk_offline(column_blocks, &biome_registry, &data, &snapshot)
+                task: ErasedTask::Density(cpu_pool().spawn(async move {
+                    gen.compute_chunk_density(column_blocks, pos)
                 })),
             });
             return true;
         }
 
-        let Some(pos) = pipeline.pending_generate.pop_front() else {
-            return false;
-        };
-        if terrain.0.is_chunk_generated(pos) || world.0.is_generated(pos) {
-            return true;
+        if prefer_density {
+            if let Some(data) = take_decorate_candidate(pipeline, terrain, &world.0) {
+                let pos = data.pos;
+                let snapshot = DecorateSnapshot::capture(&world.0, pos, world.0.air());
+                pipeline.in_progress.insert(pos);
+                pipeline.gen_in_flight += 1;
+                let gen = generator.clone();
+                let column_blocks = blocks.0;
+                let biome_registry = biomes.0.clone();
+                pipeline.tasks.push(InFlight {
+                    pos,
+                    task: ErasedTask::Decorate(cpu_pool().spawn(async move {
+                        gen.decorate_chunk_offline(column_blocks, &biome_registry, &data, &snapshot)
+                    })),
+                });
+                return true;
+            }
         }
-        pipeline.in_progress.insert(pos);
-        pipeline.gen_in_flight += 1;
-        let gen = generator.clone();
-        let column_blocks = blocks.0;
-        pipeline.tasks.push(InFlight {
-            pos,
-            task: ErasedTask::Density(cpu_pool().spawn(async move {
-                gen.compute_chunk_density(column_blocks, pos)
-            })),
-        });
-        return true;
+
+        return false;
     }
 
     false
 }
 
+const HORIZONTAL_NEIGHBORS: [(i32, i32); 8] = [
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+];
+
+fn chunk_terrain_ready(
+    pos: ChunkPos,
+    terrain: &crate::game::TerrainGen,
+    world: &stagcrest_world::World,
+) -> bool {
+    world.is_terrain_ready(pos) || terrain.0.is_chunk_terrain_ready(pos)
+}
+
+fn neighbor_generation_expected(
+    pos: ChunkPos,
+    pipeline: &StreamingPipeline,
+    world: &stagcrest_world::World,
+) -> bool {
+    world.has_chunk(pos) || pipeline.chunk_in_pipeline(pos)
+}
+
+fn neighbor_satisfied_for_decorate(
+    neighbor: ChunkPos,
+    pipeline: &StreamingPipeline,
+    terrain: &crate::game::TerrainGen,
+    world: &stagcrest_world::World,
+) -> bool {
+    if chunk_terrain_ready(neighbor, terrain, world) {
+        return true;
+    }
+    // Outside the active gen bubble: treat as void (no terrain required).
+    !neighbor_generation_expected(neighbor, pipeline, world)
+}
+
 fn take_decorate_candidate(
     pipeline: &mut StreamingPipeline,
     terrain: &crate::game::TerrainGen,
+    world: &stagcrest_world::World,
 ) -> Option<ChunkGenData> {
     let y_bounds = stagcrest_mod_host::world_chunk_y_bounds(terrain.0.config());
     let mut deferred = Vec::new();
     while let Some(data) = pipeline.deferred_decorate.pop_front() {
         let pos = data.pos;
+
         if pos.y < *y_bounds.end() {
             let above = ChunkPos {
                 x: pos.x,
                 y: pos.y + 1,
                 z: pos.z,
             };
-            if pipeline.chunk_in_pipeline(above) && !terrain.0.is_chunk_generated(above) {
+            if neighbor_generation_expected(above, pipeline, world)
+                && !chunk_terrain_ready(above, terrain, world)
+            {
                 deferred.push(data);
                 continue;
             }
         }
+
+        let mut neighbors_ready = true;
+        for (dx, dz) in HORIZONTAL_NEIGHBORS {
+            let neighbor = ChunkPos {
+                x: pos.x + dx,
+                y: pos.y,
+                z: pos.z + dz,
+            };
+            if !neighbor_satisfied_for_decorate(neighbor, pipeline, terrain, world) {
+                neighbors_ready = false;
+                break;
+            }
+        }
+        if !neighbors_ready {
+            deferred.push(data);
+            continue;
+        }
+
         return Some(data);
     }
     pipeline.deferred_decorate.extend(deferred);
@@ -550,7 +770,7 @@ pub fn pipeline_poll(mut pipeline: ResMut<StreamingPipeline>) {
                 if pipeline.discarded.remove(&pos) {
                     continue;
                 }
-                pipeline.deferred_decorate.push_back(data);
+                pipeline.integrate_terrain.push(data);
             }
             FinishedWork::Decorate { pos, entries } => {
                 pipeline.in_progress.remove(&pos);
@@ -588,20 +808,38 @@ pub fn pipeline_integrate(
         stream.center_z * stagcrest_protocol::CHUNK_SIZE,
     );
 
+    let terrain_batch = pipeline.integrate_terrain.drain(..).collect::<Vec<_>>();
+    for data in terrain_batch {
+        let pos = data.pos;
+        pipeline.pass2_pending.insert(pos, data.clone());
+        let _ = terrain.0.mark_chunk_terrain_ready(pos);
+        if !world.0.is_generated(pos) {
+            world.0.set_blocks(data.entries.clone());
+            world.0.mark_chunk_terrain_ready(pos);
+        }
+        if !terrain.0.is_chunk_generated(pos)
+            && !pipeline.deferred_decorate.iter().any(|d| d.pos == pos)
+            && !pipeline.pass2_in_flight(pos)
+        {
+            pipeline.deferred_decorate.push_back(data);
+        }
+    }
+
     let decorate = pipeline.integrate_decorate.drain(..).collect::<Vec<_>>();
     for (pos, entries) in decorate {
-        if !terrain.0.mark_chunk_generated(pos) {
-            continue;
+        terrain.0.mark_chunk_generated(pos);
+        if !world.0.is_generated(pos) {
+            world.0.set_blocks(entries);
+            world.0.finalize_generated_chunk(pos);
+            if world.0.has_chunk(pos) {
+                mesh_scheduler.request(
+                    pos,
+                    RemeshUrgency::Visible,
+                    chunk_distance_sq_from_block(player_block, pos),
+                );
+            }
         }
-        world.0.set_blocks(entries);
-        world.0.finalize_generated_chunk(pos);
-        if world.0.has_chunk(pos) {
-            mesh_scheduler.request(
-                pos,
-                RemeshUrgency::Visible,
-                chunk_distance_sq_from_block(player_block, pos),
-            );
-        }
+        pipeline.pass2_pending.remove(&pos);
     }
 
     let loads = pipeline.integrate_load.drain(..).collect::<Vec<_>>();
@@ -666,6 +904,21 @@ mod tests {
         assert!(pipeline.enqueue_generate(gen_wins, &terrain));
         assert!(pipeline.pending_generate.iter().any(|&p| p == gen_wins));
         assert!(!pipeline.pending_load.iter().any(|&p| p == gen_wins));
+    }
+
+    #[test]
+    fn pass2_pending_counts_as_in_pipeline() {
+        let pos = ChunkPos { x: 1, y: 0, z: 0 };
+        let mut pipeline = StreamingPipeline::default();
+        pipeline.pass2_pending.insert(
+            pos,
+            ChunkGenData {
+                pos,
+                entries: Vec::new(),
+            },
+        );
+        assert!(pipeline.chunk_in_pipeline(pos));
+        assert_eq!(pipeline.generation_backlog(), 1);
     }
 
     #[test]

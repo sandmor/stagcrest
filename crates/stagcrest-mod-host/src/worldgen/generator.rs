@@ -84,9 +84,9 @@ impl TerrainGenerator {
 
         let placer = FeaturePlacer::new(&self.config, &self.noise, blocks, biomes, self.seed);
         let features = placer.place(snapshot, data.pos, &surface);
-        let mut merged = surface;
-        merged.extend(features);
-        merged
+        let mut populate = surface;
+        populate.extend(features);
+        populate
     }
 }
 
@@ -98,6 +98,7 @@ pub struct ChunkGenData {
 
 pub struct WorldGenState {
     generator: TerrainGenerator,
+    pub terrain_ready_chunks: HashSet<ChunkPos>,
     pub generated_chunks: HashSet<ChunkPos>,
 }
 
@@ -105,6 +106,7 @@ impl WorldGenState {
     pub fn new(seed: WorldSeed) -> Self {
         Self {
             generator: TerrainGenerator::new(seed),
+            terrain_ready_chunks: HashSet::new(),
             generated_chunks: HashSet::new(),
         }
     }
@@ -112,6 +114,7 @@ impl WorldGenState {
     pub fn with_config(seed: WorldSeed, config: TerrainConfig) -> Self {
         Self {
             generator: TerrainGenerator::with_config(seed, config),
+            terrain_ready_chunks: HashSet::new(),
             generated_chunks: HashSet::new(),
         }
     }
@@ -132,15 +135,25 @@ impl WorldGenState {
         self.generator.climate_at(wx, wz)
     }
 
+    pub fn is_chunk_terrain_ready(&self, pos: ChunkPos) -> bool {
+        self.terrain_ready_chunks.contains(&pos) || self.generated_chunks.contains(&pos)
+    }
+
     pub fn is_chunk_generated(&self, pos: ChunkPos) -> bool {
         self.generated_chunks.contains(&pos)
     }
 
+    pub fn mark_chunk_terrain_ready(&mut self, pos: ChunkPos) -> bool {
+        self.terrain_ready_chunks.insert(pos)
+    }
+
     pub fn mark_chunk_generated(&mut self, pos: ChunkPos) -> bool {
+        self.terrain_ready_chunks.insert(pos);
         self.generated_chunks.insert(pos)
     }
 
     pub fn clear_chunk(&mut self, pos: ChunkPos) {
+        self.terrain_ready_chunks.remove(&pos);
         self.generated_chunks.remove(&pos);
     }
 }
@@ -188,6 +201,9 @@ mod tests {
         for pos in positions {
             world.ensure_chunk(pos);
             let data = generator.compute_chunk_density(blocks, pos);
+            world.set_blocks(data.entries.clone());
+            world.mark_chunk_terrain_ready(pos);
+            state.mark_chunk_terrain_ready(pos);
             let snapshot = DecorateSnapshot::capture(&world, pos, air);
             let entries = generator.decorate_chunk_offline(blocks, &biomes, &data, &snapshot);
             world.set_blocks(entries);

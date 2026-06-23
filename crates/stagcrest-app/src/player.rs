@@ -151,6 +151,9 @@ pub fn block_interaction(
     let Some(hit) = hit else { return };
 
     if mouse.just_pressed(MouseButton::Left) {
+        if !world.0.is_generated(hit.block.chunk_pos()) {
+            return;
+        }
         let (id, _) = world.0.get_block(hit.block);
         if ctx
             .registry
@@ -168,6 +171,9 @@ pub fn block_interaction(
             .notify_block_changed(break_pos, &world.0, &ctx.registry);
         request_interactive_remesh(&mut mesh_scheduler, &mut world, break_pos, cam);
     } else if mouse.just_pressed(MouseButton::Right) {
+        if !world.0.is_generated(hit.block.chunk_pos()) {
+            return;
+        }
         let (hit_id, _) = world.0.get_block(hit.block);
         if let Some(def) = ctx.registry.block(hit_id) {
             if stagcrest_circuit::is_repeater(def) {
@@ -192,6 +198,9 @@ pub fn block_interaction(
             hit.block.z + hit.face_normal.z as i32,
         );
         if block_contains_point(place_pos, cam.translation) {
+            return;
+        }
+        if !world.0.is_generated(place_pos.chunk_pos()) {
             return;
         }
         let (existing, _) = world.0.get_block(place_pos);

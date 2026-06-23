@@ -6,10 +6,8 @@ use crate::worldgen::noise::NoiseBank;
 use crate::worldgen::occupancy::OccupancyMap;
 use crate::worldgen::seed::WorldSeed;
 use crate::worldgen::terrain::{ColumnBlocks, SkyIslandSampler};
-use crate::worldgen::trees::place_oak_tree;
+use crate::worldgen::hybrid_tree::HybridTreeGenerator;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
-
-const SKY_ISLAND_TREE_CHANCE: f32 = 0.02;
 
 pub struct FeaturePlacer<'a> {
     config: &'a TerrainConfig,
@@ -105,23 +103,6 @@ impl<'a> FeaturePlacer<'a> {
                         &mut features,
                     );
                 }
-
-                if on_island
-                    && hash_chance(self.seed, wx, wz, FeatureKind::OakTree) < SKY_ISLAND_TREE_CHANCE
-                {
-                    let height = oak_tree_height(self.seed, wx, wz);
-                    place_oak_tree(
-                        wx,
-                        above_y,
-                        wz,
-                        height,
-                        &self.blocks,
-                        snapshot,
-                        &mut occupancy,
-                        &mut features,
-                        self.config,
-                    );
-                }
             }
         }
 
@@ -191,26 +172,21 @@ impl<'a> FeaturePlacer<'a> {
                 occupancy.place(pos, self.blocks.dead_bush);
             }
             FeatureKind::OakTree if is_grass_surface || on_island => {
-                let height = oak_tree_height(self.seed, wx, wz);
-                place_oak_tree(
+                HybridTreeGenerator::place_oak(
                     wx,
                     above_y,
                     wz,
-                    height,
                     &self.blocks,
                     snapshot,
                     occupancy,
                     features,
                     self.config,
+                    self.seed,
                 );
             }
             _ => {}
         }
     }
-}
-
-fn oak_tree_height(seed: WorldSeed, wx: i32, wz: i32) -> i32 {
-    4 + (hash_chance(seed, wx, wz, FeatureKind::OakTree) * 3.0) as i32
 }
 
 fn hash_chance(seed: WorldSeed, wx: i32, wz: i32, kind: FeatureKind) -> f32 {
@@ -315,5 +291,64 @@ mod tests {
         let has_log = features.iter().any(|(_, id, _)| *id == blocks.oak_log);
         let has_leaves = features.iter().any(|(_, id, _)| *id == blocks.oak_leaves);
         assert!(has_log && has_leaves, "oak tree should place logs and leaves");
+    }
+
+    #[test]
+    fn skips_column_when_snapshot_has_cross_chunk_block() {
+        let config = TerrainConfig::default();
+        let noise = NoiseBank::new(WorldSeed(99));
+        let blocks = test_blocks();
+        let reg = test_registry();
+        let mut biomes = BiomeRegistry::default();
+        biomes.register_biome(RegisterBiomeRequest {
+            namespaced_id: "stagcrest:plains".into(),
+            temperature: 0.8,
+            downfall: 0.4,
+            surface_top: "stagcrest:grass_block".into(),
+            surface_under: "stagcrest:dirt".into(),
+            surface_depth: 3,
+            underwater_top: Some("stagcrest:sand".into()),
+        });
+        biomes.register_feature(RegisterBiomeFeatureRequest {
+            biome_id: "stagcrest:plains".into(),
+            feature_kind: FeatureKind::OakTree,
+            chance: 1.0,
+        });
+        biomes.finalize(&reg).unwrap();
+
+        let surface_y = 70;
+        let wx = 5;
+        let wz = 5;
+        let above = surface_y + 1;
+        let mut snapshot = DecorateSnapshot::empty(blocks.air);
+        snapshot.chunk_pos = Some(ChunkPos {
+            x: 0,
+            y: surface_y / CHUNK_SIZE,
+            z: 0,
+        });
+        snapshot
+            .local_chunk_blocks
+            .insert(BlockPos::new(wx, above, wz), blocks.oak_leaves);
+
+        let surface_entries = vec![(
+            BlockPos::new(wx, surface_y, wz),
+            blocks.grass,
+            BlockState(0),
+        )];
+
+        let placer = FeaturePlacer::new(&config, &noise, blocks, &biomes, WorldSeed(1));
+        let features = placer.place(
+            &snapshot,
+            ChunkPos {
+                x: 0,
+                y: surface_y / CHUNK_SIZE,
+                z: 0,
+            },
+            &surface_entries,
+        );
+        assert!(
+            features.is_empty(),
+            "should not place oak when cross-chunk block occupies tree base"
+        );
     }
 }

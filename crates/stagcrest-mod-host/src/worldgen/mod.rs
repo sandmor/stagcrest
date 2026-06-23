@@ -3,6 +3,7 @@ mod caves;
 mod climate;
 mod config;
 mod decorate_snapshot;
+mod hybrid_tree;
 mod features;
 mod generator;
 pub mod noise;
@@ -11,7 +12,6 @@ mod seed;
 #[cfg(test)]
 mod test_fixtures;
 mod terrain;
-mod trees;
 
 pub use biome::{
     register_biome_feature_host, register_biome_host, BiomeRegistry, FeatureKind,

@@ -195,6 +195,11 @@ impl MeshScheduler {
             return false;
         }
 
+        if !world.is_generated(req.pos) {
+            self.pending.remove(&req.pos);
+            return true;
+        }
+
         if !world.has_chunk(req.pos) {
             self.pending.remove(&req.pos);
             return true;
@@ -369,6 +374,10 @@ pub fn mesh_drain_dirty(
             world.0.dirty_chunks.insert(pos);
             continue;
         }
+        if !world.0.is_generated(pos) {
+            world.0.dirty_chunks.insert(pos);
+            continue;
+        }
         if !world.0.has_chunk(pos) {
             world.0.dirty_chunks.insert(pos);
             continue;
@@ -390,6 +399,10 @@ pub fn circuit_flush_mesh(
     let Ok(cam) = camera.single() else { return };
     let dirty = world.0.take_dirty_chunks();
     for pos in dirty {
+        if !world.0.is_generated(pos) {
+            world.0.dirty_chunks.insert(pos);
+            continue;
+        }
         if world.0.has_chunk(pos) {
             scheduler.request(
                 pos,

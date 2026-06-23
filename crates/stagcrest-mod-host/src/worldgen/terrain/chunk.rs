@@ -425,6 +425,14 @@ mod tests {
             y: sea / CHUNK_SIZE,
             z: 0,
         };
+        world.mark_chunk_terrain_ready(chunk_pos);
+        if chunk_pos.y > 0 {
+            world.mark_chunk_terrain_ready(ChunkPos {
+                x: chunk_pos.x,
+                y: chunk_pos.y - 1,
+                z: chunk_pos.z,
+            });
+        }
         let density_entries = vec![
             (BlockPos::new(0, sea, 0), blocks.stone, BlockState(0)),
             (BlockPos::new(0, sea + 1, 0), blocks.stone, BlockState(0)),
@@ -519,9 +527,17 @@ mod tests {
             blocks.dirt,
             BlockState(0),
         );
+        let chunk_pos = ChunkPos { x: 0, y: 4, z: 0 };
+        let above = ChunkPos {
+            x: chunk_pos.x,
+            y: chunk_pos.y + 1,
+            z: chunk_pos.z,
+        };
+        world.mark_chunk_terrain_ready(chunk_pos);
+        world.mark_chunk_terrain_ready(above);
 
         let depth = count_surface_depth(
-            &DecorateSnapshot::capture(&world, ChunkPos { x: 0, y: 4, z: 0 }, air),
+            &DecorateSnapshot::capture(&world, chunk_pos, air),
             &buffer,
             base_y,
             0,
