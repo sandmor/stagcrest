@@ -151,7 +151,7 @@ pub fn block_interaction(
     let Some(hit) = hit else { return };
 
     if mouse.just_pressed(MouseButton::Left) {
-        if !world.0.is_generated(hit.block.chunk_pos()) {
+        if !world.0.is_chunk_interactive(hit.block.chunk_pos()) {
             return;
         }
         let (id, _) = world.0.get_block(hit.block);
@@ -171,7 +171,7 @@ pub fn block_interaction(
             .notify_block_changed(break_pos, &world.0, &ctx.registry);
         request_interactive_remesh(&mut mesh_scheduler, &mut world, break_pos, cam);
     } else if mouse.just_pressed(MouseButton::Right) {
-        if !world.0.is_generated(hit.block.chunk_pos()) {
+        if !world.0.is_chunk_interactive(hit.block.chunk_pos()) {
             return;
         }
         let (hit_id, _) = world.0.get_block(hit.block);
@@ -200,7 +200,7 @@ pub fn block_interaction(
         if block_contains_point(place_pos, cam.translation) {
             return;
         }
-        if !world.0.is_generated(place_pos.chunk_pos()) {
+        if !world.0.is_chunk_interactive(place_pos.chunk_pos()) {
             return;
         }
         let (existing, _) = world.0.get_block(place_pos);

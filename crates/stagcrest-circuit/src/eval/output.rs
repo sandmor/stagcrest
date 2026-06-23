@@ -12,6 +12,9 @@ pub fn neighbor_output_into(
     world_blocks: &World,
     registry: &BlockRegistry,
 ) -> u8 {
+    if !world_blocks.is_chunk_interactive(source.chunk_pos()) {
+        return 0;
+    }
     let (id, state) = world_blocks.get_block(source);
     let Some(def) = registry.block(id) else {
         return 0;

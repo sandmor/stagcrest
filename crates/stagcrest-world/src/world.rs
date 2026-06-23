@@ -75,6 +75,12 @@ impl World {
         self.is_generated(pos)
     }
 
+    /// Chunks visible to player interaction, circuits, and similar gameplay systems.
+    /// Requires the chunk to be loaded and fully populated (pass-2 complete).
+    pub fn is_chunk_interactive(&self, pos: ChunkPos) -> bool {
+        self.has_chunk(pos) && self.is_generated(pos)
+    }
+
     pub fn ensure_chunk(&mut self, pos: ChunkPos) {
         self.arena.ensure_inactive(pos, self.air);
     }
@@ -378,6 +384,31 @@ mod tests {
         world.set_blocks([(BlockPos::new(0, 0, 0), stone, BlockState(0))]);
         assert_eq!(world.dirty_chunks.len(), 7);
         assert!(world.dirty_chunks.contains(&chunk));
+    }
+
+    #[test]
+    fn terrain_ready_chunk_is_not_interactive() {
+        let air = BlockId(0);
+        let stone = BlockId(1);
+        let mut world = World::new(air);
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        world.set_blocks([(BlockPos::new(0, 0, 0), stone, BlockState(0))]);
+        world.mark_chunk_terrain_ready(pos);
+        assert!(world.has_chunk(pos));
+        assert!(world.is_terrain_ready(pos));
+        assert!(!world.is_generated(pos));
+        assert!(!world.is_chunk_interactive(pos));
+    }
+
+    #[test]
+    fn populated_chunk_is_interactive() {
+        let air = BlockId(0);
+        let stone = BlockId(1);
+        let mut world = World::new(air);
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        world.set_blocks([(BlockPos::new(0, 0, 0), stone, BlockState(0))]);
+        world.finalize_generated_chunk(pos);
+        assert!(world.is_chunk_interactive(pos));
     }
 
     #[test]

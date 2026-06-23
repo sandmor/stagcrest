@@ -41,7 +41,7 @@ pub fn update_block_target(
     let air = world.0.air();
 
     target.hit = stagcrest_world::raycast_blocks(origin, dir, 8.0, |pos| {
-        if !world.0.is_generated(pos.chunk_pos()) {
+        if !world.0.is_chunk_interactive(pos.chunk_pos()) {
             return false;
         }
         let (id, _) = world.0.get_block(pos);

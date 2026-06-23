@@ -12,6 +12,19 @@ const MAX_GEN_IN_FLIGHT: usize = 80;
 const MAX_IO_IN_FLIGHT: usize = 8;
 const QUEUE_REFILL: usize = 256;
 
+/// Vertical chunk span for streaming. Extends above terrain `y_bounds` when the
+/// player flies higher so air chunks still generate instead of leaving a void.
+fn stream_vertical_y_range(
+    center_y: i32,
+    vertical_radius: i32,
+    y_bounds: &std::ops::RangeInclusive<i32>,
+) -> Option<(i32, i32)> {
+    let y_min = (center_y - vertical_radius).max(*y_bounds.start());
+    let y_cap = (*y_bounds.end()).max(center_y);
+    let y_max = (center_y + vertical_radius).min(y_cap);
+    (y_min <= y_max).then_some((y_min, y_max))
+}
+
 #[derive(Resource, Clone, Copy)]
 pub struct TerrainBlocks(pub ColumnBlocks);
 
@@ -58,10 +71,22 @@ pub struct StreamingPipeline {
 }
 
 impl StreamingPipeline {
-    pub fn enqueue_generate(&mut self, pos: ChunkPos, terrain: &WorldGenState) -> bool {
-        if terrain.is_chunk_generated(pos)
-            || terrain.is_chunk_terrain_ready(pos)
-            || self.in_progress.contains(&pos)
+    pub fn enqueue_generate(
+        &mut self,
+        pos: ChunkPos,
+        terrain: &mut WorldGenState,
+        world: &stagcrest_world::World,
+    ) -> bool {
+        if world.has_chunk(pos) {
+            if terrain.is_chunk_generated(pos)
+                || terrain.is_chunk_terrain_ready(pos)
+            {
+                return false;
+            }
+        } else {
+            terrain.clear_chunk(pos);
+        }
+        if self.in_progress.contains(&pos)
             || self.pending_generate.iter().any(|&p| p == pos)
             || self.deferred_decorate.iter().any(|d| d.pos == pos)
         {
@@ -126,8 +151,11 @@ impl StreamingPipeline {
         }
         // Recover chunks that have terrain in world but no cached density (e.g. after reload).
         if requeued == 0 {
-            let y_min = (stream.center_y - vertical_radius).max(*y_bounds.start());
-            let y_max = (stream.center_y + vertical_radius).min(*y_bounds.end());
+            let Some((y_min, y_max)) =
+                stream_vertical_y_range(stream.center_y, vertical_radius, &y_bounds)
+            else {
+                return requeued;
+            };
             for cy in y_min..=y_max {
                 for cx in (stream.center_x - horizontal_radius)..=(stream.center_x + horizontal_radius)
                 {
@@ -172,7 +200,7 @@ impl StreamingPipeline {
 
     pub fn enqueue_area(
         &mut self,
-        terrain: &WorldGenState,
+        terrain: &mut WorldGenState,
         stored_chunks: &mut HashSet<ChunkPos>,
         storage: &dyn stagcrest_storage::ChunkStorage,
         world: &stagcrest_world::World,
@@ -182,8 +210,10 @@ impl StreamingPipeline {
         y_bounds: std::ops::RangeInclusive<i32>,
         player_block: BlockPos,
     ) {
-        let y_min = (center.y - vertical_radius).max(*y_bounds.start());
-        let y_max = (center.y + vertical_radius).min(*y_bounds.end());
+        let Some((y_min, y_max)) = stream_vertical_y_range(center.y, vertical_radius, &y_bounds)
+        else {
+            return;
+        };
         let mut gen_candidates = Vec::new();
         let mut load_candidates = Vec::new();
         for cx in (center.x - horizontal_radius)..=(center.x + horizontal_radius) {
@@ -208,7 +238,7 @@ impl StreamingPipeline {
         gen_candidates.sort_by_key(|(key, _)| *key);
         load_candidates.sort_by_key(|(key, _)| *key);
         for (_, pos) in gen_candidates {
-            self.enqueue_generate(pos, terrain);
+            self.enqueue_generate(pos, terrain, world);
         }
         for (_, pos) in load_candidates {
             self.enqueue_load(pos);
@@ -223,13 +253,25 @@ impl StreamingPipeline {
         storage: &dyn stagcrest_storage::ChunkStorage,
         world: &stagcrest_world::World,
     ) -> bool {
+        if self.chunk_in_pipeline(pos) {
+            return false;
+        }
+
+        if !world.has_chunk(pos) {
+            if stored_chunks.contains(&pos) {
+                return false;
+            }
+            if storage.contains(pos) {
+                stored_chunks.insert(pos);
+                return false;
+            }
+            return true;
+        }
+
         if world.is_generated(pos)
             || world.is_terrain_ready(pos)
             || terrain.is_chunk_generated(pos)
             || terrain.is_chunk_terrain_ready(pos)
-            || self.in_progress.contains(&pos)
-            || self.pending_generate.iter().any(|&p| p == pos)
-            || self.deferred_decorate.iter().any(|d| d.pos == pos)
         {
             return false;
         }
@@ -267,6 +309,7 @@ impl StreamingPipeline {
         self.in_progress.contains(&pos)
             || self.pending_generate.iter().any(|&p| p == pos)
             || self.pending_load.iter().any(|&p| p == pos)
+            || self.pending_persist.iter().any(|&(p, _)| p == pos)
             || self.deferred_decorate.iter().any(|d| d.pos == pos)
             || self.integrate_terrain.iter().any(|d| d.pos == pos)
             || self.pass2_pending.contains_key(&pos)
@@ -418,17 +461,11 @@ pub fn pipeline_streaming(
             cache.0.remove(pos);
             pipeline.cancel_chunk(pos);
             mesh_scheduler.cancel(pos);
+            terrain.0.clear_chunk(pos);
             continue;
         }
         cache.0.remove(pos);
-        #[cfg(target_arch = "wasm32")]
         terrain.0.clear_chunk(pos);
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            if !session.stored_chunks.contains(&pos) {
-                terrain.0.clear_chunk(pos);
-            }
-        }
         pipeline.cancel_chunk(pos);
         mesh_scheduler.cancel(pos);
     }
@@ -447,7 +484,7 @@ pub fn pipeline_streaming(
     }
     if center_changed || pipeline.generation_backlog() < QUEUE_REFILL {
         pipeline.enqueue_area(
-            &terrain.0,
+            &mut terrain.0,
             &mut session.stored_chunks,
             storage.as_ref(),
             &world.0,
@@ -476,7 +513,7 @@ pub fn pipeline_streaming(
 
 pub fn pipeline_dispatch(
     mut pipeline: ResMut<StreamingPipeline>,
-    terrain: Res<crate::game::TerrainGen>,
+    mut terrain: ResMut<crate::game::TerrainGen>,
     blocks: Option<Res<TerrainBlocks>>,
     biomes: Option<Res<TerrainBiomes>>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
@@ -495,7 +532,7 @@ pub fn pipeline_dispatch(
     {
         if !dispatch_one(
             &mut pipeline,
-            &terrain,
+            &mut terrain,
             &blocks,
             &biomes,
             &world,
@@ -510,7 +547,7 @@ pub fn pipeline_dispatch(
 
 fn dispatch_one(
     pipeline: &mut StreamingPipeline,
-    terrain: &crate::game::TerrainGen,
+    terrain: &mut crate::game::TerrainGen,
     blocks: &TerrainBlocks,
     biomes: &TerrainBiomes,
     world: &crate::game::StagcrestWorldResource,
@@ -571,12 +608,16 @@ fn dispatch_one(
         }
 
         if let Some(pos) = pipeline.pending_generate.pop_front() {
-            if terrain.0.is_chunk_generated(pos)
-                || world.0.is_generated(pos)
-                || terrain.0.is_chunk_terrain_ready(pos)
-                || world.0.is_terrain_ready(pos)
-            {
-                return true;
+            if world.0.has_chunk(pos) {
+                if terrain.0.is_chunk_generated(pos)
+                    || world.0.is_generated(pos)
+                    || terrain.0.is_chunk_terrain_ready(pos)
+                    || world.0.is_terrain_ready(pos)
+                {
+                    return true;
+                }
+            } else {
+                terrain.0.clear_chunk(pos);
             }
             pipeline.in_progress.insert(pos);
             pipeline.gen_in_flight += 1;
@@ -860,7 +901,12 @@ pub fn pipeline_integrate(
                     );
                 }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                if let Some(session) = session.as_mut() {
+                    session.stored_chunks.remove(&pos);
+                }
+                pipeline.enqueue_generate(pos, &mut terrain.0, &world.0);
+            }
             Err(err) => {
                 tracing::error!("failed to load chunk {pos:?}: {err}");
                 pipeline.enqueue_load(pos);
@@ -890,18 +936,51 @@ mod tests {
     use stagcrest_mod_host::WorldSeed;
 
     #[test]
+    fn stream_vertical_y_range_extends_above_terrain_cap() {
+        let bounds = 0..=10;
+        let (y_min, y_max) = stream_vertical_y_range(15, 4, &bounds).unwrap();
+        assert_eq!(y_min, 11);
+        assert_eq!(y_max, 15);
+        let (y_min, y_max) = stream_vertical_y_range(10, 4, &bounds).unwrap();
+        assert_eq!(y_min, 6);
+        assert_eq!(y_max, 10);
+    }
+
+    #[test]
+    fn should_generate_when_terrain_stale_but_chunk_evicted() {
+        let mut terrain = WorldGenState::new(WorldSeed(1));
+        let pos = ChunkPos { x: 2, y: 1, z: -3 };
+        terrain.mark_chunk_terrain_ready(pos);
+        let air = stagcrest_protocol::BlockId(0);
+        let world = stagcrest_world::World::new(air);
+        let pipeline = StreamingPipeline::default();
+        let mut stored = HashSet::new();
+        let storage = stagcrest_storage::NullChunkStorage;
+        assert!(pipeline.should_generate(
+            pos,
+            &terrain,
+            &mut stored,
+            &storage,
+            &world,
+        ));
+    }
+
+    #[test]
     fn generate_and_load_queues_are_mutually_exclusive() {
         let terrain = WorldGenState::new(WorldSeed(1));
+        let air = stagcrest_protocol::BlockId(0);
+        let world = stagcrest_world::World::new(air);
         let load_wins = ChunkPos { x: 3, y: 0, z: -2 };
         let mut pipeline = StreamingPipeline::default();
-        assert!(pipeline.enqueue_generate(load_wins, &terrain));
+        let mut terrain = terrain;
+        assert!(pipeline.enqueue_generate(load_wins, &mut terrain, &world));
         assert!(pipeline.enqueue_load(load_wins));
         assert!(pipeline.pending_load.iter().any(|&p| p == load_wins));
         assert!(!pipeline.pending_generate.iter().any(|&p| p == load_wins));
 
         let gen_wins = ChunkPos { x: 4, y: 0, z: -2 };
         assert!(pipeline.enqueue_load(gen_wins));
-        assert!(pipeline.enqueue_generate(gen_wins, &terrain));
+        assert!(pipeline.enqueue_generate(gen_wins, &mut terrain, &world));
         assert!(pipeline.pending_generate.iter().any(|&p| p == gen_wins));
         assert!(!pipeline.pending_load.iter().any(|&p| p == gen_wins));
     }

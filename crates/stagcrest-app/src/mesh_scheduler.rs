@@ -145,6 +145,14 @@ impl MeshScheduler {
         for pos in out_of_stream {
             self.cancel(pos);
         }
+        self.rebuild_heap_from_pending();
+    }
+
+    fn rebuild_heap_from_pending(&mut self) {
+        self.heap.clear();
+        for req in self.pending.values() {
+            self.heap.push(*req);
+        }
     }
 
     fn pop_next(&mut self) -> Option<MeshRequest> {
@@ -152,10 +160,7 @@ impl MeshScheduler {
             let Some(current) = self.pending.get(&req.pos) else {
                 continue;
             };
-            if current.version != req.version
-                || current.urgency != req.urgency
-                || current.distance_sq != req.distance_sq
-            {
+            if current.version != req.version {
                 continue;
             }
             return Some(*current);
@@ -179,57 +184,75 @@ impl MeshScheduler {
             return false;
         }
 
-        let Some(req) = self.pop_next() else {
-            return false;
-        };
+        let mut deferred = Vec::new();
+        let mut rebuilt_heap = false;
 
-        if self.in_progress.contains(&req.pos) {
-            self.heap.push(req);
-            return false;
-        }
+        for _ in 0..64 {
+            let Some(req) = self.pop_next() else {
+                if !self.pending.is_empty() && !rebuilt_heap {
+                    self.rebuild_heap_from_pending();
+                    rebuilt_heap = true;
+                    continue;
+                }
+                break;
+            };
 
-        if Self::counts_toward_dispatch_cap(req.urgency)
-            && self.background_dispatched_this_frame >= MAX_BACKGROUND_DISPATCH_PER_FRAME
-        {
-            self.heap.push(req);
-            return false;
-        }
+            if self.in_progress.contains(&req.pos) {
+                deferred.push(req);
+                continue;
+            }
 
-        if !world.is_generated(req.pos) {
+            if Self::counts_toward_dispatch_cap(req.urgency)
+                && self.background_dispatched_this_frame >= MAX_BACKGROUND_DISPATCH_PER_FRAME
+            {
+                deferred.push(req);
+                continue;
+            }
+
+            if !world.is_generated(req.pos) {
+                deferred.push(req);
+                continue;
+            }
+
+            if !world.has_chunk(req.pos) {
+                deferred.push(req);
+                continue;
+            }
+
+            let Some(snapshot) = capture_mesh_snapshot(
+                req.pos,
+                world,
+                ctx,
+                circuit,
+                colormaps,
+                terrain,
+            ) else {
+                deferred.push(req);
+                continue;
+            };
+
+            if Self::counts_toward_dispatch_cap(req.urgency) {
+                self.background_dispatched_this_frame += 1;
+            }
+
             self.pending.remove(&req.pos);
+            self.in_progress.insert(req.pos);
+            self.mesh_in_flight += 1;
+            self.tasks.push(MeshInFlight {
+                pos: req.pos,
+                expected_version: req.version,
+                task: cpu_pool().spawn(async move { build_chunk_mesh_snapshot(&snapshot) }),
+            });
+            for req in deferred {
+                self.heap.push(req);
+            }
             return true;
         }
 
-        if !world.has_chunk(req.pos) {
-            self.pending.remove(&req.pos);
-            return true;
-        }
-
-        let Some(snapshot) = capture_mesh_snapshot(
-            req.pos,
-            world,
-            ctx,
-            circuit,
-            colormaps,
-            terrain,
-        ) else {
+        for req in deferred {
             self.heap.push(req);
-            return false;
-        };
-
-        if Self::counts_toward_dispatch_cap(req.urgency) {
-            self.background_dispatched_this_frame += 1;
         }
-
-        self.pending.remove(&req.pos);
-        self.in_progress.insert(req.pos);
-        self.mesh_in_flight += 1;
-        self.tasks.push(MeshInFlight {
-            pos: req.pos,
-            expected_version: req.version,
-            task: cpu_pool().spawn(async move { build_chunk_mesh_snapshot(&snapshot) }),
-        });
-        true
+        false
     }
 
     pub fn poll(&mut self) {
@@ -336,6 +359,7 @@ pub fn mesh_dispatch(
 ) {
     let Some(ctx) = mod_ctx else { return };
     scheduler.background_dispatched_this_frame = 0;
+    scheduler.rebuild_heap_from_pending();
     let mut spins = 0;
     while spins < 64 && scheduler.dispatch_one(
         &world.0,
@@ -358,6 +382,51 @@ pub fn mesh_commit_meshes(
 ) {
     while let Some((pos, mesh)) = scheduler.ready_meshes.pop_front() {
         cache.0.commit_mesh(pos, mesh);
+    }
+}
+
+pub fn mesh_recover_unmeshed(
+    world: Res<crate::game::StagcrestWorldResource>,
+    cache: Res<stagcrest_render::MeshCacheResource>,
+    mut scheduler: ResMut<MeshScheduler>,
+    stream: Res<crate::streaming_pipeline::TerrainStreamState>,
+    config: Res<crate::game::GameConfig>,
+    mut tick: Local<u32>,
+) {
+    *tick = tick.wrapping_add(1);
+    if *tick % 60 != 0 || !stream.valid {
+        return;
+    }
+
+    let h = config.render_distance;
+    let v = config.vertical_render_distance;
+    let player_block = BlockPos::new(
+        stream.center_x * stagcrest_protocol::CHUNK_SIZE,
+        stream.center_y * stagcrest_protocol::CHUNK_SIZE,
+        stream.center_z * stagcrest_protocol::CHUNK_SIZE,
+    );
+
+    for pos in world.0.loaded_chunk_positions() {
+        if (pos.x - stream.center_x).abs() > h
+            || (pos.z - stream.center_z).abs() > h
+            || (pos.y - stream.center_y).abs() > v
+        {
+            continue;
+        }
+        if !world.0.is_generated(pos) || !world.0.has_chunk(pos) {
+            continue;
+        }
+        if cache.0.get(pos).is_some() {
+            continue;
+        }
+        if scheduler.pending.contains_key(&pos) || scheduler.in_progress.contains(&pos) {
+            continue;
+        }
+        scheduler.request(
+            pos,
+            RemeshUrgency::Visible,
+            chunk_distance_sq_from_block(player_block, pos),
+        );
     }
 }
 
@@ -479,5 +548,34 @@ mod tests {
 
         assert!(sched.ready_meshes.is_empty());
         assert_eq!(sched.mesh_version.get(&pos), Some(&2));
+    }
+
+    #[test]
+    fn dispatch_defers_unfinished_chunk() {
+        use crate::game::ModContext;
+        use stagcrest_mod_host::{BlockRegistry, ModHost, ModelRegistry, TextureAtlas};
+        use stagcrest_protocol::{BlockId, BlockPos, BlockState};
+
+        let mut sched = MeshScheduler::default();
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        sched.request(pos, RemeshUrgency::Visible, 0);
+
+        let air = BlockId(0);
+        let stone = BlockId(1);
+        let mut world = stagcrest_world::World::new(air);
+        world.set_blocks([(BlockPos::new(0, 0, 0), stone, BlockState(0))]);
+        world.mark_chunk_terrain_ready(pos);
+        assert!(world.has_chunk(pos));
+        assert!(!world.is_generated(pos));
+
+        let ctx = ModContext {
+            host: ModHost::new(),
+            atlas: TextureAtlas::build(std::iter::empty()),
+            registry: BlockRegistry::new(),
+            models: ModelRegistry::new(),
+        };
+
+        assert!(!sched.dispatch_one(&world, &ctx, None, None, None));
+        assert!(sched.pending.contains_key(&pos));
     }
 }

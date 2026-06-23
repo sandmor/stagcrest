@@ -83,7 +83,8 @@ impl MeshCache {
 
     pub fn remove(&mut self, pos: ChunkPos) {
         self.meshes.remove(&pos);
-        self.dirty.remove(&pos);
+        // Mark dirty so the render sync despawns GPU entities for this chunk.
+        self.dirty.insert(pos);
     }
 }
 

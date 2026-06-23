@@ -97,6 +97,9 @@ impl CircuitWorld {
     }
 
     fn evaluate_node(&mut self, pos: BlockPos, world: &mut World, registry: &BlockRegistry) {
+        if !world.is_chunk_interactive(pos.chunk_pos()) {
+            return;
+        }
         let (id, state) = world.get_block(pos);
         let Some(def) = registry.block(id) else {
             return;
@@ -169,6 +172,9 @@ impl CircuitWorld {
         registry: &BlockRegistry,
     ) {
         for npos in crate::neighbors(pos) {
+            if !world.is_chunk_interactive(npos.chunk_pos()) {
+                continue;
+            }
             let (nid, _) = world.get_block(npos);
             if registry.block(nid).and_then(|d| d.circuit).is_some() {
                 self.queue.enqueue_evaluate(npos);
@@ -310,18 +316,55 @@ mod tests {
         }
     }
 
+    fn populate_chunks(world: &mut World, blocks: &[BlockPos]) {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        for pos in blocks {
+            let cpos = pos.chunk_pos();
+            if seen.insert(cpos) {
+                world.finalize_generated_chunk(cpos);
+            }
+        }
+    }
+
+    #[test]
+    fn terrain_ready_wire_not_evaluated() {
+        let (reg, source, wire, _, _, _, _) = setup_registry();
+        let mut world = World::new(BlockId(0));
+        let mut circuit = CircuitWorld::new();
+        let source_pos = BlockPos::new(0, 0, 0);
+        let wire_pos = BlockPos::new(stagcrest_protocol::CHUNK_SIZE, 0, 0);
+
+        world.set_block(source_pos, source, BlockState(0));
+        world.set_block(wire_pos, wire, BlockState(0));
+        populate_chunks(&mut world, &[source_pos]);
+        world.mark_chunk_terrain_ready(wire_pos.chunk_pos());
+        assert!(!world.is_chunk_interactive(wire_pos.chunk_pos()));
+
+        circuit.queue_update(wire_pos);
+        circuit.tick(&mut world, &reg);
+        assert_eq!(circuit.power_at(wire_pos), 0);
+    }
+
     #[test]
     fn wire_falloff_chain() {
         let (reg, source, wire, _, _, _, _) = setup_registry();
         let mut world = World::new(BlockId(0));
         let mut circuit = CircuitWorld::new();
 
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(BlockPos::new(2, 0, 0), wire, BlockState(0));
-        world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
+        let blocks = [
+            BlockPos::new(0, 0, 0),
+            BlockPos::new(1, 0, 0),
+            BlockPos::new(2, 0, 0),
+            BlockPos::new(3, 0, 0),
+        ];
+        world.set_block(blocks[0], source, BlockState(0));
+        world.set_block(blocks[1], wire, BlockState(0));
+        world.set_block(blocks[2], wire, BlockState(0));
+        world.set_block(blocks[3], wire, BlockState(0));
+        populate_chunks(&mut world, &blocks);
 
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
+        circuit.notify_block_changed(blocks[0], &world, &reg);
         settle(&mut circuit, &mut world, &reg, 4);
 
         assert_eq!(circuit.power_at(BlockPos::new(1, 0, 0)), 14);
@@ -338,6 +381,14 @@ mod tests {
         world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
         world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
         world.set_block(BlockPos::new(2, 0, 0), inverter, BlockState(0));
+        populate_chunks(
+            &mut world,
+            &[
+                BlockPos::new(0, 0, 0),
+                BlockPos::new(1, 0, 0),
+                BlockPos::new(2, 0, 0),
+            ],
+        );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
         settle(&mut circuit, &mut world, &reg, 4);
@@ -353,6 +404,10 @@ mod tests {
 
         world.set_block(BlockPos::new(0, 0, 0), switch, BlockState(1));
         world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
+        populate_chunks(
+            &mut world,
+            &[BlockPos::new(0, 0, 0), BlockPos::new(1, 0, 0)],
+        );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
         settle(&mut circuit, &mut world, &reg, 2);
@@ -370,6 +425,15 @@ mod tests {
         world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
         world.set_block(BlockPos::new(2, 0, 0), delay, BlockState(0));
         world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
+        populate_chunks(
+            &mut world,
+            &[
+                BlockPos::new(0, 0, 0),
+                BlockPos::new(1, 0, 0),
+                BlockPos::new(2, 0, 0),
+                BlockPos::new(3, 0, 0),
+            ],
+        );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
         settle(&mut circuit, &mut world, &reg, 1);
@@ -394,6 +458,15 @@ mod tests {
             repeater_state(false, Facing::East, 2),
         );
         world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
+        populate_chunks(
+            &mut world,
+            &[
+                BlockPos::new(0, 0, 0),
+                BlockPos::new(1, 0, 0),
+                BlockPos::new(2, 0, 0),
+                BlockPos::new(3, 0, 0),
+            ],
+        );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
         settle(&mut circuit, &mut world, &reg, 1);
@@ -417,6 +490,14 @@ mod tests {
             repeater_pos,
             repeater,
             repeater_state(false, Facing::East, 2),
+        );
+        populate_chunks(
+            &mut world,
+            &[
+                BlockPos::new(0, 0, 0),
+                BlockPos::new(1, 0, 0),
+                repeater_pos,
+            ],
         );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
@@ -442,6 +523,7 @@ mod tests {
             repeater_state(false, Facing::East, 2),
         );
         world.set_block(BlockPos::new(3, 0, 0), source, BlockState(0));
+        populate_chunks(&mut world, &[repeater_pos, BlockPos::new(3, 0, 0)]);
 
         circuit.notify_block_changed(BlockPos::new(3, 0, 0), &world, &reg);
         settle(&mut circuit, &mut world, &reg, 8);
@@ -464,6 +546,15 @@ mod tests {
             repeater_state(false, Facing::East, 2),
         );
         world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
+        populate_chunks(
+            &mut world,
+            &[
+                BlockPos::new(0, 0, 0),
+                BlockPos::new(1, 0, 0),
+                repeater_pos,
+                BlockPos::new(3, 0, 0),
+            ],
+        );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
         settle(&mut circuit, &mut world, &reg, 3);

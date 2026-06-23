@@ -125,7 +125,7 @@ fn apply_loaded_content(
 
     let lru_cap = streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
     let world = StagcrestWorldResource(stagcrest_world::World::with_lru_capacity(lru_cap, air));
-    let terrain = WorldGenState::new(WorldSeed(config.world_seed));
+    let mut terrain = WorldGenState::new(WorldSeed(config.world_seed));
     let mut session = WorldSession::open("default").expect("open world storage");
     let spawn = BlockPos::new(8, SEA_LEVEL + 16, 8);
     let spawn_chunk = spawn.chunk_pos();
@@ -134,7 +134,7 @@ fn apply_loaded_content(
     let y_bounds = world_chunk_y_bounds(terrain.config());
     let mut pipeline = StreamingPipeline::default();
     pipeline.enqueue_area(
-        &terrain,
+        &mut terrain,
         &mut session.stored_chunks,
         session.storage.as_ref(),
         &world.0,

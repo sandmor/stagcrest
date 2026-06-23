@@ -1,6 +1,6 @@
 use crate::mesh_scheduler::{
     circuit_flush_mesh, mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll,
-    MeshScheduler,
+    mesh_recover_unmeshed, MeshScheduler,
 };
 use crate::streaming_pipeline::{
     pipeline_dispatch, pipeline_integrate, pipeline_poll, pipeline_streaming, StreamingPipeline,
@@ -108,19 +108,23 @@ impl Plugin for GamePlugin {
                     block_outline::sync_block_outline.run_if(in_state(AppState::InGame)),
                     circuit_tick.run_if(in_state(AppState::InGame)),
                     circuit_flush_mesh.after(circuit_tick).run_if(in_state(AppState::InGame)),
-                    mesh_dispatch
-                        .after(circuit_flush_mesh)
-                        .run_if(in_state(AppState::InGame)),
                     mesh_drain_dirty
-                        .after(mesh_dispatch)
+                        .after(circuit_flush_mesh)
                         .run_if(in_state(AppState::InGame)),
                     pipeline_streaming.run_if(in_state(AppState::InGame)),
                     pipeline_dispatch.run_if(in_state(AppState::InGame)),
                     pipeline_poll.run_if(in_state(AppState::InGame)),
                     pipeline_integrate.run_if(in_state(AppState::InGame)),
+                    mesh_dispatch
+                        .after(pipeline_integrate)
+                        .run_if(in_state(AppState::InGame)),
                     mesh_poll.run_if(in_state(AppState::InGame)),
                     mesh_commit_meshes
                         .before(stagcrest_render::sync_chunk_meshes)
+                        .run_if(in_state(AppState::InGame)),
+                    mesh_recover_unmeshed
+                        .after(pipeline_integrate)
+                        .before(mesh_dispatch)
                         .run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
                 ),
