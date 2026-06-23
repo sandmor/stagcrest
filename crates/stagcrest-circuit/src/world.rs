@@ -149,7 +149,7 @@ impl CircuitWorld {
             kind,
             CircuitKind::Wire { .. } | CircuitKind::Delay { .. } | CircuitKind::Repeater { .. }
         ) {
-            world.mark_dirty_and_neighbors(pos);
+            world.mark_dirty_face_neighbors(pos.chunk_pos());
         }
 
         if new_power == 0 {

@@ -5,6 +5,9 @@
 .DS_Store
 mods/**/*.wasm
 
+# Local world saves (native persistence)
+/worlds/
+
 # Local Minecraft-format resource packs (not shipped in the repo).
 /resourcepacks/*
 !/resourcepacks/.gitkeep

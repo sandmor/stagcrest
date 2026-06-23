@@ -1,4 +1,5 @@
 mod block_model;
+mod mesh_snapshot;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -12,11 +13,14 @@ use stagcrest_protocol::{
     fluid_flowing, BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TextureId,
     TintKind, CHUNK_SIZE,
 };
-use stagcrest_world::{ChunkBlock, ChunkView, World};
+use stagcrest_world::ChunkBlock;
 use std::collections::{HashMap, HashSet};
 
 pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
+};
+pub use mesh_snapshot::{
+    capture_power_grid, MeshClimateSnapshot, MeshSnapshot,
 };
 
 #[repr(C)]
@@ -60,52 +64,9 @@ impl MeshCache {
         self.meshes.get(&pos)
     }
 
-    pub fn rebuild_dirty(
-        &mut self,
-        world: &World,
-        registry: &BlockRegistry,
-        models: &ModelRegistry,
-        power: Option<&dyn PowerLookup>,
-        climate: Option<&MeshClimateTint<'_>>,
-        dirty: impl IntoIterator<Item = ChunkPos>,
-    ) {
-        let dirty: Vec<_> = dirty.into_iter().collect();
-        #[cfg(feature = "parallel")]
-        {
-            use rayon::prelude::*;
-            let built: Vec<_> = dirty
-                .par_iter()
-                .filter_map(|&pos| {
-                    world.chunk_view(pos).map(|_| {
-                        (
-                            pos,
-                            build_chunk_mesh(
-                                pos,
-                                world,
-                                registry,
-                                models,
-                                power,
-                                climate,
-                            ),
-                        )
-                    })
-                })
-                .collect();
-            for (pos, mesh) in built {
-                self.meshes.insert(pos, mesh);
-                self.dirty.insert(pos);
-            }
-        }
-        #[cfg(not(feature = "parallel"))]
-        {
-            for pos in dirty {
-                if world.chunk_view(pos).is_some() {
-                    let mesh = build_chunk_mesh(pos, world, registry, models, power, climate);
-                    self.meshes.insert(pos, mesh);
-                    self.dirty.insert(pos);
-                }
-            }
-        }
+    pub fn commit_mesh(&mut self, pos: ChunkPos, mesh: ChunkMesh) {
+        self.meshes.insert(pos, mesh);
+        self.dirty.insert(pos);
     }
 
     pub fn meshes(&self) -> &HashMap<ChunkPos, ChunkMesh> {
@@ -281,7 +242,7 @@ fn build_column_tint_cache(
     grid
 }
 
-fn fluid_flow_textures(
+pub(crate) fn fluid_flow_textures(
     mut faces: stagcrest_protocol::BlockFaceTextures,
     flow_tex: TextureId,
 ) -> stagcrest_protocol::BlockFaceTextures {
@@ -297,44 +258,33 @@ fn fluid_flow_textures(
     faces
 }
 
-fn build_chunk_mesh(
+pub fn build_chunk_mesh_snapshot(snapshot: &MeshSnapshot) -> ChunkMesh {
+    mesh_snapshot::mesh_from_snapshot(snapshot)
+}
+
+pub(crate) fn build_chunk_mesh_neighbors(
     chunk_pos: ChunkPos,
-    world: &World,
+    air: BlockId,
     registry: &BlockRegistry,
     models: &ModelRegistry,
     power: Option<&dyn PowerLookup>,
     climate: Option<&MeshClimateTint<'_>>,
+    neighbor_at: impl Fn(i32, i32, i32) -> Option<ChunkBlock>,
 ) -> ChunkMesh {
-    let Some(center) = world.chunk_view(chunk_pos) else {
-        return ChunkMesh::default();
-    };
-
     let mut mesh = ChunkMesh::default();
     let base_x = chunk_pos.x * CHUNK_SIZE;
     let base_y = chunk_pos.y * CHUNK_SIZE;
     let base_z = chunk_pos.z * CHUNK_SIZE;
-
-    let neighbor_at =
-        |lx: i32, ly: i32, lz: i32| -> Option<ChunkBlock> {
-            world.get_block_if_loaded(BlockPos::new(
-                base_x + lx,
-                base_y + ly,
-                base_z + lz,
-            ))
-        };
 
     let column_tints = climate.map(|ctx| build_column_tint_cache(base_x, base_z, ctx));
 
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                let local = stagcrest_protocol::LocalBlockPos {
-                    x: x as u8,
-                    y: y as u8,
-                    z: z as u8,
+                let Some(block) = neighbor_at(x, y, z) else {
+                    continue;
                 };
-                let block = center.get(local);
-                if block.id == world.air() {
+                if block.id == air {
                     continue;
                 }
                 let Some(def) = registry.block(block.id) else {
@@ -367,7 +317,7 @@ fn build_chunk_mesh(
                         let Some(neighbor) = neighbor_at(x + dx, y, z + dz) else {
                             return false;
                         };
-                        neighbor.id != world.air()
+                        neighbor.id != air
                             && is_dust_connectable_neighbor(
                                 registry,
                                 neighbor.id,
@@ -398,17 +348,19 @@ fn build_chunk_mesh(
                     z as i32,
                     climate,
                     column_tints.as_ref(),
-                    |normal| should_cull_face(
-                        def,
-                        neighbor_at(
-                            x + normal.x as i32,
-                            y + normal.y as i32,
-                            z + normal.z as i32,
-                        ),
-                        world.air(),
-                        registry,
-                        normal,
-                    ),
+                    |normal| {
+                        should_cull_face(
+                            def,
+                            neighbor_at(
+                                x + normal.x as i32,
+                                y + normal.y as i32,
+                                z + normal.z as i32,
+                            ),
+                            air,
+                            registry,
+                            normal,
+                        )
+                    },
                     dust_face,
                 );
             }

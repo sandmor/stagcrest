@@ -3854,6 +3854,7 @@ dependencies = [
  "rayon",
  "stagcrest-mod-host",
  "stagcrest-protocol",
+ "stagcrest-storage",
  "stagcrest-world",
 ]
 

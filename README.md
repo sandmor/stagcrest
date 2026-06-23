@@ -13,7 +13,10 @@ Mod-first voxel engine in Rust: **Bevy** for UI and app shell, **wgpu** (via Bev
 
 - Creative mode: fly, place/break blocks, hotbar with block previews, creative block picker
 - Greedy mesh chunk rendering with texture atlas from mod PNGs
-- Basic redstone (dust, torch, block, lever, button, repeater) via a 10 Hz circuit graph engine
+- Async chunk streaming: terrain generation and storage I/O off the main thread (`StreamingPipeline`)
+- Priority mesh remeshing on a separate scheduler (`MeshScheduler`) so player edits and redstone visuals are not starved by worldgen backlog
+- Native world persistence (redb) with async load/persist
+- Basic redstone (dust, torch, block, lever, button, repeater) via an event-driven circuit graph (default 10 Hz; tick rate configurable in code)
 - Main menu → mod loading → in-game flow (Bevy UI)
 - Native desktop + WASM/web
 
@@ -41,7 +44,38 @@ bash scripts/build-core-mod.sh
 cargo run -p stagcrest-app
 ```
 
-Run from the repo root so the engine finds `mods/mods.toml`. Resource packs are optional (see below).
+Run from the repo root so the engine finds `mods/mods.toml`. Resource packs are optional (see below). Native saves are written to `worlds/<name>/world.redb` (gitignored).
+
+## World persistence
+
+On native desktop, explored chunks are persisted asynchronously to `worlds/<name>/world.redb` when they leave the in-memory LRU. Returning to an area loads stored chunks from disk instead of regenerating them. The web build uses in-memory storage only (`NullChunkStorage`) — no persistence in the browser.
+
+## Chunk streaming and meshing
+
+While in-game, terrain and mesh work run asynchronously off the main thread in two cooperating systems:
+
+### StreamingPipeline (generation + I/O)
+
+1. **Enqueue** — discover chunks near the player (generate new terrain or load from storage)
+2. **Dispatch** — up to 80 in-flight gen tasks (density, decorate) and 8 I/O tasks (load, persist)
+3. **Poll / integrate** — apply finished chunks to the world and request **Visible** remeshes for newly integrated chunks
+
+### MeshScheduler (remeshing)
+
+Chunk meshes are rebuilt separately so mesh work never competes with density generation for task slots. Requests are ordered by urgency (then distance):
+
+| Urgency       | Source                                      |
+| ------------- | ------------------------------------------- |
+| Interactive   | Player place/break                          |
+| Circuit       | Redstone power / block state visual changes |
+| Visible       | Chunk integrate (generate or load)          |
+| Background    | Remaining dirty-chunk drain (streaming)     |
+
+Each chunk has a `mesh_version`; stale async mesh results are discarded when the world changes faster than a build completes (e.g. oscillating redstone).
+
+4. **Commit / sync** — push finished CPU meshes to the render cache, then upload to GPU entities
+
+Initial spawn pre-enqueues a small bubble so terrain appears quickly; **Visible** remesh requests on integrate keep the world from staying in an invisible void while generation catches up.
 
 ## Run (web)
 
@@ -114,12 +148,13 @@ Resource packs can supply block overlay PNGs via the normal block texture path (
 crates/
   stagcrest-protocol   — shared types
   stagcrest-world      — chunks, raycast
+  stagcrest-storage    — chunk persistence (redb native, null on wasm)
   stagcrest-mesh       — greedy meshing
-  stagcrest-circuit     — 10 Hz event-driven circuit graph interpreter
+  stagcrest-circuit    — event-driven circuit graph interpreter (default 10 Hz)
   stagcrest-mod-sdk    — mod author API (host imports)
   stagcrest-mod-host   — wasmi loader, AssetReader, registries
   stagcrest-render     — chunk mesh → Bevy entities
-  stagcrest-app        — Bevy app (menu, loading, game)
+  stagcrest-app        — Bevy app (menu, loading, game; streaming pipeline + mesh scheduler)
 mods/
   stagcrest-core/      — air, blocks, redstone, textures
   mods.toml            — mod manifest

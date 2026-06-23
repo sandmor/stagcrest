@@ -7,7 +7,7 @@ pub use outline::{
     OutlineMaterialPlugin,
 };
 pub use plugin::{
-    despawn_chunk_entities, BlockAtlasResource, ChunkEntityMarker, MeshCacheResource,
-    VoxelCamera, VoxelRenderPlugin,
+    despawn_chunk_entities, sync_chunk_meshes, BlockAtlasResource, ChunkEntityMarker,
+    MeshCacheResource, VoxelCamera, VoxelRenderPlugin,
 };
 pub use voxel_material::{VoxelMaterial, VoxelMaterialPlugin};

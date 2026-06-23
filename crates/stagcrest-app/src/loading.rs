@@ -1,9 +1,11 @@
 use crate::game::{AppState, GameConfig, ModContext, StagcrestWorldResource, TerrainGen};
 use crate::game::WorldColormaps;
 use crate::session::{streaming_lru_capacity, WorldSession};
-use crate::terrain_queue::{TerrainBlocks, TerrainBiomes, TerrainGenQueue, TerrainStreamState};
+use crate::streaming_pipeline::{
+    StreamingPipeline, TerrainBiomes, TerrainBlocks, TerrainStreamState,
+};
 #[cfg(target_arch = "wasm32")]
-use crate::terrain_queue::poll_future_now;
+use crate::mesh_scheduler::poll_future_now;
 use bevy::prelude::*;
 use stagcrest_mesh::MeshCache;
 use stagcrest_mod_host::{
@@ -124,16 +126,17 @@ fn apply_loaded_content(
     let lru_cap = streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
     let world = StagcrestWorldResource(stagcrest_world::World::with_lru_capacity(lru_cap, air));
     let terrain = WorldGenState::new(WorldSeed(config.world_seed));
-    let session = WorldSession::open("default").expect("open world storage");
+    let mut session = WorldSession::open("default").expect("open world storage");
     let spawn = BlockPos::new(8, SEA_LEVEL + 16, 8);
     let spawn_chunk = spawn.chunk_pos();
     let initial_h = config.render_distance.min(4);
     let initial_v = config.vertical_render_distance.min(4);
     let y_bounds = world_chunk_y_bounds(terrain.config());
-    let mut queue = TerrainGenQueue::default();
-    queue.enqueue_area(
+    let mut pipeline = StreamingPipeline::default();
+    pipeline.enqueue_area(
         &terrain,
-        &session.storage,
+        &mut session.stored_chunks,
+        session.storage.as_ref(),
         &world.0,
         spawn_chunk,
         initial_h,
@@ -155,7 +158,7 @@ fn apply_loaded_content(
     commands.insert_resource(TerrainGen(terrain));
     commands.insert_resource(TerrainBlocks(column_blocks));
     commands.insert_resource(TerrainBiomes(biome_registry));
-    commands.insert_resource(queue);
+    commands.insert_resource(pipeline);
     commands.insert_resource(TerrainStreamState {
         center_x: spawn_chunk.x,
         center_y: spawn_chunk.y,

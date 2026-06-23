@@ -1,5 +1,5 @@
+use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, CHUNK_SIZE};
-use stagcrest_world::World;
 use std::collections::HashMap;
 
 /// Tracks block occupancy during feature placement for a decorating chunk.
@@ -39,18 +39,18 @@ impl OccupancyMap {
         }
     }
 
-    pub fn block_at(&self, world: &World, pos: BlockPos) -> BlockId {
+    pub fn block_at(&self, snapshot: &DecorateSnapshot, pos: BlockPos) -> BlockId {
         if let Some(&id) = self.blocks.get(&pos) {
             return id;
         }
         if self.in_decorating_chunk(pos) {
             return self.air;
         }
-        world.get_block(pos).0
+        snapshot.block_at(pos)
     }
 
-    pub fn can_place(&self, world: &World, pos: BlockPos) -> bool {
-        self.block_at(world, pos) == self.air
+    pub fn can_place(&self, snapshot: &DecorateSnapshot, pos: BlockPos) -> bool {
+        self.block_at(snapshot, pos) == self.air
     }
 
     pub fn place(&mut self, pos: BlockPos, id: BlockId) {

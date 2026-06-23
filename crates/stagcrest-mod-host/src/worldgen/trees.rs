@@ -1,14 +1,14 @@
 use crate::worldgen::config::TerrainConfig;
+use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::occupancy::OccupancyMap;
 use crate::worldgen::terrain::ColumnBlocks;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState};
-use stagcrest_world::World;
 
 pub trait TrunkPlacer {
     fn place_trunk(
         &self,
         base: BlockPos,
-        world: &World,
+        snapshot: &DecorateSnapshot,
         occupancy: &mut OccupancyMap,
         out: &mut Vec<(BlockPos, BlockId, BlockState)>,
         config: &TerrainConfig,
@@ -24,7 +24,7 @@ impl TrunkPlacer for StraightTrunkPlacer {
     fn place_trunk(
         &self,
         base: BlockPos,
-        world: &World,
+        snapshot: &DecorateSnapshot,
         occupancy: &mut OccupancyMap,
         out: &mut Vec<(BlockPos, BlockId, BlockState)>,
         config: &TerrainConfig,
@@ -34,7 +34,7 @@ impl TrunkPlacer for StraightTrunkPlacer {
             if pos.y > config.world_max_y {
                 break;
             }
-            if !occupancy.can_place(world, pos) {
+            if !occupancy.can_place(snapshot, pos) {
                 break;
             }
             out.push((pos, self.log, BlockState(0)));
@@ -51,7 +51,7 @@ impl LeafCanopyPlacer {
     pub fn place_oak_canopy(
         &self,
         trunk_top: BlockPos,
-        world: &World,
+        snapshot: &DecorateSnapshot,
         occupancy: &mut OccupancyMap,
         out: &mut Vec<(BlockPos, BlockId, BlockState)>,
         config: &TerrainConfig,
@@ -79,7 +79,7 @@ impl LeafCanopyPlacer {
                     if pos.x == trunk_top.x && pos.z == trunk_top.z && y <= trunk_top.y {
                         continue;
                     }
-                    if !occupancy.can_place(world, pos) {
+                    if !occupancy.can_place(snapshot, pos) {
                         continue;
                     }
                     out.push((pos, self.leaves, BlockState(0)));
@@ -96,13 +96,13 @@ pub fn place_oak_tree(
     wz: i32,
     height: i32,
     blocks: &ColumnBlocks,
-    world: &World,
+    snapshot: &DecorateSnapshot,
     occupancy: &mut OccupancyMap,
     out: &mut Vec<(BlockPos, BlockId, BlockState)>,
     config: &TerrainConfig,
 ) {
     let base = BlockPos::new(wx, above_y, wz);
-    if !occupancy.can_place(world, base) {
+    if !occupancy.can_place(snapshot, base) {
         return;
     }
 
@@ -110,7 +110,7 @@ pub fn place_oak_tree(
         log: blocks.oak_log,
         height,
     };
-    trunk.place_trunk(base, world, occupancy, out, config);
+    trunk.place_trunk(base, snapshot, occupancy, out, config);
 
     let placed_height = out
         .iter()
@@ -124,5 +124,5 @@ pub fn place_oak_tree(
     let leaves = LeafCanopyPlacer {
         leaves: blocks.oak_leaves,
     };
-    leaves.place_oak_canopy(trunk_top, world, occupancy, out, config);
+    leaves.place_oak_canopy(trunk_top, snapshot, occupancy, out, config);
 }

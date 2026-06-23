@@ -1,13 +1,12 @@
-use crate::registry::BlockRegistry;
 use crate::worldgen::biome::BiomeRegistry;
 use crate::worldgen::climate::ClimateSampler;
 use crate::worldgen::config::TerrainConfig;
+use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::features::FeaturePlacer;
 use crate::worldgen::noise::NoiseBank;
 use crate::worldgen::seed::WorldSeed;
 use crate::worldgen::terrain::{ChunkFiller, ColumnBlocks, DensitySampler};
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos};
-use stagcrest_world::World;
 use std::collections::HashSet;
 
 pub struct TerrainGenerator {
@@ -70,36 +69,24 @@ impl TerrainGenerator {
         ChunkGenData { pos, entries }
     }
 
-    pub fn decorate_chunk(
+    /// Decoration stage (async-safe; uses a pre-captured neighbor snapshot).
+    pub fn decorate_chunk_offline(
         &self,
-        world: &World,
         blocks: ColumnBlocks,
         biomes: &BiomeRegistry,
         data: &ChunkGenData,
+        snapshot: &DecorateSnapshot,
     ) -> Vec<(BlockPos, BlockId, BlockState)> {
         let density = DensitySampler::new(&self.config, &self.noise, self.seed);
         let climate = ClimateSampler::new(&self.config, &self.noise);
         let filler = ChunkFiller::new(&self.config, density, climate, biomes, blocks);
-        let surface = filler.decorate(world, data.pos, &data.entries);
+        let surface = filler.decorate(snapshot, data.pos, &data.entries);
 
         let placer = FeaturePlacer::new(&self.config, &self.noise, blocks, biomes, self.seed);
-        let features = placer.place(world, data.pos, &surface);
+        let features = placer.place(snapshot, data.pos, &surface);
         let mut merged = surface;
         merged.extend(features);
         merged
-    }
-
-    fn fill_chunk(
-        &self,
-        world: &mut World,
-        registry: &BlockRegistry,
-        biomes: &BiomeRegistry,
-        pos: ChunkPos,
-    ) {
-        let blocks = ColumnBlocks::resolve(registry, world.air());
-        let data = self.compute_chunk_density(blocks, pos);
-        let entries = self.decorate_chunk(world, blocks, biomes, &data);
-        world.set_blocks(entries);
     }
 }
 
@@ -156,66 +143,11 @@ impl WorldGenState {
     pub fn clear_chunk(&mut self, pos: ChunkPos) {
         self.generated_chunks.remove(&pos);
     }
-
-    pub fn generate_area(
-        &mut self,
-        world: &mut World,
-        registry: &BlockRegistry,
-        biomes: &BiomeRegistry,
-        center: ChunkPos,
-        horizontal_radius: i32,
-        vertical_radius: i32,
-        y_bounds: std::ops::RangeInclusive<i32>,
-    ) {
-        let y_min = (center.y - vertical_radius).max(*y_bounds.start());
-        let y_max = (center.y + vertical_radius).min(*y_bounds.end());
-        for cx in (center.x - horizontal_radius)..=(center.x + horizontal_radius) {
-            for cz in (center.z - horizontal_radius)..=(center.z + horizontal_radius) {
-                for cy in y_min..=y_max {
-                    self.generate_chunk(
-                        world,
-                        registry,
-                        biomes,
-                        ChunkPos {
-                            x: cx,
-                            y: cy,
-                            z: cz,
-                        },
-                    );
-                }
-            }
-        }
-    }
-
-    pub fn generate_chunk(
-        &mut self,
-        world: &mut World,
-        registry: &BlockRegistry,
-        biomes: &BiomeRegistry,
-        pos: ChunkPos,
-    ) {
-        if !self.generated_chunks.insert(pos) {
-            return;
-        }
-        self.generator.fill_chunk(world, registry, biomes, pos);
-    }
 }
 
 impl Default for WorldGenState {
     fn default() -> Self {
         Self::new(WorldSeed(42))
-    }
-}
-
-pub fn generate_chunks(
-    state: &mut WorldGenState,
-    world: &mut World,
-    registry: &BlockRegistry,
-    biomes: &BiomeRegistry,
-    chunks: impl IntoIterator<Item = ChunkPos>,
-) {
-    for pos in chunks {
-        state.generate_chunk(world, registry, biomes, pos);
     }
 }
 
@@ -225,15 +157,17 @@ mod tests {
     use crate::worldgen::config::TerrainConfig;
     use crate::worldgen::test_fixtures::{test_biomes, test_registry};
     use crate::worldgen::world_chunk_y_bounds;
+    use stagcrest_world::World;
 
     #[test]
-    fn sync_generate_vertical_slice_produces_blocks() {
+    fn pipeline_generate_vertical_slice_produces_blocks() {
         let config = TerrainConfig::default();
         let y_bounds = world_chunk_y_bounds(&config);
         let mut state = WorldGenState::with_config(WorldSeed(42), config);
         let mut registry = test_registry();
         let biomes = test_biomes(&mut registry);
         let air = registry.block_by_name("stagcrest:air").unwrap();
+        let blocks = ColumnBlocks::resolve(&registry, air);
         let mut world = World::new(air);
 
         let center_y = 5i32;
@@ -250,9 +184,15 @@ mod tests {
             }
         }
 
+        let generator = state.generator().clone();
         for pos in positions {
             world.ensure_chunk(pos);
-            state.generate_chunk(&mut world, &registry, &biomes, pos);
+            let data = generator.compute_chunk_density(blocks, pos);
+            let snapshot = DecorateSnapshot::capture(&world, pos, air);
+            let entries = generator.decorate_chunk_offline(blocks, &biomes, &data, &snapshot);
+            world.set_blocks(entries);
+            world.finalize_generated_chunk(pos);
+            state.mark_chunk_generated(pos);
         }
 
         let stone = registry.block_by_name("stagcrest:stone").unwrap();

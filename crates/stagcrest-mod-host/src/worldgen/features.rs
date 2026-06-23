@@ -1,13 +1,13 @@
 use crate::worldgen::biome::{BiomeRegistry, FeatureKind};
 use crate::worldgen::climate::ClimateSampler;
 use crate::worldgen::config::TerrainConfig;
+use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::noise::NoiseBank;
 use crate::worldgen::occupancy::OccupancyMap;
 use crate::worldgen::seed::WorldSeed;
 use crate::worldgen::terrain::{ColumnBlocks, SkyIslandSampler};
 use crate::worldgen::trees::place_oak_tree;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
-use stagcrest_world::World;
 
 const SKY_ISLAND_TREE_CHANCE: f32 = 0.02;
 
@@ -40,7 +40,7 @@ impl<'a> FeaturePlacer<'a> {
 
     pub fn place(
         &self,
-        world: &World,
+        snapshot: &DecorateSnapshot,
         pos: ChunkPos,
         surface_entries: &[(BlockPos, BlockId, BlockState)],
     ) -> Vec<(BlockPos, BlockId, BlockState)> {
@@ -81,7 +81,7 @@ impl<'a> FeaturePlacer<'a> {
 
                 let above_y = surface_y + 1;
                 let above_pos = BlockPos::new(wx, above_y, wz);
-                if !occupancy.can_place(world, above_pos) {
+                if !occupancy.can_place(snapshot, above_pos) {
                     continue;
                 }
 
@@ -100,7 +100,7 @@ impl<'a> FeaturePlacer<'a> {
                         is_grass_surface,
                         is_sand_surface,
                         on_island,
-                        world,
+                        snapshot,
                         &mut occupancy,
                         &mut features,
                     );
@@ -116,7 +116,7 @@ impl<'a> FeaturePlacer<'a> {
                         wz,
                         height,
                         &self.blocks,
-                        world,
+                        snapshot,
                         &mut occupancy,
                         &mut features,
                         self.config,
@@ -138,7 +138,7 @@ impl<'a> FeaturePlacer<'a> {
         is_grass_surface: bool,
         is_sand_surface: bool,
         on_island: bool,
-        world: &World,
+        snapshot: &DecorateSnapshot,
         occupancy: &mut OccupancyMap,
         features: &mut Vec<(BlockPos, BlockId, BlockState)>,
     ) {
@@ -162,7 +162,7 @@ impl<'a> FeaturePlacer<'a> {
                     return;
                 }
                 let pos = BlockPos::new(wx, above_y, wz);
-                if !occupancy.can_place(world, pos) {
+                if !occupancy.can_place(snapshot, pos) {
                     return;
                 }
                 features.push((pos, block, BlockState(0)));
@@ -172,7 +172,7 @@ impl<'a> FeaturePlacer<'a> {
                 let height = 1 + (hash_chance(self.seed, wx, wz, FeatureKind::Cactus) * 3.0) as i32;
                 for dy in 0..height {
                     let pos = BlockPos::new(wx, above_y + dy, wz);
-                    if !occupancy.can_place(world, pos) {
+                    if !occupancy.can_place(snapshot, pos) {
                         break;
                     }
                     features.push((pos, self.blocks.cactus, BlockState(0)));
@@ -184,7 +184,7 @@ impl<'a> FeaturePlacer<'a> {
                     return;
                 }
                 let pos = BlockPos::new(wx, above_y, wz);
-                if !occupancy.can_place(world, pos) {
+                if !occupancy.can_place(snapshot, pos) {
                     return;
                 }
                 features.push((pos, self.blocks.dead_bush, BlockState(0)));
@@ -198,7 +198,7 @@ impl<'a> FeaturePlacer<'a> {
                     wz,
                     height,
                     &self.blocks,
-                    world,
+                    snapshot,
                     occupancy,
                     features,
                     self.config,
@@ -239,7 +239,7 @@ mod tests {
         let mut reg = test_registry();
         let biomes = test_biomes(&mut reg);
         let placer = FeaturePlacer::new(&config, &noise, blocks, &biomes, WorldSeed(7));
-        let world = stagcrest_world::World::new(blocks.air);
+        let snapshot = DecorateSnapshot::empty(blocks.air);
 
         let surface_y = 64;
         let surface_entries = vec![
@@ -256,7 +256,7 @@ mod tests {
         ];
 
         let features = placer.place(
-            &world,
+            &snapshot,
             ChunkPos {
                 x: 0,
                 y: surface_y / CHUNK_SIZE,
@@ -293,7 +293,7 @@ mod tests {
             chance: 1.0,
         });
         biomes.finalize(&reg).unwrap();
-        let world = stagcrest_world::World::new(blocks.air);
+        let snapshot = DecorateSnapshot::empty(blocks.air);
 
         let surface_y = 70;
         let surface_entries = vec![(
@@ -304,7 +304,7 @@ mod tests {
 
         let placer = FeaturePlacer::new(&config, &noise, blocks, &biomes, WorldSeed(1));
         let features = placer.place(
-            &world,
+            &snapshot,
             ChunkPos {
                 x: 0,
                 y: surface_y / CHUNK_SIZE,

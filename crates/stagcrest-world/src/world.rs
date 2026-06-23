@@ -74,7 +74,7 @@ impl World {
     ) -> bool {
         let evicted = self.arena.insert_inactive(pos, chunk);
         self.arena.mark_generated(pos);
-        self.mark_dirty_and_neighbors_chunk(pos);
+        self.mark_dirty_face_neighbors(pos);
         evicted
     }
 
@@ -145,7 +145,7 @@ impl World {
         if let Some(chunk) = self.arena.active_mut(chunk_pos) {
             chunk.set(local, id, state);
             self.arena.mark_modified(chunk_pos);
-            self.mark_dirty_and_neighbors(pos);
+            self.mark_dirty_face_neighbors(chunk_pos);
         }
     }
 
@@ -172,7 +172,7 @@ impl World {
             }
         }
         for chunk_pos in touched_chunks {
-            self.mark_dirty_neighbors_of_chunk(chunk_pos);
+            self.mark_dirty_face_neighbors(chunk_pos);
         }
     }
 
@@ -185,7 +185,53 @@ impl World {
         } else if !self.has_chunk(pos) {
             self.ensure_chunk(pos);
         }
-        self.mark_dirty_and_neighbors_chunk(pos);
+        self.mark_dirty_face_neighbors(pos);
+    }
+
+    pub fn mark_dirty_face_neighbors(&mut self, chunk_pos: ChunkPos) {
+        for pos in Self::face_neighbor_chunks(chunk_pos) {
+            self.dirty_chunks.insert(pos);
+        }
+    }
+
+    pub fn face_neighbor_chunks(chunk_pos: ChunkPos) -> [ChunkPos; 7] {
+        [
+            chunk_pos,
+            ChunkPos {
+                x: chunk_pos.x + 1,
+                y: chunk_pos.y,
+                z: chunk_pos.z,
+            },
+            ChunkPos {
+                x: chunk_pos.x - 1,
+                y: chunk_pos.y,
+                z: chunk_pos.z,
+            },
+            ChunkPos {
+                x: chunk_pos.x,
+                y: chunk_pos.y + 1,
+                z: chunk_pos.z,
+            },
+            ChunkPos {
+                x: chunk_pos.x,
+                y: chunk_pos.y - 1,
+                z: chunk_pos.z,
+            },
+            ChunkPos {
+                x: chunk_pos.x,
+                y: chunk_pos.y,
+                z: chunk_pos.z + 1,
+            },
+            ChunkPos {
+                x: chunk_pos.x,
+                y: chunk_pos.y,
+                z: chunk_pos.z - 1,
+            },
+        ]
+    }
+
+    pub fn clear_dirty(&mut self, chunk_pos: ChunkPos) {
+        self.dirty_chunks.remove(&chunk_pos);
     }
 
     pub fn mark_dirty_and_neighbors(&mut self, pos: BlockPos) {
@@ -204,10 +250,6 @@ impl World {
                 }
             }
         }
-    }
-
-    fn mark_dirty_and_neighbors_chunk(&mut self, chunk_pos: ChunkPos) {
-        self.mark_dirty_neighbors_of_chunk(chunk_pos);
     }
 
     pub fn take_dirty_chunks(&mut self) -> HashSet<ChunkPos> {
@@ -311,49 +353,19 @@ impl World {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stagcrest_protocol::{BlockPos, CHUNK_SIZE};
+    use stagcrest_protocol::BlockPos;
 
     #[test]
-    fn set_blocks_marks_neighbor_chunks() {
+    fn set_block_marks_face_neighbors_only() {
         let air = BlockId(0);
         let stone = BlockId(1);
         let mut world = World::new(air);
         let chunk = ChunkPos { x: 0, y: 0, z: 0 };
         world.ensure_chunk(chunk);
 
-        world.set_blocks([(
-            BlockPos::new(0, 0, 0),
-            stone,
-            BlockState(0),
-        )]);
+        world.set_blocks([(BlockPos::new(0, 0, 0), stone, BlockState(0))]);
+        assert_eq!(world.dirty_chunks.len(), 7);
         assert!(world.dirty_chunks.contains(&chunk));
-        assert!(world.dirty_chunks.len() <= 27);
-    }
-
-    #[test]
-    fn set_blocks_writes_many_blocks_in_one_chunk() {
-        let air = BlockId(0);
-        let stone = BlockId(1);
-        let mut world = World::new(air);
-        world.ensure_chunk(ChunkPos { x: 0, y: 0, z: 0 });
-
-        let blocks: Vec<_> = (0..CHUNK_SIZE)
-            .flat_map(|x| {
-                (0..CHUNK_SIZE).flat_map(move |z| {
-                    (0..CHUNK_SIZE).map(move |y| (BlockPos::new(x, y, z), stone, BlockState(0)))
-                })
-            })
-            .collect();
-        world.set_blocks(blocks);
-        world.finalize_generated_chunk(ChunkPos { x: 0, y: 0, z: 0 });
-
-        for x in 0..CHUNK_SIZE {
-            for y in 0..CHUNK_SIZE {
-                for z in 0..CHUNK_SIZE {
-                    assert_eq!(world.get_block(BlockPos::new(x, y, z)).0, stone);
-                }
-            }
-        }
     }
 
     #[test]

@@ -1,13 +1,13 @@
 use crate::worldgen::biome::BiomeRegistry;
 use crate::worldgen::climate::ClimateSampler;
 use crate::worldgen::config::TerrainConfig;
+use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::terrain::column::ColumnBlocks;
 use crate::worldgen::terrain::density::DensitySampler;
 use stagcrest_protocol::{
     still_water_state, BlockId, BlockPos, BlockState, ChunkPos, LocalBlockPos, CHUNK_SIZE,
     CHUNK_VOLUME,
 };
-use stagcrest_world::World;
 
 pub struct ChunkFiller<'a> {
     config: &'a TerrainConfig,
@@ -77,10 +77,10 @@ impl<'a> ChunkFiller<'a> {
         entries
     }
 
-    /// Stage B: biome surface decoration (requires chunk above in `world` when at local y=15).
+    /// Stage B: biome surface decoration (uses neighbor face rows from `snapshot`).
     pub fn decorate(
         &self,
-        world: &World,
+        snapshot: &DecorateSnapshot,
         pos: ChunkPos,
         density_entries: &[(BlockPos, BlockId, BlockState)],
     ) -> Vec<(BlockPos, BlockId, BlockState)> {
@@ -148,7 +148,7 @@ impl<'a> ChunkFiller<'a> {
                         .index();
                         buffer[above_idx]
                     } else {
-                        world.get_block(BlockPos::new(wx, y + 1, wz)).0
+                        snapshot.face_above(lx, lz)
                     };
 
                     let below_id = if ly > 0 {
@@ -160,7 +160,7 @@ impl<'a> ChunkFiller<'a> {
                         .index();
                         buffer[below_idx]
                     } else {
-                        world.get_block(BlockPos::new(wx, y - 1, wz)).0
+                        snapshot.face_below(lx, lz)
                     };
 
                     let above_open =
@@ -195,7 +195,7 @@ impl<'a> ChunkFiller<'a> {
                         };
 
                         let depth = count_surface_depth(
-                            world,
+                            snapshot,
                             &buffer,
                             base_y,
                             wx,
@@ -251,7 +251,7 @@ fn is_beach(surface_y: f64, sea: i32, downfall: f32) -> bool {
 }
 
 fn count_surface_depth(
-    world: &World,
+    snapshot: &DecorateSnapshot,
     buffer: &[BlockId],
     base_y: i32,
     wx: i32,
@@ -272,9 +272,7 @@ fn count_surface_depth(
             .index();
             buffer[idx]
         } else {
-            world
-                .get_block(BlockPos::new(wx, base_y + ly as i32 + dy as i32, wz))
-                .0
+            snapshot.block_at(BlockPos::new(wx, base_y + ly as i32 + dy as i32, wz))
         };
         if above == blocks.grass
             || above == blocks.sand
@@ -356,7 +354,11 @@ mod tests {
             density_entries.push((BlockPos::new(0, y, 0), blocks.water, water_state));
         }
 
-        let decorated = filler.decorate(&world, chunk_pos, &density_entries);
+        let decorated = filler.decorate(
+            &DecorateSnapshot::capture(&world, chunk_pos, BlockId(0)),
+            chunk_pos,
+            &density_entries,
+        );
         let floor = decorated
             .iter()
             .find(|(pos, _, _)| pos.y == seafloor_y)
@@ -428,7 +430,11 @@ mod tests {
             (BlockPos::new(0, sea + 1, 0), blocks.stone, BlockState(0)),
         ];
 
-        let decorated = filler.decorate(&world, chunk_pos, &density_entries);
+        let decorated = filler.decorate(
+            &DecorateSnapshot::capture(&world, chunk_pos, BlockId(0)),
+            chunk_pos,
+            &density_entries,
+        );
         let shore = decorated
             .iter()
             .find(|(pos, _, _)| pos.y == sea)
@@ -515,7 +521,7 @@ mod tests {
         );
 
         let depth = count_surface_depth(
-            &world,
+            &DecorateSnapshot::capture(&world, ChunkPos { x: 0, y: 4, z: 0 }, air),
             &buffer,
             base_y,
             0,

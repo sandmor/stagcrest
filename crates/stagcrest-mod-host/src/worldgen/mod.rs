@@ -2,6 +2,7 @@ mod biome;
 mod caves;
 mod climate;
 mod config;
+mod decorate_snapshot;
 mod features;
 mod generator;
 pub mod noise;
@@ -18,8 +19,9 @@ pub use biome::{
 };
 pub use climate::ClimateSampler;
 pub use config::{terrain_chunk_y_range, world_chunk_y_bounds, TerrainConfig, SEA_LEVEL};
+pub use decorate_snapshot::DecorateSnapshot;
 pub use generator::{
-    generate_chunks, ChunkGenData, TerrainGenerator, WorldGenState,
+    ChunkGenData, TerrainGenerator, WorldGenState,
 };
 pub use seed::WorldSeed;
 pub use terrain::{ColumnBlocks, ColumnData};

@@ -32,4 +32,4 @@ jobs:
       - name: Install Trunk
         run: cargo install trunk --locked
       - name: Build web
-        run: trunk build
+        run: unset NO_COLOR && trunk build

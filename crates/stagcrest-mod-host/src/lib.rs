@@ -35,8 +35,8 @@ pub use registry::BlockRegistry;
 pub use resourcepack::{ResourcePackLoader, infer_vertical_strip_animation};
 pub use torch_placement::{torch_can_attach, torch_state_from_normal, validate_torch_placement};
 pub use worldgen::{
-    generate_chunks, terrain_chunk_y_range, world_chunk_y_bounds, BiomeRegistry, ChunkGenData,
-    ClimateSampler, ColumnBlocks, ColumnData, FeatureKind, RegisterBiomeFeatureRequest,
+    terrain_chunk_y_range, world_chunk_y_bounds, BiomeRegistry, ChunkGenData,
+    ClimateSampler, ColumnBlocks, ColumnData, DecorateSnapshot, FeatureKind, RegisterBiomeFeatureRequest,
     RegisterBiomeRequest, ResolvedBiome, TerrainConfig, TerrainGenerator, WorldGenState,
     WorldSeed, SEA_LEVEL,
 };

@@ -14,7 +14,8 @@ pub mod menu;
 pub mod pause;
 pub mod player;
 pub mod session;
-pub mod terrain_queue;
+pub mod mesh_scheduler;
+pub mod streaming_pipeline;
 pub mod targeting;
 pub mod ui;
 

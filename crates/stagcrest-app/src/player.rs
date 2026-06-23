@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use glam::Vec3;
 
+use crate::mesh_scheduler::{
+    chunk_distance_sq_from_camera, request_face_neighbors, MeshScheduler, RemeshUrgency,
+};
+
 #[derive(Component)]
 pub struct FlyCamera {
     pub speed: f32,
@@ -81,11 +85,29 @@ fn block_contains_point(pos: stagcrest_protocol::BlockPos, point: Vec3) -> bool 
         && point.z < max.z
 }
 
+fn request_interactive_remesh(
+    mesh_scheduler: &mut MeshScheduler,
+    world: &mut crate::game::StagcrestWorldResource,
+    block_pos: stagcrest_protocol::BlockPos,
+    cam: &Transform,
+) {
+    let center = block_pos.chunk_pos();
+    request_face_neighbors(
+        mesh_scheduler,
+        &mut world.0,
+        center,
+        RemeshUrgency::Interactive,
+        |pos| chunk_distance_sq_from_camera(cam, pos),
+        true,
+    );
+}
+
 pub fn block_interaction(
     mouse: Res<ButtonInput<MouseButton>>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
     mut world: ResMut<crate::game::StagcrestWorldResource>,
     mut circuit: ResMut<crate::game::CircuitResource>,
+    mut mesh_scheduler: ResMut<MeshScheduler>,
     mut selected: ResMut<SelectedBlock>,
     target: Res<crate::targeting::BlockTarget>,
     inventory_ui: Option<Res<crate::inventory::InventoryUiState>>,
@@ -144,6 +166,7 @@ pub fn block_interaction(
         circuit
             .0
             .notify_block_changed(break_pos, &world.0, &ctx.registry);
+        request_interactive_remesh(&mut mesh_scheduler, &mut world, break_pos, cam);
     } else if mouse.just_pressed(MouseButton::Right) {
         let (hit_id, _) = world.0.get_block(hit.block);
         if let Some(def) = ctx.registry.block(hit_id) {
@@ -151,12 +174,14 @@ pub fn block_interaction(
                 circuit
                     .0
                     .cycle_repeater_delay(hit.block, &mut world.0, &ctx.registry);
+                request_interactive_remesh(&mut mesh_scheduler, &mut world, hit.block, cam);
                 return;
             }
             if stagcrest_circuit::is_player_toggleable(def) {
                 circuit
                     .0
                     .toggle_block(hit.block, &mut world.0, &ctx.registry);
+                request_interactive_remesh(&mut mesh_scheduler, &mut world, hit.block, cam);
                 return;
             }
         }
@@ -228,6 +253,7 @@ pub fn block_interaction(
             circuit
                 .0
                 .notify_block_changed(place_pos, &world.0, &ctx.registry);
+            request_interactive_remesh(&mut mesh_scheduler, &mut world, place_pos, cam);
         }
     }
 }

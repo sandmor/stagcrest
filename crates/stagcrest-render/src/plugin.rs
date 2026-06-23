@@ -62,7 +62,7 @@ fn block_atlas_image(atlas: &TextureAtlas) -> Image {
     image
 }
 
-fn sync_chunk_meshes(
+pub fn sync_chunk_meshes(
     mut commands: Commands,
     mut cache: ResMut<MeshCacheResource>,
     atlas: Option<Res<BlockAtlasResource>>,
