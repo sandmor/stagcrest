@@ -1,4 +1,4 @@
-use stagcrest_mod_host::BlockRegistry;
+use stagcrest_mod_client::BlockRegistry;
 use stagcrest_protocol::{
     AtlasRect, BlockFaceTextures, BlockGeometry, BlockModel, FaceTexture, ModelAxis, ModelElement,
     ModelFace, ModelRenderLayer, ModelRotation, ModelTexture, TintKind,

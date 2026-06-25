@@ -1,0 +1,28 @@
+[package]
+name = "stagcrest-server"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "stagcrest_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "stagcrest-server"
+path = "src/main.rs"
+
+[dependencies]
+stagcrest-protocol.workspace = true
+stagcrest-storage.workspace = true
+stagcrest-world.workspace = true
+stagcrest-circuit.workspace = true
+stagcrest-mod-server.workspace = true
+stagcrest-net.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+glam.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+futures-lite.workspace = true

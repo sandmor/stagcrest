@@ -1,5 +1,5 @@
 use crate::MeshClimateTint;
-use stagcrest_mod_host::{BlockRegistry, ModelRegistry, PowerLookup};
+use stagcrest_mod_client::{BlockRegistry, ColormapSet, ModelRegistry, PowerLookup};
 use stagcrest_protocol::{BlockPos, ChunkPos, LocalBlockPos, CHUNK_SIZE, CHUNK_VOLUME};
 use stagcrest_storage::InactiveChunk;
 use stagcrest_world::{ChunkBlock, World};
@@ -9,19 +9,17 @@ use std::sync::Arc;
 /// Serializable climate inputs for worker-thread mesh tinting.
 #[derive(Clone)]
 pub struct MeshClimateSnapshot {
-    pub colormaps: Arc<stagcrest_mod_host::ColormapSet>,
-    pub config: stagcrest_mod_host::TerrainConfig,
-    pub seed: stagcrest_mod_host::WorldSeed,
-    pub noise: stagcrest_mod_host::NoiseBank,
+    pub colormaps: Arc<ColormapSet>,
+    pub temperature: f32,
+    pub downfall: f32,
 }
 
 impl MeshClimateSnapshot {
     pub fn as_tint(&self) -> MeshClimateTint<'_> {
         MeshClimateTint {
             colormaps: &self.colormaps,
-            config: &self.config,
-            seed: self.seed,
-            noise: &self.noise,
+            temperature: self.temperature,
+            downfall: self.downfall,
         }
     }
 }

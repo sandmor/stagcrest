@@ -1,0 +1,26 @@
+[package]
+name = "stagcrest-client"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "stagcrest-client"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true, features = ["dynamic_linking"] }
+stagcrest-protocol.workspace = true
+stagcrest-world.workspace = true
+stagcrest-mesh = { workspace = true, features = ["parallel"] }
+stagcrest-circuit.workspace = true
+stagcrest-mod-client.workspace = true
+stagcrest-render.workspace = true
+stagcrest-storage.workspace = true
+stagcrest-net.workspace = true
+stagcrest-server.workspace = true
+glam.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures-lite.workspace = true
+clap.workspace = true
+tokio.workspace = true

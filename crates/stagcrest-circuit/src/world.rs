@@ -1,4 +1,4 @@
-use stagcrest_mod_host::{BlockRegistry, PowerLookup};
+use crate::registry::{BlockRegistry, PowerLookup};
 use stagcrest_protocol::{BlockPos, BlockState, CircuitKind, set_torch_lit};
 use stagcrest_world::World;
 use std::collections::HashMap;

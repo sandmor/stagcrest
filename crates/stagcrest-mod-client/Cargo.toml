@@ -1,0 +1,9 @@
+[package]
+name = "stagcrest-mod-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+stagcrest-protocol.workspace = true
+image.workspace = true
+tracing.workspace = true

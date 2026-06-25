@@ -10,7 +10,7 @@ mod wire;
 pub use output::neighbor_output_into;
 pub use sync::{is_player_toggleable, is_repeater, is_torch_geometry, sync_block_state};
 
-use stagcrest_mod_host::BlockRegistry;
+use crate::registry::BlockRegistry;
 use stagcrest_protocol::{BlockPos, BlockState, CircuitKind};
 use stagcrest_world::World;
 

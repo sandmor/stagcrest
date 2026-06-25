@@ -6,4 +6,4 @@ edition.workspace = true
 [dependencies]
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
-stagcrest-mod-host = { path = "../stagcrest-mod-host" }
+stagcrest-mod-server.workspace = true

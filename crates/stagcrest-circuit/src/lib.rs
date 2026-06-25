@@ -14,6 +14,7 @@
 mod eval;
 mod event;
 mod init;
+mod registry;
 mod world;
 
 pub use eval::{is_player_toggleable, is_repeater};

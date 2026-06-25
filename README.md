@@ -1,33 +1,33 @@
 # Stagcrest
 
-Mod-first voxel engine in Rust: **Bevy** for UI and app shell, **wgpu** (via Bevy mesh rendering) for the world, **wasmi** for WASM mods. Every block, texture, and redstone rule comes from mods — the `stagcrest-core` mod provides vanilla content.
+Mod-first voxel engine in Rust: **server-authoritative** simulation, **Bevy** native client for rendering and UI, **wasmi** for WASM mods. Every block, texture, and redstone rule comes from mods — the `stagcrest-core` mod provides vanilla content.
 
 ## Architecture
 
-- Mods compile to `wasm32-unknown-unknown` cdylibs and export `_stagcrest_register()`.
-- The host loads mod `.wasm` bytes through **wasmi** on both native and web (same pipeline).
-- Native reads assets from the repo filesystem; the web build fetches the same paths over HTTP (Trunk copies `mods/`, `assets/`, and any local `resourcepacks/` content into the bundle).
-- Mods call host imports in the `stagcrest_host` module to register blocks, textures, and log messages.
+- **stagcrest-server** — mods (wasmi), worldgen, block world, circuits, persistence (redb), chunk streaming
+- **stagcrest-client** — Bevy rendering, meshing, UI, input, raycast against a world replica
+- **stagcrest-net** — postcard-framed TCP (remote) or in-process transport (embedded single-player)
+- Mods compile to `wasm32-unknown-unknown` cdylibs and export `_stagcrest_register()`. The server loads mod `.wasm` bytes through **wasmi**.
+
+Single-player embeds the server in-process (no second terminal). Remote play: run `stagcrest-server`, connect with `stagcrest-client --connect host:port`.
 
 ## Features
 
 - Creative mode: fly, place/break blocks, hotbar with block previews, creative block picker
 - Greedy mesh chunk rendering with texture atlas from mod PNGs
-- Async chunk streaming: terrain generation and storage I/O off the main thread (`StreamingPipeline`)
-- Priority mesh remeshing on a separate scheduler (`MeshScheduler`) so player edits and redstone visuals are not starved by worldgen backlog
-- Native world persistence (redb) with async load/persist
-- Basic redstone (dust, torch, block, lever, button, repeater) via an event-driven circuit graph (default 10 Hz; tick rate configurable in code)
-- Main menu → mod loading → in-game flow (Bevy UI)
-- Native desktop + WASM/web
+- Server-side chunk streaming with client mesh remeshing (`MeshScheduler`)
+- Native world persistence (redb) on the server
+- Basic redstone (dust, torch, block, lever, button, repeater) via an event-driven circuit graph (default 10 Hz)
+- Main menu → connect / load → in-game flow (Bevy UI)
+- Native desktop only (no web/WASM host)
 
 ## Requirements
 
 - Rust 1.78+
-- For web: [Trunk](https://trunkrs.io/) and `wasm32-unknown-unknown` target
 
 ## Build core mod (required)
 
-Mods are built artifacts (not committed). Build before running native or web:
+Mods are built artifacts (not committed). Build before running:
 
 ```bash
 rustup target add wasm32-unknown-unknown
@@ -36,87 +36,65 @@ bash scripts/build-core-mod.sh
 
 This produces `mods/stagcrest-core/stagcrest-core.wasm`.
 
-## Run (native)
+## Run (single-player)
+
+Embedded server — no TCP latency:
 
 ```bash
-cd /path/to/stagcrest
 bash scripts/build-core-mod.sh
-cargo run -p stagcrest-app
+cargo run -p stagcrest-client
+# or
+bash scripts/run-dev.sh
 ```
 
-Run from the repo root so the engine finds `mods/mods.toml`. Resource packs are optional (see below). Native saves are written to `worlds/<name>/world.redb` (gitignored).
+Run from the repo root so the server finds `mods/mods.toml`. Saves are written to `worlds/<name>/world.redb` on the server (gitignored).
 
-## World persistence
+## Run (dedicated server + client)
 
-On native desktop, explored chunks are persisted asynchronously to `worlds/<name>/world.redb` when they leave the in-memory LRU. Returning to an area loads stored chunks from disk instead of regenerating them. The web build uses in-memory storage only (`NullChunkStorage`) — no persistence in the browser.
+Terminal 1 — server:
+
+```bash
+bash scripts/build-core-mod.sh
+cargo run -p stagcrest-server -- --bind 0.0.0.0:4242
+```
+
+Terminal 2 — client:
+
+```bash
+cargo run -p stagcrest-client -- --connect 127.0.0.1:4242
+```
+
+### CLI flags
+
+| Binary             | Flag                     | Description                                     |
+| ------------------ | ------------------------ | ----------------------------------------------- |
+| `stagcrest-client` | `--connect HOST:PORT`    | Remote server (omit for embedded single-player) |
+| `stagcrest-client` | `--net-sim-latency-ms N` | Artificial latency for localhost testing        |
+| `stagcrest-server` | `--bind HOST:PORT`       | Listen address (default `0.0.0.0:4242`)         |
+| `stagcrest-server` | `--net-sim-latency-ms N` | Artificial latency on outbound frames           |
+
+Press **F3** in-game for debug overlay (position, target block, net transport, RTT from ping).
+
+## Networking
+
+- **In-process** (default): zero-lag single-player; same postcard framing as TCP without sockets.
+- **TCP remote**: `TCP_NODELAY`, tuned socket buffers, server priority/bulk send queues so block updates are not blocked behind chunk snapshots.
+- Protocol: versioned handshake → `ContentManifest` → initial spawn → streaming `ChunkSnapshot`s and `BlockUpdate`s.
 
 ## Chunk streaming and meshing
 
-While in-game, terrain and mesh work run asynchronously off the main thread in two cooperating systems:
+The **server** generates/loads chunks and sends compressed `ChunkSnapshot` frames. The **client** integrates chunks into a read-only `WorldReplica` and remeshes via `MeshScheduler`:
 
-### StreamingPipeline (generation + I/O)
-
-1. **Enqueue** — discover chunks near the player (generate new terrain or load from storage)
-2. **Dispatch** — up to 80 in-flight gen tasks (density, decorate) and 8 I/O tasks (load, persist)
-3. **Poll / integrate** — apply finished chunks to the world and request **Visible** remeshes for newly integrated chunks
-
-### MeshScheduler (remeshing)
-
-Chunk meshes are rebuilt separately so mesh work never competes with density generation for task slots. Requests are ordered by urgency (then distance):
-
-| Urgency       | Source                                      |
-| ------------- | ------------------------------------------- |
-| Interactive   | Player place/break                          |
-| Circuit       | Redstone power / block state visual changes |
-| Visible       | Chunk integrate (generate or load)          |
-| Background    | Remaining dirty-chunk drain (streaming)     |
-
-Each chunk has a `mesh_version`; stale async mesh results are discarded when the world changes faster than a build completes (e.g. oscillating redstone).
-
-4. **Commit / sync** — push finished CPU meshes to the render cache, then upload to GPU entities
-
-Initial spawn pre-enqueues a small bubble so terrain appears quickly; **Visible** remesh requests on integrate keep the world from staying in an invisible void while generation catches up.
-
-## Run (web)
-
-```bash
-bash scripts/build-core-mod.sh
-cargo install trunk
-trunk serve
-```
-
-Open the URL Trunk prints (usually `http://127.0.0.1:8080`). Trunk serves:
-
-- `mods/` — mod manifest and `.wasm` binaries
-- `assets/` — bundled colormaps and shaders
-- `resourcepacks/` — local Minecraft-format resource packs (if configured)
-
-Requires a modern browser with WebGPU (preferred) or WebGL2 fallback.
-
-## Build (web release)
-
-Production static bundle for hosting (e.g. Cloudflare Pages). Output goes to `dist/`.
-
-```bash
-# Optional: slim a full local pack down to the textures the engine needs
-bash scripts/prepare-web-resourcepack.sh "resourcepacks/My Pack"
-
-bash scripts/build-web-release.sh
-```
-
-`prepare-web-resourcepack.sh` copies only the block textures referenced by `stagcrest-core` (and optional colormaps) into `resourcepacks/web/`, then writes `resourcepacks/resourcepacks.toml`. Skip it if you already have a configured pack or want placeholder colors.
-
-`build-web-release.sh` builds the core mod and runs `trunk build --release`. Requires [Trunk](https://trunkrs.io/) on your `PATH`.
-
-Serve locally to verify:
-
-```bash
-npx serve dist
-```
+| Urgency     | Source                               |
+| ----------- | ------------------------------------ |
+| Interactive | Player place/break (from server ack) |
+| Circuit     | Redstone power visual updates        |
+| Visible     | Chunk integrate                      |
+| Background  | Remaining dirty-chunk drain          |
 
 ## Resource packs (optional)
 
-Texture packs are **not included** in the repo. A fresh clone runs with flat-color block placeholders and bundled/procedural biome colormaps — no setup required.
+Texture packs are **not included** in the repo. A fresh clone runs with flat-color block placeholders and bundled/procedural biome colormaps.
 
 To use Minecraft-format block textures locally:
 
@@ -127,54 +105,45 @@ To use Minecraft-format block textures locally:
    ```
 3. Edit `resourcepacks/resourcepacks.toml`: set `path` to your pack folder name and `enabled = true`.
 
-The host loads block PNGs from `{pack}/assets/minecraft/textures/block/` for the textures referenced by `stagcrest-core`. If a pack or texture is missing, the core mod falls back to solid-color placeholders.
-
-## Block tinting and colormaps
-
-Grass blocks use **greyscale tint masks** (like vanilla Minecraft): the engine multiplies texture RGB by a color sampled from `colormap/grass.png`. Side faces blend a base texture with an overlay (`grass_block_side_overlay`) where the overlay grey pixels receive the same tint.
-
-| Source                    | Path                                                  |
-| ------------------------- | ----------------------------------------------------- |
-| Resource pack (preferred) | `{pack}/assets/minecraft/textures/colormap/grass.png` |
-| Bundled fallback          | `assets/minecraft/colormap/grass.png`                 |
-
-Tint rules for blocks are curated in `crates/stagcrest-mod-host/src/block_tints.rs`. For MVP, a single fixed Plains-like green (temperature `0.8`, downfall `0.4`) is passed to the voxel shader on native and WASM.
-
-Resource packs can supply block overlay PNGs via the normal block texture path (e.g. `grass_block_side_overlay.png`).
+The server loads block PNGs from `{pack}/assets/minecraft/textures/block/` for textures referenced by `stagcrest-core`.
 
 ## Project layout
 
 ```
 crates/
-  stagcrest-protocol   — shared types
-  stagcrest-world      — chunks, raycast
-  stagcrest-storage    — chunk persistence (redb native, null on wasm)
-  stagcrest-mesh       — greedy meshing
-  stagcrest-circuit    — event-driven circuit graph interpreter (default 10 Hz)
-  stagcrest-mod-sdk    — mod author API (host imports)
-  stagcrest-mod-host   — wasmi loader, AssetReader, registries
-  stagcrest-render     — chunk mesh → Bevy entities
-  stagcrest-app        — Bevy app (menu, loading, game; streaming pipeline + mesh scheduler)
+  stagcrest-protocol    — shared types, ContentManifest
+  stagcrest-world       — chunks, raycast
+  stagcrest-storage     — chunk persistence (redb)
+  stagcrest-mesh        — greedy meshing
+  stagcrest-circuit     — event-driven circuit graph
+  stagcrest-mod-sdk     — mod author API (host imports)
+  stagcrest-mod-server  — wasmi loader, worldgen, server registries
+  stagcrest-mod-client  — client content from manifest
+  stagcrest-net         — framing, transports, NetConfig
+  stagcrest-server      — authoritative simulation (lib + bin)
+  stagcrest-render      — chunk mesh → Bevy entities
+  stagcrest-client      — Bevy client (menu, loading, game)
 mods/
-  stagcrest-core/      — air, blocks, redstone, textures
-  mods.toml            — mod manifest
-resourcepacks/         — local MC-format packs (gitignored; see example manifest)
+  stagcrest-core/       — air, blocks, redstone, textures
+  mods.toml             — mod manifest
+resourcepacks/          — local MC-format packs (gitignored)
 ```
 
 ## Controls
 
-| Input                | Action                                              |
-| -------------------- | --------------------------------------------------- |
-| Main menu Play       | Start loading mods                                  |
-| WASD / Space / Shift | Fly                                                 |
-| Mouse                | Look (after click to capture)                       |
-| LMB                  | Break block                                         |
-| RMB                  | Place / toggle redstone component                   |
-| Middle-click         | Pick looked-at block into selected hotbar slot      |
-| 1–9                  | Hotbar slot                                         |
-| Scroll wheel         | Cycle hotbar slot                                   |
+| Input                | Action                                                |
+| -------------------- | ----------------------------------------------------- |
+| Main menu Play       | Connect (embedded or remote)                          |
+| WASD / Space / Shift | Fly                                                   |
+| Mouse                | Look (after click to capture)                         |
+| LMB                  | Break block                                           |
+| RMB                  | Place / toggle redstone component                     |
+| Middle-click         | Pick looked-at block into selected hotbar slot        |
+| 1–9                  | Hotbar slot                                           |
+| Scroll wheel         | Cycle hotbar slot                                     |
 | E                    | Creative inventory (search, drag-drop, block catalog) |
-| Escape               | Release cursor / pause                              |
+| F3                   | Debug overlay                                         |
+| Escape               | Release cursor / pause                                |
 
 ## Mod API
 

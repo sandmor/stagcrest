@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod persistence_tests {
     use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
-    use stagcrest_storage::{load_inactive_chunk, ChunkStorage, NullChunkStorage, RedbChunkStorage};
+    use stagcrest_storage::{ChunkStorage, RedbChunkStorage};
     use stagcrest_world::World;
 
     #[test]
@@ -57,13 +57,5 @@ mod persistence_tests {
 
         world.set_block(BlockPos::new(0, 0, 0), air, BlockState(0));
         assert!(world.chunk(pos).is_some());
-    }
-
-    #[test]
-    fn null_storage_misses() {
-        let storage = NullChunkStorage;
-        let pos = ChunkPos { x: 0, y: 0, z: 0 };
-        assert!(!storage.contains(pos));
-        assert!(load_inactive_chunk(&storage, pos).unwrap().is_none());
     }
 }

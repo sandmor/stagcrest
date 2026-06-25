@@ -1,4 +1,9 @@
 pub mod block_model;
+pub mod manifest;
+
+pub use manifest::{
+    AtlasSnapshot, ColormapSnapshot, ContentManifest, RegistrySnapshot,
+};
 
 use serde::{Deserialize, Serialize};
 

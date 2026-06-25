@@ -7,7 +7,7 @@ edition.workspace = true
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
 stagcrest-storage.workspace = true
-stagcrest-mod-host = { path = "../stagcrest-mod-host" }
+stagcrest-mod-client.workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 

@@ -1,4 +1,4 @@
-use stagcrest_mod_host::BlockRegistry;
+use crate::registry::BlockRegistry;
 use stagcrest_world::World;
 
 use crate::world::CircuitWorld;

@@ -3,10 +3,9 @@ mod mesh_snapshot;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
-use stagcrest_mod_host::{
+use stagcrest_mod_client::{
     dust_connections_from_neighbors, dust_vertex_tint, face_texture_for, sample_colormap_rgb,
-    ClimateSampler, ColormapSet, NoiseBank, TerrainConfig, WorldSeed,
-    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face,
+    ColormapSet, is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face,
     BlockRegistry, ModelRegistry, PowerLookup,
 };
 use stagcrest_protocol::{
@@ -54,9 +53,8 @@ pub struct MeshCache {
 #[derive(Clone)]
 pub struct MeshClimateTint<'a> {
     pub colormaps: &'a ColormapSet,
-    pub config: &'a TerrainConfig,
-    pub seed: WorldSeed,
-    pub noise: &'a NoiseBank,
+    pub temperature: f32,
+    pub downfall: f32,
 }
 
 impl MeshCache {
@@ -684,9 +682,8 @@ fn tint_mul_for_kind(
     let Some(ctx) = climate else {
         return WHITE_TINT_MUL;
     };
-    let sampler = ClimateSampler::new(ctx.config, ctx.noise);
-    let (temp, downfall) = sampler.at(wx, wz);
-    let norm_temp = (temp / ctx.config.temperature_scale).clamp(0.0, 1.0);
+    let norm_temp = ctx.temperature.clamp(0.0, 1.0);
+    let downfall = ctx.downfall.clamp(0.0, 1.0);
     match kind {
         TintKind::Grass => sample_colormap_rgb(
             &ctx.colormaps.grass,

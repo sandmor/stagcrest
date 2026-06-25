@@ -7,9 +7,12 @@ members = [
     "crates/stagcrest-mesh",
     "crates/stagcrest-circuit",
     "crates/stagcrest-mod-sdk",
-    "crates/stagcrest-mod-host",
+    "crates/stagcrest-mod-server",
+    "crates/stagcrest-mod-client",
+    "crates/stagcrest-net",
+    "crates/stagcrest-server",
+    "crates/stagcrest-client",
     "crates/stagcrest-render",
-    "crates/stagcrest-app",
     "mods/stagcrest-core",
 ]
 
@@ -35,8 +38,6 @@ bevy = { version = "0.16", default-features = false, features = [
     "tonemapping_luts",
     "x11",
     "wayland",
-    "webgl2",
-    "webgpu",
 ] }
 glam = { version = "0.29", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
@@ -44,8 +45,8 @@ serde_json = "1"
 toml = "0.8"
 thiserror = "2"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 wasmi = "0.32"
-gloo-net = "0.6"
 rayon = "1.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
 noise = "0.9"
@@ -54,6 +55,11 @@ redb = "2"
 lz4_flex = "0.11"
 slab = "0.4"
 lru = "0.12"
+postcard = { version = "1.1", features = ["alloc"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time", "macros", "io-util"] }
+clap = { version = "4", features = ["derive"] }
+socket2 = "0.5"
+futures-lite = "2.6"
 
 stagcrest-protocol = { path = "crates/stagcrest-protocol" }
 stagcrest-storage = { path = "crates/stagcrest-storage" }
@@ -61,7 +67,11 @@ stagcrest-world = { path = "crates/stagcrest-world" }
 stagcrest-mesh = { path = "crates/stagcrest-mesh" }
 stagcrest-circuit = { path = "crates/stagcrest-circuit" }
 stagcrest-mod-sdk = { path = "crates/stagcrest-mod-sdk" }
-stagcrest-mod-host = { path = "crates/stagcrest-mod-host" }
+stagcrest-mod-server = { path = "crates/stagcrest-mod-server" }
+stagcrest-mod-client = { path = "crates/stagcrest-mod-client" }
+stagcrest-net = { path = "crates/stagcrest-net" }
+stagcrest-server = { path = "crates/stagcrest-server" }
+stagcrest-client = { path = "crates/stagcrest-client" }
 stagcrest-render = { path = "crates/stagcrest-render" }
 
 [profile.release]

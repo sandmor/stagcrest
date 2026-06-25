@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::render::primitives::Aabb;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use stagcrest_mesh::{ChunkMesh, MeshCache};
-use stagcrest_mod_host::TextureAtlas;
+use stagcrest_mod_client::TextureAtlas;
 use stagcrest_protocol::ChunkPos;
 
 use crate::voxel_material::{VoxelMaterial, voxel_vertex_layout};
