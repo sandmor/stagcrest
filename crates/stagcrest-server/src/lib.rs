@@ -15,7 +15,7 @@ use stagcrest_net::{
     send_message, spawn_tcp_session, ClientMessage, GameMessage, GameTransport, InProcessTransport,
     NetConfig, ServerMessage,
 };
-use stagcrest_protocol::{BlockId, BlockPos, ChunkPos};
+use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 use tokio::net::TcpListener;
 
@@ -70,6 +70,9 @@ pub struct GameServer {
     pub server_id: u64,
     pub client_id: Option<u64>,
     pub(crate) handshake_complete: bool,
+    pub(crate) handshake_pending: bool,
+    cached_manifest: stagcrest_protocol::manifest::ContentManifest,
+    cached_atlas: AtlasTransfer,
 }
 
 impl GameServer {
@@ -122,6 +125,16 @@ impl GameServer {
         let mut circuit = CircuitWorld::new();
         init_circuit_blocks(&mut circuit, &world, &registry);
 
+        let cached = {
+            let mut host = mod_host;
+            let mut reg = registry;
+            std::mem::swap(&mut host.registry, &mut reg);
+            let (cached_manifest, cached_atlas) = host.build_handshake_content(&colormaps);
+            std::mem::swap(&mut host.registry, &mut reg);
+            (host, reg, cached_manifest, cached_atlas)
+        };
+        let (mod_host, registry, cached_manifest, cached_atlas) = cached;
+
         Ok(Self {
             config,
             mod_host,
@@ -145,14 +158,23 @@ impl GameServer {
             server_id: 1,
             client_id: None,
             handshake_complete: false,
+            handshake_pending: false,
+            cached_manifest,
+            cached_atlas,
         })
     }
 
     pub fn build_manifest(&mut self) -> stagcrest_protocol::manifest::ContentManifest {
         std::mem::swap(&mut self.mod_host.registry, &mut self.registry);
-        let manifest = self.mod_host.build_content_manifest(&self.colormaps);
+        let (manifest, atlas) = self.mod_host.build_handshake_content(&self.colormaps);
+        self.cached_atlas = atlas;
         std::mem::swap(&mut self.mod_host.registry, &mut self.registry);
         manifest
+    }
+
+    pub fn build_atlas_transfer(&mut self) -> AtlasTransfer {
+        self.build_manifest();
+        self.cached_atlas.clone()
     }
 
     pub fn handle_client_message(&mut self, msg: ClientMessage) {
@@ -206,6 +228,21 @@ impl GameServer {
         priority.into_iter().chain(bulk)
     }
 
+    pub fn drain_priority(&mut self) -> impl Iterator<Item = GameMessage> + '_ {
+        std::mem::take(&mut self.pending_priority).into_iter()
+    }
+
+    pub fn drain_bulk(&mut self) -> impl Iterator<Item = GameMessage> + '_ {
+        std::mem::take(&mut self.pending_bulk).into_iter()
+    }
+
+    pub(crate) fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) {
+        if self.handshake_pending && wire_ready {
+            self.handshake_pending = false;
+            self.handshake_complete = true;
+        }
+    }
+
     pub fn run_loop<T: GameTransport>(&mut self, transport: &mut T, tick_ms: u64) {
         let dt = tick_ms as f32 / 1000.0;
         loop {
@@ -238,6 +275,7 @@ impl GameServer {
                     return;
                 }
             }
+            self.finish_handshake_if_wire_ready(true);
             transport.idle_wait(Duration::from_millis(tick_ms));
         }
     }
@@ -281,7 +319,12 @@ pub async fn run_standalone(
                 tracing::info!("client connected from {addr}");
                 session = Some(spawn_tcp_session(stream, net_config.clone()).await?);
                 server.handshake_complete = false;
+                server.handshake_pending = false;
                 server.client_id = None;
+                if let Some(conn) = session.as_ref() {
+                    conn.handshake_wire_ready
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
             }
             _ = interval.tick() => {
                 let mut disconnected = false;
@@ -302,12 +345,26 @@ pub async fn run_standalone(
                     }
                     if !disconnected {
                         server.tick(0.016);
-                        for msg in server.drain_outgoing() {
+                        for msg in server.drain_priority() {
                             if send_message(conn, msg).await.is_err() {
                                 disconnected = true;
                                 break;
                             }
                         }
+                        if !disconnected
+                            && conn.handshake_wire_ready.load(std::sync::atomic::Ordering::Acquire)
+                        {
+                            for msg in server.drain_bulk() {
+                                if send_message(conn, msg).await.is_err() {
+                                    disconnected = true;
+                                    break;
+                                }
+                            }
+                        }
+                        server.finish_handshake_if_wire_ready(
+                            conn.handshake_wire_ready
+                                .load(std::sync::atomic::Ordering::Acquire),
+                        );
                     }
                 } else {
                     server.tick(0.016);
@@ -315,6 +372,7 @@ pub async fn run_standalone(
                 if disconnected {
                     session = None;
                     server.handshake_complete = false;
+                    server.handshake_pending = false;
                     server.client_id = None;
                 }
             }

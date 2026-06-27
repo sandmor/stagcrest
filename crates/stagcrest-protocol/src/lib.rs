@@ -1,7 +1,10 @@
 pub mod block_model;
 pub mod manifest;
 
-pub use manifest::{AtlasSnapshot, ColormapSnapshot, ContentManifest, RegistrySnapshot};
+pub use manifest::{
+    AtlasTransfer, ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot,
+    TextureWireDef,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -506,7 +509,6 @@ impl BlockTextures {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub enum CircuitKind {
     Source {
         level: u8,

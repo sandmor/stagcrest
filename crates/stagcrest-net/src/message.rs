@@ -1,6 +1,9 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
-use stagcrest_protocol::{manifest::ContentManifest, BlockId, BlockPos, BlockState, ChunkPos};
+use stagcrest_protocol::{
+    manifest::{AtlasTransfer, ContentManifest},
+    BlockId, BlockPos, BlockState, ChunkPos,
+};
 
 /// Handshake: client → server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +112,7 @@ pub enum ServerMessage {
     Hello(ServerHello),
     Reject(HelloReject),
     Manifest(ContentManifest),
+    AtlasTransfer(AtlasTransfer),
     Initial(InitialState),
     ChunkSnapshot(ChunkSnapshot),
     ChunkUnload(ChunkPos),
@@ -129,8 +133,7 @@ impl GameMessage {
     pub fn is_bulk(&self) -> bool {
         matches!(
             self,
-            GameMessage::Server(ServerMessage::Manifest(_))
-                | GameMessage::Server(ServerMessage::ChunkSnapshot(_))
+            GameMessage::Server(ServerMessage::ChunkSnapshot(_))
         )
     }
 }

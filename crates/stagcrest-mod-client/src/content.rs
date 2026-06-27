@@ -1,4 +1,4 @@
-use stagcrest_protocol::manifest::ContentManifest;
+use stagcrest_protocol::manifest::{AtlasTransfer, ContentManifest};
 
 use crate::atlas::TextureAtlas;
 use crate::biome::BiomeRegistryClient;
@@ -6,7 +6,7 @@ use crate::colormap::ColormapSet;
 use crate::models::ModelRegistry;
 use crate::registry::BlockRegistry;
 
-/// Client-side content rebuilt from a server `ContentManifest`.
+/// Client-side content rebuilt from server handshake messages.
 pub struct ContentRuntime {
     pub registry: BlockRegistry,
     pub atlas: TextureAtlas,
@@ -17,9 +17,9 @@ pub struct ContentRuntime {
 }
 
 impl ContentRuntime {
-    pub fn from_manifest(manifest: ContentManifest) -> Self {
-        let registry = BlockRegistry::from_snapshot(manifest.registry);
-        let atlas = TextureAtlas::from_snapshot(&manifest.atlas);
+    pub fn from_parts(manifest: ContentManifest, atlas: AtlasTransfer) -> Self {
+        let registry = BlockRegistry::from_wire_snapshot(manifest.registry);
+        let atlas = TextureAtlas::from_transfer(&atlas);
         let colormaps = ColormapSet::from_snapshot(&manifest.colormaps);
         let biomes = BiomeRegistryClient::from_snapshot(manifest.biomes);
         Self {
@@ -34,18 +34,30 @@ impl ContentRuntime {
 }
 
 impl TextureAtlas {
-    pub fn from_snapshot(snap: &stagcrest_protocol::AtlasSnapshot) -> Self {
+    pub fn from_transfer(transfer: &AtlasTransfer) -> Self {
+        let img = image::load_from_memory(&transfer.png).expect("atlas PNG decode");
+        let rgba = img.to_rgba8();
+        assert_eq!(
+            rgba.width(),
+            transfer.width,
+            "atlas PNG width mismatch"
+        );
+        assert_eq!(
+            rgba.height(),
+            transfer.height,
+            "atlas PNG height mismatch"
+        );
         Self {
-            width: snap.width,
-            height: snap.height,
-            pixels: snap.pixels.clone(),
-            placements: snap.placements.clone(),
+            width: transfer.width,
+            height: transfer.height,
+            pixels: rgba.into_raw(),
+            placements: transfer.placements.clone(),
         }
     }
 }
 
 impl ColormapSet {
-    pub fn from_snapshot(snap: &stagcrest_protocol::ColormapSnapshot) -> Self {
+    pub fn from_snapshot(snap: &stagcrest_protocol::manifest::ColormapSnapshot) -> Self {
         Self {
             grass: snap.grass.clone(),
             grass_w: snap.grass_w,

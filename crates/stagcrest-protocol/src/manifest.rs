@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AtlasRect, BlockDef, BlockId, TextureDef, TextureId};
+use crate::{AtlasRect, BlockDef, BlockId, TextureAnimation, TextureDef, TextureId};
 
-/// Serializable block registry state sent from server to client.
+/// Full registry snapshot including texture pixels (in-process / tests only).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrySnapshot {
     pub blocks: Vec<BlockDef>,
@@ -15,13 +15,37 @@ pub struct RegistrySnapshot {
     pub next_texture_id: u32,
 }
 
-/// Packed texture atlas pixels and placement rects.
+/// Texture metadata sent on the wire without pixel bytes (pixels live in `AtlasTransfer`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AtlasSnapshot {
+pub struct TextureWireDef {
+    pub id: TextureId,
+    pub namespaced_id: String,
     pub width: u32,
     pub height: u32,
-    pub pixels: Vec<u8>,
+    #[serde(default)]
+    pub animation: Option<TextureAnimation>,
+}
+
+/// Serializable block registry state sent from server to client (no texture pixels).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryWireSnapshot {
+    pub blocks: Vec<BlockDef>,
+    pub textures: Vec<TextureWireDef>,
+    pub placeable: Vec<BlockId>,
+    pub atlas_uvs: Vec<(TextureId, AtlasRect)>,
+    pub atlas_width: u32,
+    pub atlas_height: u32,
+    pub next_block_id: u32,
+    pub next_texture_id: u32,
+}
+
+/// Lossless PNG atlas payload sent after the content manifest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AtlasTransfer {
+    pub width: u32,
+    pub height: u32,
     pub placements: Vec<(TextureId, AtlasRect)>,
+    pub png: Vec<u8>,
 }
 
 /// Colormap PNG bytes for grass/foliage/water tinting.
@@ -61,12 +85,11 @@ pub struct BiomesSnapshot {
     pub biomes: Vec<BiomeClientDef>,
 }
 
-/// Full content package sent once after handshake.
+/// Content metadata sent once after handshake (atlas follows separately).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentManifest {
     pub loaded_mods: Vec<String>,
-    pub registry: RegistrySnapshot,
-    pub atlas: AtlasSnapshot,
+    pub registry: RegistryWireSnapshot,
     pub colormaps: ColormapSnapshot,
     #[serde(default)]
     pub biomes: BiomesSnapshot,

@@ -26,3 +26,6 @@ glam.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
 futures-lite.workspace = true
+
+[dev-dependencies]
+stagcrest-mod-client.workspace = true

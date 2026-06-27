@@ -54,9 +54,6 @@ impl Default for GameConfig {
 
 pub struct GamePlugin;
 
-const DRY_AMBIENT_BRIGHTNESS: f32 = 800.0;
-const WET_AMBIENT_BRIGHTNESS: f32 = 520.0;
-
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameConfig>()

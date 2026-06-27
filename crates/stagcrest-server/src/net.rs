@@ -27,9 +27,6 @@ pub fn send_handshake(server: &mut GameServer) {
         world_seed,
     })));
 
-    let manifest = server.build_manifest();
-    server.queue_bulk(GameMessage::Server(ServerMessage::Manifest(manifest)));
-
     let spawn = server.spawn_position();
     server.queue_priority(GameMessage::Server(ServerMessage::Initial(InitialState {
         spawn_x: spawn.x as f32 + 0.5,
@@ -37,7 +34,12 @@ pub fn send_handshake(server: &mut GameServer) {
         spawn_z: spawn.z as f32 + 0.5,
         render_distance: server.config.render_distance,
     })));
-    server.handshake_complete = true;
+
+    let manifest = server.cached_manifest.clone();
+    server.queue_priority(GameMessage::Server(ServerMessage::Manifest(manifest)));
+    let atlas = server.cached_atlas.clone();
+    server.queue_priority(GameMessage::Server(ServerMessage::AtlasTransfer(atlas)));
+    server.handshake_pending = true;
 }
 
 pub fn handle_pose(server: &mut GameServer, pose: PlayerPose) {

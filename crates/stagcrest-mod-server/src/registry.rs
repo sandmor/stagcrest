@@ -194,6 +194,34 @@ impl BlockRegistry {
         kind.as_f32()
     }
 
+    pub fn to_wire_snapshot(&self) -> stagcrest_protocol::RegistryWireSnapshot {
+        use stagcrest_protocol::manifest::TextureWireDef;
+        stagcrest_protocol::RegistryWireSnapshot {
+            blocks: self.blocks.values().cloned().collect(),
+            textures: self
+                .textures
+                .values()
+                .map(|tex| TextureWireDef {
+                    id: tex.id,
+                    namespaced_id: tex.namespaced_id.clone(),
+                    width: tex.width,
+                    height: tex.height,
+                    animation: tex.animation.clone(),
+                })
+                .collect(),
+            placeable: self.placeable.clone(),
+            atlas_uvs: self
+                .atlas_uvs
+                .iter()
+                .map(|(&id, &rect)| (id, rect))
+                .collect(),
+            atlas_width: self.atlas_width,
+            atlas_height: self.atlas_height,
+            next_block_id: self.next_block_id,
+            next_texture_id: self.next_texture_id,
+        }
+    }
+
     pub fn to_snapshot(&self) -> stagcrest_protocol::RegistrySnapshot {
         stagcrest_protocol::RegistrySnapshot {
             blocks: self.blocks.values().cloned().collect(),

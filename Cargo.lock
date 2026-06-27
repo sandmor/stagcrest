@@ -4093,6 +4093,7 @@ dependencies = [
  "glam",
  "rayon",
  "stagcrest-circuit",
+ "stagcrest-mod-client",
  "stagcrest-mod-server",
  "stagcrest-net",
  "stagcrest-protocol",

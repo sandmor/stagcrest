@@ -333,7 +333,6 @@ fn capture_mesh_snapshot(
     let power_grid = capture_power_grid(pos, power_lookup);
 
     let climate = replica.and_then(|r| {
-        let grid = r.biome_grid(pos)?;
         let wx = pos.x * CHUNK_SIZE + CHUNK_SIZE / 2;
         let wz = pos.z * CHUNK_SIZE + CHUNK_SIZE / 2;
         let biome_idx = r.biome_at(BlockPos::new(wx, pos.y * CHUNK_SIZE, wz))?;

@@ -134,14 +134,16 @@ impl GameNetClient {
             return out;
         };
         loop {
-            let Ok(Some(msg)) = transport.try_recv() else {
-                break;
-            };
-            if let GameMessage::Server(server_msg) = msg {
-                if let ServerMessage::Pong { nonce } = &server_msg {
-                    pongs.push(*nonce);
+            match transport.try_recv() {
+                Ok(Some(GameMessage::Server(server_msg))) => {
+                    if let ServerMessage::Pong { nonce } = &server_msg {
+                        pongs.push(*nonce);
+                    }
+                    out.push(server_msg);
                 }
-                out.push(server_msg);
+                Ok(Some(_)) => {}
+                Ok(None) => break,
+                Err(_) => break,
             }
         }
         for nonce in pongs {

@@ -1,4 +1,5 @@
 use std::io::{ErrorKind, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -137,7 +138,7 @@ impl TcpTransport {
     }
 
     fn read_more(&mut self) -> Result<bool, TransportError> {
-        let mut tmp = [0u8; 4096];
+        let mut tmp = [0u8; 65536];
         match self.stream.read(&mut tmp) {
             Ok(0) => Err(TransportError::Closed),
             Ok(n) => {
@@ -165,8 +166,13 @@ impl TcpTransport {
                     return Ok(None);
                 }
                 let payload = self.read_buf[4..4 + len].to_vec();
-                self.read_buf.drain(..4 + len);
-                self.pending_payload = Some(payload);
+                match decode_payload::<GameMessage>(&payload) {
+                    Ok(msg) => {
+                        self.read_buf.drain(..4 + len);
+                        return Ok(Some(msg));
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
 
             if let Some(payload) = self.pending_payload.take() {
@@ -182,11 +188,12 @@ impl GameTransport for TcpTransport {
         if let Some(msg) = self.try_decode_frame()? {
             return Ok(Some(msg));
         }
-        match self.read_more() {
-            Ok(true) => self.try_decode_frame(),
-            Ok(false) => Ok(None),
-            Err(e) => Err(e),
+        while self.read_more()? {
+            if let Some(msg) = self.try_decode_frame()? {
+                return Ok(Some(msg));
+            }
         }
+        Ok(None)
     }
 
     fn send(&mut self, msg: GameMessage) -> Result<(), TransportError> {
@@ -215,6 +222,8 @@ pub struct AsyncTcpSession {
     pub incoming: async_mpsc::Receiver<GameMessage>,
     pub outgoing_priority: async_mpsc::Sender<GameMessage>,
     pub outgoing_bulk: async_mpsc::Sender<GameMessage>,
+    /// Set by the writer after the Manifest frame is fully flushed to TCP.
+    pub handshake_wire_ready: Arc<AtomicBool>,
 }
 
 pub async fn spawn_tcp_session(
@@ -225,6 +234,7 @@ pub async fn spawn_tcp_session(
     let (incoming_tx, incoming_rx) = async_mpsc::channel(config.max_priority_queue);
     let (priority_tx, priority_rx) = async_mpsc::channel(config.max_priority_queue);
     let (bulk_tx, bulk_rx) = async_mpsc::channel(config.max_bulk_queue);
+    let handshake_wire_ready = Arc::new(AtomicBool::new(false));
 
     let (mut read_half, mut write_half) = stream.into_split();
 
@@ -264,27 +274,60 @@ pub async fn spawn_tcp_session(
 
     // Writer task
     let writer_cfg = config.clone();
+    let writer_handshake_ready = handshake_wire_ready.clone();
     tokio::spawn(async move {
+        use crate::message::ServerMessage;
         let mut priority_rx = priority_rx;
         let mut bulk_rx = bulk_rx;
         let mut write_buf: Vec<u8> = Vec::new();
-        loop {
+        'writer: loop {
             let mut wrote = false;
             while let Ok(msg) = priority_rx.try_recv() {
-                if let Ok(payload) = encode_payload(&msg) {
-                    if let Ok(framed) = wrap_frame(&payload) {
-                        write_buf.extend_from_slice(&framed);
-                        wrote = true;
-                    }
-                }
-            }
-            if write_buf.len() >= 8192 || (!wrote && write_buf.is_empty()) {
-                if let Ok(msg) = bulk_rx.try_recv() {
-                    if let Ok(payload) = encode_payload(&msg) {
-                        if let Ok(framed) = wrap_frame(&payload) {
+                let atlas_sent = matches!(
+                    msg,
+                    GameMessage::Server(ServerMessage::AtlasTransfer(_))
+                );
+                match encode_payload(&msg) {
+                    Ok(payload) => match wrap_frame(&payload) {
+                        Ok(framed) => {
                             write_buf.extend_from_slice(&framed);
+                            if !write_buf.is_empty() {
+                                if writer_cfg.sim_latency_ms > 0 {
+                                    tokio::time::sleep(Duration::from_millis(
+                                        writer_cfg.sim_latency_ms,
+                                    ))
+                                    .await;
+                                }
+                                if write_half.write_all(&write_buf).await.is_err() {
+                                    break 'writer;
+                                }
+                                if write_half.flush().await.is_err() {
+                                    break 'writer;
+                                }
+                                write_buf.clear();
+                                if atlas_sent {
+                                    writer_handshake_ready.store(true, Ordering::Release);
+                                }
+                            }
                             wrote = true;
                         }
+                        Err(_) => {}
+                    },
+                    Err(_) => {}
+                }
+            }
+            if writer_handshake_ready.load(Ordering::Acquire)
+                && (write_buf.len() >= 8192 || (!wrote && write_buf.is_empty()))
+            {
+                if let Ok(msg) = bulk_rx.try_recv() {
+                    match encode_payload(&msg) {
+                        Ok(payload) => {
+                            if let Ok(framed) = wrap_frame(&payload) {
+                                write_buf.extend_from_slice(&framed);
+                                wrote = true;
+                            }
+                        }
+                        Err(_) => {}
                     }
                 }
             }
@@ -307,6 +350,7 @@ pub async fn spawn_tcp_session(
         incoming: incoming_rx,
         outgoing_priority: priority_tx,
         outgoing_bulk: bulk_tx,
+        handshake_wire_ready,
     })
 }
 

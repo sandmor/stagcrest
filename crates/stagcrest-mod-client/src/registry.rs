@@ -211,7 +211,8 @@ impl BlockRegistry {
         }
     }
 
-    pub fn from_snapshot(snap: stagcrest_protocol::RegistrySnapshot) -> Self {
+    pub fn from_wire_snapshot(snap: stagcrest_protocol::RegistryWireSnapshot) -> Self {
+        use stagcrest_protocol::{TextureDef, manifest::TextureWireDef};
         let mut registry = Self {
             next_block_id: snap.next_block_id,
             next_texture_id: snap.next_texture_id,
@@ -220,10 +221,25 @@ impl BlockRegistry {
             ..Default::default()
         };
         for tex in snap.textures {
-            registry
-                .texture_by_name
-                .insert(tex.namespaced_id.clone(), tex.id);
-            registry.textures.insert(tex.id, tex);
+            let TextureWireDef {
+                id,
+                namespaced_id,
+                width,
+                height,
+                animation,
+            } = tex;
+            registry.texture_by_name.insert(namespaced_id.clone(), id);
+            registry.textures.insert(
+                id,
+                TextureDef {
+                    id,
+                    namespaced_id,
+                    width,
+                    height,
+                    rgba: Vec::new(),
+                    animation,
+                },
+            );
         }
         for def in snap.blocks {
             registry
