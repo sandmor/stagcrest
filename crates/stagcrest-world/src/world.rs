@@ -89,11 +89,11 @@ impl World {
         &mut self,
         pos: ChunkPos,
         chunk: stagcrest_storage::InactiveChunk,
-    ) -> bool {
-        let evicted = self.arena.insert_inactive(pos, chunk);
+    ) -> crate::arena::InsertInactiveResult {
+        let result = self.arena.insert_inactive(pos, chunk);
         self.arena.mark_generated(pos);
         self.mark_dirty_face_neighbors(pos);
-        evicted
+        result
     }
 
     pub fn pack_chunk_for_storage(

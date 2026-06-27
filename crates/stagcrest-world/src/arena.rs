@@ -48,6 +48,12 @@ impl ChunkMeta {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InsertInactiveResult {
+    pub replaced_existing: bool,
+    pub lru_evicted: Option<ChunkPos>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChunkSlot {
     Inactive,
     Active(usize),
@@ -100,20 +106,25 @@ impl ChunkArena {
         entry.modified = true;
     }
 
-    pub fn insert_inactive(&mut self, pos: ChunkPos, chunk: InactiveChunk) -> bool {
+    pub fn insert_inactive(&mut self, pos: ChunkPos, chunk: InactiveChunk) -> InsertInactiveResult {
         if let Some(ChunkSlot::Active(token)) = self.slots.remove(&pos) {
             self.active.remove(token);
         }
         let is_new = !self.lru.contains(&pos);
+        let mut lru_evicted = None;
         if is_new && self.lru.len() == self.lru.cap().get() {
             if let Some((evicted_pos, _)) = self.lru.pop_lru() {
                 self.slots.remove(&evicted_pos);
                 self.meta.remove(&evicted_pos);
+                lru_evicted = Some(evicted_pos);
             }
         }
-        let evicted = self.lru.put(pos, chunk).is_some();
+        let replaced_existing = self.lru.put(pos, chunk).is_some();
         self.slots.insert(pos, ChunkSlot::Inactive);
-        evicted
+        InsertInactiveResult {
+            replaced_existing,
+            lru_evicted,
+        }
     }
 
     pub fn inactive(&self, pos: ChunkPos) -> Option<&InactiveChunk> {
@@ -187,5 +198,43 @@ impl ChunkArena {
 
     pub fn loaded_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
         self.slots.keys().copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stagcrest_protocol::{BlockId, BlockState};
+
+    fn dummy_inactive() -> InactiveChunk {
+        let mut chunk = Chunk::new();
+        chunk.fill(BlockId(0), BlockState(0));
+        chunk.to_inactive().unwrap()
+    }
+
+    #[test]
+    fn insert_inactive_reports_lru_eviction() {
+        let mut arena = ChunkArena::with_capacity(2);
+        let a = ChunkPos { x: 0, y: 0, z: 0 };
+        let b = ChunkPos { x: 1, y: 0, z: 0 };
+        let c = ChunkPos { x: 2, y: 0, z: 0 };
+
+        assert!(
+            arena
+                .insert_inactive(a, dummy_inactive())
+                .lru_evicted
+                .is_none()
+        );
+        assert!(
+            arena
+                .insert_inactive(b, dummy_inactive())
+                .lru_evicted
+                .is_none()
+        );
+        let result = arena.insert_inactive(c, dummy_inactive());
+        assert_eq!(result.lru_evicted, Some(a));
+        assert!(!arena.contains(a));
+        assert!(arena.contains(b));
+        assert!(arena.contains(c));
     }
 }

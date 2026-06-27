@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use stagcrest_mod_client::{sample_colormap_rgb, BiomeRegistryClient, InterpolatedEnvironment};
 use stagcrest_protocol::BlockPos;
 
+use crate::chunk_streaming::BiomeGridCache;
 use crate::game::ModContext;
 use crate::player::FlyCamera;
 use crate::world_replica::WorldReplica;
@@ -45,6 +46,7 @@ pub fn update_player_environment(
     time: Res<Time>,
     mod_ctx: Option<Res<ModContext>>,
     world: Option<Res<WorldReplica>>,
+    biome_cache: Option<Res<BiomeGridCache>>,
     camera: Query<&Transform, With<FlyCamera>>,
     mut env: ResMut<PlayerEnvironment>,
 ) {
@@ -76,8 +78,10 @@ pub fn update_player_environment(
         env.submersion = (env.submersion - SUBMERSION_LERP_SPEED * dt).max(target);
     }
 
-    if let (Some(ctx), Some(world)) = (mod_ctx.as_deref(), world.as_deref()) {
-        let interp = sample_biome_environment(&ctx.biomes, world, eye_block);
+    if let (Some(ctx), Some(_world), Some(biome_cache)) =
+        (mod_ctx.as_deref(), world.as_deref(), biome_cache.as_deref())
+    {
+        let interp = sample_biome_environment(&ctx.biomes, biome_cache, eye_block);
         env.temperature = interp.temperature;
         env.downfall = interp.downfall;
         env.fog_color = interp.fog_color;
@@ -113,8 +117,8 @@ pub fn update_player_environment(
 
 fn sample_biome_environment(
     biomes: &BiomeRegistryClient,
-    world: &WorldReplica,
+    biome_cache: &BiomeGridCache,
     pos: BlockPos,
 ) -> InterpolatedEnvironment {
-    biomes.interpolate_at(pos, |chunk| world.biome_grid(chunk).map(|g| *g))
+    biomes.interpolate_at(pos, |chunk| biome_cache.biome_grid(chunk).map(|g| *g))
 }

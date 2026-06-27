@@ -177,6 +177,7 @@ fn poll_connection_system(
             biomes: runtime.biomes,
         });
         commands.insert_resource(world);
+        commands.insert_resource(crate::chunk_streaming::BiomeGridCache::default());
         commands.insert_resource(BlockAtlasResource {
             atlas: runtime.atlas,
             grass_tint: Color::srgb(grass_rgb[0], grass_rgb[1], grass_rgb[2]),

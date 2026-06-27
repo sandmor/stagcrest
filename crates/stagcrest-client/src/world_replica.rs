@@ -1,54 +1,53 @@
 use bevy::prelude::*;
 use stagcrest_net::{BlockUpdate, ChunkSnapshot, ServerMessage};
-use stagcrest_protocol::manifest::{BIOME_GRID_SIZE, BIOME_GRID_VOLUME};
-use stagcrest_protocol::{BlockPos, ChunkPos};
+use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_storage::{decompress_stored, InactiveChunk};
 use stagcrest_world::World;
-use std::collections::HashMap;
 
+use crate::chunk_streaming::{
+    drop_chunk_assets, unload_chunk, BiomeGridCache,
+};
 use crate::mesh_scheduler::{MeshScheduler, RemeshUrgency};
 
 #[derive(Resource)]
 pub struct WorldReplica {
     pub world: World,
-    pub biome_grids: HashMap<ChunkPos, [u8; BIOME_GRID_VOLUME]>,
 }
 
 impl WorldReplica {
     pub fn new(world: World) -> Self {
-        Self {
-            world,
-            biome_grids: HashMap::new(),
-        }
+        Self { world }
     }
 
-    pub fn biome_grid(&self, pos: ChunkPos) -> Option<&[u8; BIOME_GRID_VOLUME]> {
-        self.biome_grids.get(&pos)
-    }
-
-    pub fn biome_at(&self, block_pos: BlockPos) -> Option<u16> {
-        let chunk = block_pos.chunk_pos();
-        let grid = self.biome_grids.get(&chunk)?;
-        let lx = block_pos.x.rem_euclid(stagcrest_protocol::CHUNK_SIZE);
-        let ly = block_pos.y.rem_euclid(stagcrest_protocol::CHUNK_SIZE);
-        let lz = block_pos.z.rem_euclid(stagcrest_protocol::CHUNK_SIZE);
-        let cell = stagcrest_protocol::CHUNK_SIZE / BIOME_GRID_SIZE as i32;
-        let gx = (lx / cell).clamp(0, 3) as usize;
-        let gy = (ly / cell).clamp(0, 3) as usize;
-        let gz = (lz / cell).clamp(0, 3) as usize;
-        let idx = gx + gy * 4 + gz * 16;
-        Some(grid[idx] as u16)
-    }
-
-    pub fn apply_server_message(&mut self, msg: ServerMessage, mesh_scheduler: &mut MeshScheduler) {
+    pub fn apply_server_message(
+        &mut self,
+        msg: ServerMessage,
+        mesh_scheduler: &mut MeshScheduler,
+        mesh_cache: &mut stagcrest_mesh::MeshCache,
+        biome_cache: &mut BiomeGridCache,
+        power: &mut CircuitPowerOverlay,
+        commands: &mut Commands,
+    ) {
         match msg {
             ServerMessage::ChunkSnapshot(snapshot) => {
-                self.apply_chunk_snapshot(snapshot, mesh_scheduler);
+                self.apply_chunk_snapshot(
+                    snapshot,
+                    mesh_scheduler,
+                    mesh_cache,
+                    biome_cache,
+                    power,
+                    commands,
+                );
             }
             ServerMessage::ChunkUnload(pos) => {
-                self.world.remove_chunk(pos);
-                self.biome_grids.remove(&pos);
-                mesh_scheduler.cancel(pos);
+                unload_chunk(
+                    pos,
+                    self,
+                    mesh_scheduler,
+                    mesh_cache,
+                    power,
+                    commands,
+                );
             }
             ServerMessage::BlockUpdate(update) => {
                 self.apply_block_update(update, mesh_scheduler);
@@ -61,6 +60,10 @@ impl WorldReplica {
         &mut self,
         snapshot: ChunkSnapshot,
         mesh_scheduler: &mut MeshScheduler,
+        mesh_cache: &mut stagcrest_mesh::MeshCache,
+        biome_cache: &mut BiomeGridCache,
+        power: &mut CircuitPowerOverlay,
+        commands: &mut Commands,
     ) {
         let Ok(wire) = decompress_stored(&snapshot.compressed) else {
             tracing::warn!("failed to decompress chunk {:?}", snapshot.pos);
@@ -70,13 +73,22 @@ impl WorldReplica {
             tracing::warn!("failed to decode chunk {:?}", snapshot.pos);
             return;
         };
-        self.world.insert_inactive_chunk(snapshot.pos, inactive);
+        let insert_result = self.world.insert_inactive_chunk(snapshot.pos, inactive);
+        if let Some(evicted) = insert_result.lru_evicted {
+            drop_chunk_assets(
+                evicted,
+                mesh_scheduler,
+                mesh_cache,
+                power,
+                commands,
+            );
+        }
         self.world.finalize_generated_chunk(snapshot.pos);
         if let Some(grid) = snapshot.biome_grid {
             if grid.len() == BIOME_GRID_VOLUME {
                 let mut arr = [0u8; BIOME_GRID_VOLUME];
                 arr.copy_from_slice(&grid);
-                self.biome_grids.insert(snapshot.pos, arr);
+                biome_cache.insert(snapshot.pos, arr);
             }
         }
         if self.world.has_chunk(snapshot.pos) {
@@ -104,6 +116,7 @@ impl std::ops::DerefMut for WorldReplica {
 }
 
 use stagcrest_mod_client::PowerLookup;
+use stagcrest_protocol::BlockPos;
 
 /// Power levels from server for redstone dust tinting.
 #[derive(Resource, Default)]

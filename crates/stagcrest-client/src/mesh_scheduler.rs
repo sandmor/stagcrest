@@ -3,6 +3,7 @@ use bevy::tasks::Task;
 use stagcrest_mesh::{build_chunk_mesh_snapshot, capture_power_grid, MeshSnapshot};
 use stagcrest_protocol::{BlockPos, ChunkPos, CHUNK_SIZE};
 
+use crate::chunk_streaming::BiomeGridCache;
 use crate::world_replica::WorldReplica;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::future::Future;
@@ -105,64 +106,12 @@ impl MeshScheduler {
         self.pending.remove(&pos);
         self.mesh_version.remove(&pos);
         self.in_progress.remove(&pos);
+        self.ready_meshes.retain(|(p, _)| *p != pos);
         let tasks_before = self.tasks.len();
         self.tasks.retain(|t| t.pos != pos);
         self.mesh_in_flight = self
             .mesh_in_flight
             .saturating_sub(tasks_before - self.tasks.len());
-    }
-
-    pub fn prune_out_of_stream(
-        &mut self,
-        center_x: i32,
-        center_y: i32,
-        center_z: i32,
-        valid: bool,
-        horizontal_radius: i32,
-        vertical_radius: i32,
-    ) {
-        if !valid {
-            return;
-        }
-        self.pending.retain(|&pos, _| {
-            chunk_in_stream(
-                pos,
-                center_x,
-                center_y,
-                center_z,
-                horizontal_radius,
-                vertical_radius,
-            )
-        });
-        self.mesh_version.retain(|pos, _| {
-            chunk_in_stream(
-                *pos,
-                center_x,
-                center_y,
-                center_z,
-                horizontal_radius,
-                vertical_radius,
-            )
-        });
-        let out_of_stream: Vec<_> = self
-            .in_progress
-            .iter()
-            .copied()
-            .filter(|pos| {
-                !chunk_in_stream(
-                    *pos,
-                    center_x,
-                    center_y,
-                    center_z,
-                    horizontal_radius,
-                    vertical_radius,
-                )
-            })
-            .collect();
-        for pos in out_of_stream {
-            self.cancel(pos);
-        }
-        self.rebuild_heap_from_pending();
     }
 
     fn rebuild_heap_from_pending(&mut self) {
@@ -194,7 +143,7 @@ impl MeshScheduler {
         world: &stagcrest_world::World,
         ctx: &crate::game::ModContext,
         power: Option<&crate::world_replica::CircuitPowerOverlay>,
-        replica: Option<&crate::world_replica::WorldReplica>,
+        biome_cache: Option<&BiomeGridCache>,
     ) -> bool {
         if self.mesh_in_flight >= MAX_MESH_IN_FLIGHT {
             return false;
@@ -235,7 +184,9 @@ impl MeshScheduler {
                 continue;
             }
 
-            let Some(snapshot) = capture_mesh_snapshot(req.pos, world, ctx, power, replica) else {
+            let Some(snapshot) =
+                capture_mesh_snapshot(req.pos, world, ctx, power, biome_cache)
+            else {
                 deferred.push(req);
                 continue;
             };
@@ -286,19 +237,6 @@ impl MeshScheduler {
     }
 }
 
-fn chunk_in_stream(
-    pos: ChunkPos,
-    center_x: i32,
-    center_y: i32,
-    center_z: i32,
-    horizontal_radius: i32,
-    vertical_radius: i32,
-) -> bool {
-    (pos.x - center_x).abs() <= horizontal_radius
-        && (pos.z - center_z).abs() <= horizontal_radius
-        && (pos.y - center_y).abs() <= vertical_radius
-}
-
 fn cpu_pool() -> &'static bevy::tasks::TaskPool {
     bevy::tasks::AsyncComputeTaskPool::get()
 }
@@ -327,15 +265,15 @@ fn capture_mesh_snapshot(
     world: &stagcrest_world::World,
     ctx: &crate::game::ModContext,
     power: Option<&crate::world_replica::CircuitPowerOverlay>,
-    replica: Option<&crate::world_replica::WorldReplica>,
+    biome_cache: Option<&BiomeGridCache>,
 ) -> Option<MeshSnapshot> {
     let power_lookup = power.map(|p| p as &dyn stagcrest_mod_client::PowerLookup);
     let power_grid = capture_power_grid(pos, power_lookup);
 
-    let climate = replica.and_then(|r| {
+    let climate = biome_cache.and_then(|cache| {
         let wx = pos.x * CHUNK_SIZE + CHUNK_SIZE / 2;
         let wz = pos.z * CHUNK_SIZE + CHUNK_SIZE / 2;
-        let biome_idx = r.biome_at(BlockPos::new(wx, pos.y * CHUNK_SIZE, wz))?;
+        let biome_idx = cache.biome_at(BlockPos::new(wx, pos.y * CHUNK_SIZE, wz))?;
         let biome = ctx.biomes.biome_by_index(biome_idx)?;
         Some(stagcrest_mesh::MeshClimateSnapshot {
             colormaps: Arc::new(ctx.colormaps.clone()),
@@ -359,12 +297,20 @@ pub fn mesh_dispatch(
     mod_ctx: Option<Res<crate::game::ModContext>>,
     world: Res<crate::world_replica::WorldReplica>,
     power: Option<Res<crate::world_replica::CircuitPowerOverlay>>,
+    biome_cache: Option<Res<BiomeGridCache>>,
 ) {
     let Some(ctx) = mod_ctx else { return };
     scheduler.background_dispatched_this_frame = 0;
     scheduler.rebuild_heap_from_pending();
     let mut spins = 0;
-    while spins < 64 && scheduler.dispatch_one(&*world, &ctx, power.as_deref(), Some(&world)) {
+    while spins < 64
+        && scheduler.dispatch_one(
+            &*world,
+            &ctx,
+            power.as_deref(),
+            biome_cache.as_deref(),
+        )
+    {
         spins += 1;
     }
 }
@@ -376,9 +322,12 @@ pub fn mesh_poll(mut scheduler: ResMut<MeshScheduler>) {
 pub fn mesh_commit_meshes(
     mut scheduler: ResMut<MeshScheduler>,
     mut cache: ResMut<stagcrest_render::MeshCacheResource>,
+    world: Res<WorldReplica>,
 ) {
     while let Some((pos, mesh)) = scheduler.ready_meshes.pop_front() {
-        cache.0.commit_mesh(pos, mesh);
+        if world.has_chunk(pos) && world.is_generated(pos) {
+            cache.0.commit_mesh(pos, mesh);
+        }
     }
 }
 

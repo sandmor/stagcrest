@@ -1,3 +1,6 @@
+use crate::chunk_streaming::{
+    on_chunk_unloaded_remove_biome, BiomeGridCache, ChunkUnloaded,
+};
 use crate::environment::{self, PlayerEnvironment};
 use crate::mesh_scheduler::{
     mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll, mesh_recover_unmeshed,
@@ -63,6 +66,9 @@ impl Plugin for GamePlugin {
             .init_resource::<VoxelCamera>()
             .init_resource::<targeting::BlockTarget>()
             .init_resource::<CircuitPowerOverlay>()
+            .init_resource::<BiomeGridCache>()
+            .add_event::<ChunkUnloaded>()
+            .add_observer(on_chunk_unloaded_remove_biome)
             .add_plugins(VoxelRenderPlugin)
             .add_systems(
                 Update,
@@ -108,8 +114,10 @@ fn net_poll_system(
     mut net: ResMut<GameNetClient>,
     mut world: ResMut<WorldReplica>,
     mut mesh_scheduler: ResMut<MeshScheduler>,
-    _mod_ctx: Option<Res<ModContext>>,
+    mut mesh_cache: ResMut<MeshCacheResource>,
+    mut biome_cache: ResMut<BiomeGridCache>,
     mut power_overlay: ResMut<CircuitPowerOverlay>,
+    mut commands: Commands,
 ) {
     for msg in net.poll() {
         match msg {
@@ -117,7 +125,14 @@ fn net_poll_system(
                 apply_power_batch(&mut power_overlay, batch.updates, &mut mesh_scheduler);
             }
             other => {
-                world.apply_server_message(other, &mut mesh_scheduler);
+                world.apply_server_message(
+                    other,
+                    &mut mesh_scheduler,
+                    &mut mesh_cache.0,
+                    &mut biome_cache,
+                    &mut power_overlay,
+                    &mut commands,
+                );
             }
         }
     }
@@ -167,6 +182,7 @@ fn cleanup_game_session(
     commands.remove_resource::<BlockAtlasResource>();
     commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<MeshScheduler>();
+    commands.remove_resource::<BiomeGridCache>();
     commands.remove_resource::<targeting::BlockTarget>();
     commands.remove_resource::<PlayerEnvironment>();
     commands.remove_resource::<CircuitPowerOverlay>();

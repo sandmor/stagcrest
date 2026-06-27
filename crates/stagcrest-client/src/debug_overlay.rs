@@ -6,6 +6,7 @@ use stagcrest_protocol::{
 };
 use stagcrest_world::RaycastHit;
 
+use crate::chunk_streaming::BiomeGridCache;
 use crate::environment::PlayerEnvironment;
 use crate::game::{AppState, GameConfig, ModContext};
 use crate::net_client::GameNetClient;
@@ -97,6 +98,7 @@ fn update_debug_overlay(
     time: Res<Time>,
     mod_ctx: Option<Res<ModContext>>,
     world: Option<Res<WorldReplica>>,
+    biome_cache: Option<Res<BiomeGridCache>>,
     config: Res<GameConfig>,
     net: Option<Res<GameNetClient>>,
     env: Res<PlayerEnvironment>,
@@ -132,6 +134,7 @@ fn update_debug_overlay(
         fly,
         mod_ctx.as_deref(),
         world.as_deref(),
+        biome_cache.as_deref(),
         &config,
         net.as_deref(),
         &env,
@@ -146,6 +149,7 @@ fn format_debug_text(
     fly: &FlyCamera,
     mod_ctx: Option<&ModContext>,
     world: Option<&WorldReplica>,
+    biome_cache: Option<&BiomeGridCache>,
     config: &GameConfig,
     net: Option<&GameNetClient>,
     env: &PlayerEnvironment,
@@ -196,12 +200,22 @@ fn format_debug_text(
     ];
 
     lines.extend(format_environment_section(env, config));
-    lines.extend(format_biome_section(mod_ctx, world, block_pos, chunk));
+    lines.extend(format_biome_section(
+        mod_ctx,
+        biome_cache,
+        block_pos,
+        chunk,
+    ));
     lines.push(String::new());
     lines.extend(format_net_section(net));
     lines.push(String::new());
 
-    lines.extend(format_target_section(target.hit, mod_ctx, world));
+    lines.extend(format_target_section(
+        target.hit,
+        mod_ctx,
+        world,
+        biome_cache,
+    ));
     lines.push(String::new());
 
     let selected_name = mod_ctx
@@ -274,8 +288,12 @@ fn format_environment_section(env: &PlayerEnvironment, config: &GameConfig) -> V
     ]
 }
 
-fn format_biome_at(mod_ctx: &ModContext, world: &WorldReplica, block_pos: BlockPos) -> String {
-    let Some(idx) = world.biome_at(block_pos) else {
+fn format_biome_at(
+    mod_ctx: &ModContext,
+    biome_cache: &BiomeGridCache,
+    block_pos: BlockPos,
+) -> String {
+    let Some(idx) = biome_cache.biome_at(block_pos) else {
         return "-".to_string();
     };
     mod_ctx
@@ -287,16 +305,16 @@ fn format_biome_at(mod_ctx: &ModContext, world: &WorldReplica, block_pos: BlockP
 
 fn format_biome_section(
     mod_ctx: Option<&ModContext>,
-    world: Option<&WorldReplica>,
+    biome_cache: Option<&BiomeGridCache>,
     block_pos: BlockPos,
     chunk: ChunkPos,
 ) -> Vec<String> {
-    let (Some(ctx), Some(world)) = (mod_ctx, world) else {
+    let (Some(ctx), Some(biome_cache)) = (mod_ctx, biome_cache) else {
         return vec![format!("{} -", pad_label("Biome"))];
     };
 
-    let player_biome = format_biome_at(ctx, world, block_pos);
-    let grid = if world.biome_grid(chunk).is_some() {
+    let player_biome = format_biome_at(ctx, biome_cache, block_pos);
+    let grid = if biome_cache.biome_grid(chunk).is_some() {
         "yes"
     } else {
         "no"
@@ -313,6 +331,7 @@ fn format_target_section(
     hit: Option<RaycastHit>,
     mod_ctx: Option<&ModContext>,
     world: Option<&WorldReplica>,
+    biome_cache: Option<&BiomeGridCache>,
 ) -> Vec<String> {
     let Some(hit) = hit else {
         return vec![format!("{} -", pad_label("Target"))];
@@ -322,6 +341,9 @@ fn format_target_section(
         return vec![format!("{} -", pad_label("Target"))];
     };
     let Some(world) = world else {
+        return vec![format!("{} -", pad_label("Target"))];
+    };
+    let Some(biome_cache) = biome_cache else {
         return vec![format!("{} -", pad_label("Target"))];
     };
 
@@ -356,7 +378,7 @@ fn format_target_section(
         ),
     ];
 
-    let target_biome = format_biome_at(ctx, world, hit.block);
+    let target_biome = format_biome_at(ctx, biome_cache, hit.block);
     lines.push(format!("        biome {target_biome}"));
 
     if let Some(decoded) = format_block_state(def, state) {
