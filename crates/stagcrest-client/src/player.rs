@@ -101,8 +101,10 @@ pub fn block_interaction(
 
     if mouse.just_pressed(MouseButton::Middle) {
         let Some(hit) = hit else { return };
-        let (id, _) = world.0.get_block(hit.block);
-        let Some(def) = ctx.registry.block(id) else { return };
+        let (id, _) = world.get_block(hit.block);
+        let Some(def) = ctx.registry.block(id) else {
+            return;
+        };
         if !def.placeable {
             return;
         }
@@ -124,7 +126,7 @@ pub fn block_interaction(
     let kind = if mouse.just_pressed(MouseButton::Left) {
         PlayerActionKind::Break
     } else {
-        let (hit_id, _) = world.0.get_block(hit.block);
+        let (hit_id, _) = world.get_block(hit.block);
         if let Some(def) = ctx.registry.block(hit_id) {
             if stagcrest_circuit::is_repeater(def) || stagcrest_circuit::is_player_toggleable(def) {
                 PlayerActionKind::Toggle

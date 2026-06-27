@@ -116,7 +116,16 @@ impl DecorateSnapshot {
             }
         }
 
-        for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+        for (dx, dz) in [
+            (-1, 0),
+            (1, 0),
+            (0, -1),
+            (0, 1),
+            (-1, -1),
+            (1, -1),
+            (-1, 1),
+            (1, 1),
+        ] {
             capture_horizontal_neighbor_shell(world, pos, dx, dz, air, &mut snapshot);
         }
 

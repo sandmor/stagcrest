@@ -38,6 +38,29 @@ pub struct ColormapSnapshot {
     pub water_h: u32,
 }
 
+/// Per-biome environmental data sent to the client for interpolation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BiomeClientDef {
+    pub index: u16,
+    pub namespaced_id: String,
+    pub fog_color: [u8; 3],
+    pub fog_density: f32,
+    pub water_color: [u8; 3],
+    pub water_fog_color: [u8; 3],
+    pub sky_color: [u8; 3],
+    pub grass_color: Option<[u8; 3]>,
+    pub foliage_color: Option<[u8; 3]>,
+    /// Climate anchor for colormap fallback sampling.
+    pub temperature: f32,
+    pub downfall: f32,
+}
+
+/// All registered biomes for client-side environment interpolation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BiomesSnapshot {
+    pub biomes: Vec<BiomeClientDef>,
+}
+
 /// Full content package sent once after handshake.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentManifest {
@@ -45,4 +68,10 @@ pub struct ContentManifest {
     pub registry: RegistrySnapshot,
     pub atlas: AtlasSnapshot,
     pub colormaps: ColormapSnapshot,
+    #[serde(default)]
+    pub biomes: BiomesSnapshot,
 }
+
+/// 4×4×4 biome index grid per chunk (64 cells).
+pub const BIOME_GRID_SIZE: usize = 4;
+pub const BIOME_GRID_VOLUME: usize = BIOME_GRID_SIZE * BIOME_GRID_SIZE * BIOME_GRID_SIZE;

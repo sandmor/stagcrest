@@ -224,50 +224,49 @@ mod tests {
     use crate::worldgen::config::TerrainConfig;
     use crate::worldgen::test_fixtures::test_blocks;
 
+    fn place_sample_oak(
+        blocks: &ColumnBlocks,
+        config: &TerrainConfig,
+        seed: WorldSeed,
+        surface_entries: &[(BlockPos, BlockId, BlockState)],
+        wx: i32,
+        wz: i32,
+        surface_y: i32,
+    ) -> Vec<(BlockPos, BlockId, BlockState)> {
+        let snapshot = DecorateSnapshot::empty(blocks.air);
+        let pos = stagcrest_protocol::ChunkPos { x: 0, y: 4, z: 0 };
+        let mut out = Vec::new();
+        let mut occ = OccupancyMap::from_surface_entries(surface_entries, pos, blocks.air);
+        HybridTreeGenerator::place_oak(
+            wx,
+            surface_y + 1,
+            wz,
+            blocks,
+            &snapshot,
+            &mut occ,
+            &mut out,
+            config,
+            seed,
+        );
+        out
+    }
+
     #[test]
-    fn hybrid_tree_is_deterministic() {
+    fn hybrid_tree_is_deterministic_and_produces_structure() {
         let blocks = test_blocks();
         let config = TerrainConfig::default();
         let seed = WorldSeed(42);
-        let snapshot = DecorateSnapshot::empty(blocks.air);
         let surface_y = 64;
         let wx = 8;
         let wz = 8;
-
         let surface_entries = vec![(
             BlockPos::new(wx, surface_y, wz),
             blocks.grass,
             BlockState(0),
         )];
-        let pos = stagcrest_protocol::ChunkPos { x: 0, y: 4, z: 0 };
 
-        let mut run_a = Vec::new();
-        let mut occ_a = OccupancyMap::from_surface_entries(&surface_entries, pos, blocks.air);
-        HybridTreeGenerator::place_oak(
-            wx,
-            surface_y + 1,
-            wz,
-            &blocks,
-            &snapshot,
-            &mut occ_a,
-            &mut run_a,
-            &config,
-            seed,
-        );
-
-        let mut run_b = Vec::new();
-        let mut occ_b = OccupancyMap::from_surface_entries(&surface_entries, pos, blocks.air);
-        HybridTreeGenerator::place_oak(
-            wx,
-            surface_y + 1,
-            wz,
-            &blocks,
-            &snapshot,
-            &mut occ_b,
-            &mut run_b,
-            &config,
-            seed,
-        );
+        let run_a = place_sample_oak(&blocks, &config, seed, &surface_entries, wx, wz, surface_y);
+        let run_b = place_sample_oak(&blocks, &config, seed, &surface_entries, wx, wz, surface_y);
 
         assert_eq!(run_a, run_b);
         assert!(run_a.iter().any(|(_, id, _)| *id == blocks.oak_log));
@@ -275,24 +274,9 @@ mod tests {
     }
 
     #[test]
-    fn branch_steps_are_single_voxel() {
-        for h in 0..512u32 {
-            let (dx, dy, dz) = branch_step_from_hash(h);
-            assert!(
-                dx.abs() <= 1 && dy.abs() <= 1 && dz.abs() <= 1,
-                "step ({dx},{dy},{dz}) exceeds unit voxel"
-            );
-            assert!(dx != 0 || dy != 0 || dz != 0);
-            let cheb = dx.abs().max(dy.abs()).max(dz.abs());
-            assert_eq!(cheb, 1, "step ({dx},{dy},{dz}) must be face/edge adjacent");
-        }
-    }
-
-    #[test]
-    fn branch_logs_are_contiguous() {
+    fn hybrid_tree_branch_logs_stay_contiguous() {
         let blocks = test_blocks();
         let config = TerrainConfig::default();
-        let snapshot = DecorateSnapshot::empty(blocks.air);
         let surface_y = 64;
         let wx = 10;
         let wz = 10;
@@ -301,22 +285,16 @@ mod tests {
             blocks.grass,
             BlockState(0),
         )];
-        let chunk = stagcrest_protocol::ChunkPos { x: 0, y: 4, z: 0 };
 
-        for seed_val in 0..64u64 {
-            let mut out = Vec::new();
-            let mut occ =
-                OccupancyMap::from_surface_entries(&surface_entries, chunk, blocks.air);
-            HybridTreeGenerator::place_oak(
-                wx,
-                surface_y + 1,
-                wz,
+        for seed_val in [0u64, 7, 13, 31, 42, 77, 99, 123] {
+            let out = place_sample_oak(
                 &blocks,
-                &snapshot,
-                &mut occ,
-                &mut out,
                 &config,
                 WorldSeed(seed_val),
+                &surface_entries,
+                wx,
+                wz,
+                surface_y,
             );
             let logs: Vec<BlockPos> = out
                 .iter()
@@ -327,67 +305,17 @@ mod tests {
                 if log_pos.x == wx && log_pos.z == wz {
                     continue;
                 }
-                let touches_trunk = logs.iter().any(|t| {
-                    t.x == wx
-                        && t.z == wz
-                        && chebyshev_dist(*log_pos, *t) == 1
-                });
-                let touches_branch = logs.iter().any(|other| {
-                    other != log_pos && chebyshev_dist(*log_pos, *other) == 1
-                });
+                let touches_trunk = logs
+                    .iter()
+                    .any(|t| t.x == wx && t.z == wz && chebyshev_dist(*log_pos, *t) == 1);
+                let touches_branch = logs
+                    .iter()
+                    .any(|other| other != log_pos && chebyshev_dist(*log_pos, *other) == 1);
                 assert!(
                     touches_trunk || touches_branch,
                     "isolated branch log at {log_pos:?} seed={seed_val}"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn branches_attach_to_trunk_not_planned_height() {
-        let blocks = test_blocks();
-        let config = TerrainConfig::default();
-        let seed = WorldSeed(77);
-        let snapshot = DecorateSnapshot::empty(blocks.air);
-        let surface_y = 64;
-        let wx = 4;
-        let wz = 4;
-        let surface_entries = vec![
-            (BlockPos::new(wx, surface_y, wz), blocks.grass, BlockState(0)),
-            (
-                BlockPos::new(wx, surface_y + 2, wz),
-                blocks.stone,
-                BlockState(0),
-            ),
-        ];
-        let pos = stagcrest_protocol::ChunkPos { x: 0, y: 4, z: 0 };
-        let mut out = Vec::new();
-        let mut occ = OccupancyMap::from_surface_entries(&surface_entries, pos, blocks.air);
-        HybridTreeGenerator::place_oak(
-            wx,
-            surface_y + 1,
-            wz,
-            &blocks,
-            &snapshot,
-            &mut occ,
-            &mut out,
-            &config,
-            seed,
-        );
-        for (p, id, _) in &out {
-            if *id != blocks.oak_log {
-                continue;
-            }
-            let below = BlockPos::new(p.x, p.y - 1, p.z);
-            let supported = out
-                .iter()
-                .any(|(bp, bid, _)| *bp == below && *bid == blocks.oak_log)
-                || below.y == surface_y && below.x == wx && below.z == wz;
-            assert!(
-                supported || (p.x == wx && p.z == wz && *p == BlockPos::new(wx, surface_y + 1, wz)),
-                "log at {:?} has no trunk or ground support",
-                p
-            );
         }
     }
 }

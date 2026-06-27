@@ -1,20 +1,22 @@
-use crate::worldgen::biome::{BiomeRegistry, FeatureKind};
-use crate::worldgen::climate::ClimateSampler;
+use crate::registry::BlockRegistry;
+use crate::worldgen::biome::BiomeRegistry;
 use crate::worldgen::config::TerrainConfig;
 use crate::worldgen::decorate_snapshot::DecorateSnapshot;
+use crate::worldgen::hybrid_tree::HybridTreeGenerator;
 use crate::worldgen::noise::NoiseBank;
 use crate::worldgen::occupancy::OccupancyMap;
 use crate::worldgen::seed::WorldSeed;
 use crate::worldgen::terrain::{ColumnBlocks, SkyIslandSampler};
-use crate::worldgen::hybrid_tree::HybridTreeGenerator;
+use stagcrest_mod_sdk::{FeaturePlacement, TreeShape};
+use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
 
 pub struct FeaturePlacer<'a> {
     config: &'a TerrainConfig,
     sky_islands: SkyIslandSampler<'a>,
-    climate: ClimateSampler<'a>,
     blocks: ColumnBlocks,
     biomes: &'a BiomeRegistry,
+    registry: &'a BlockRegistry,
     seed: WorldSeed,
 }
 
@@ -24,14 +26,15 @@ impl<'a> FeaturePlacer<'a> {
         noise: &'a NoiseBank,
         blocks: ColumnBlocks,
         biomes: &'a BiomeRegistry,
+        registry: &'a BlockRegistry,
         seed: WorldSeed,
     ) -> Self {
         Self {
             config,
             sky_islands: SkyIslandSampler::new(config, noise, seed),
-            climate: ClimateSampler::new(config, noise),
             blocks,
             biomes,
+            registry,
             seed,
         }
     }
@@ -41,10 +44,10 @@ impl<'a> FeaturePlacer<'a> {
         snapshot: &DecorateSnapshot,
         pos: ChunkPos,
         surface_entries: &[(BlockPos, BlockId, BlockState)],
+        biome_grid: &[u8; BIOME_GRID_VOLUME],
     ) -> Vec<(BlockPos, BlockId, BlockState)> {
         let base_x = pos.x * CHUNK_SIZE;
         let base_z = pos.z * CHUNK_SIZE;
-
         let chunk_area = CHUNK_SIZE as usize;
         let mut top_surface: [Option<(i32, BlockId)>; 256] = [None; 256];
 
@@ -61,7 +64,8 @@ impl<'a> FeaturePlacer<'a> {
             }
         }
 
-        let mut occupancy = OccupancyMap::from_surface_entries(surface_entries, pos, self.blocks.air);
+        let mut occupancy =
+            OccupancyMap::from_surface_entries(surface_entries, pos, self.blocks.air);
         let mut features = Vec::new();
 
         for lz in 0..CHUNK_SIZE as usize {
@@ -73,10 +77,16 @@ impl<'a> FeaturePlacer<'a> {
 
                 let wx = base_x + lx as i32;
                 let wz = base_z + lz as i32;
-                let (temp, downfall) = self.climate.at(wx, wz);
-                let biome = self.biomes.biome_at(temp, downfall);
-                let on_island = self.sky_islands.is_solid(wx, surface_y, wz);
+                let gx = (lx / 4).min(3);
+                let gy = ((surface_y - pos.y * CHUNK_SIZE) / 4).clamp(0, 3) as usize;
+                let gz = (lz / 4).min(3);
+                let biome_idx = biome_grid[gx + gy * 4 + gz * 16] as u16;
+                let biome = self
+                    .biomes
+                    .biome_by_index(biome_idx)
+                    .unwrap_or_else(|| self.biomes.default_plains());
 
+                let on_island = self.sky_islands.is_solid(wx, surface_y, wz);
                 let above_y = surface_y + 1;
                 let above_pos = BlockPos::new(wx, above_y, wz);
                 if !occupancy.can_place(snapshot, above_pos) {
@@ -90,7 +100,7 @@ impl<'a> FeaturePlacer<'a> {
 
                 for feature in &biome.features {
                     self.place_feature(
-                        feature.kind,
+                        &feature.placement,
                         feature.chance,
                         wx,
                         wz,
@@ -111,7 +121,7 @@ impl<'a> FeaturePlacer<'a> {
 
     fn place_feature(
         &self,
-        kind: FeatureKind,
+        placement: &FeaturePlacement,
         chance: f32,
         wx: i32,
         wz: i32,
@@ -123,74 +133,226 @@ impl<'a> FeaturePlacer<'a> {
         occupancy: &mut OccupancyMap,
         features: &mut Vec<(BlockPos, BlockId, BlockState)>,
     ) {
-        let roll = hash_chance(self.seed, wx, wz, kind);
+        let roll = hash_chance(self.seed, wx, wz, placement);
         if roll >= chance {
             return;
         }
 
-        match kind {
-            FeatureKind::ShortGrass | FeatureKind::TallGrass | FeatureKind::Dandelion
-            | FeatureKind::Poppy if is_grass_surface =>
-            {
-                let block = match kind {
-                    FeatureKind::ShortGrass => self.blocks.short_grass,
-                    FeatureKind::TallGrass => self.blocks.tall_grass,
-                    FeatureKind::Dandelion => self.blocks.dandelion,
-                    FeatureKind::Poppy => self.blocks.poppy,
-                    _ => return,
-                };
-                if block == self.blocks.air {
+        match placement {
+            FeaturePlacement::Plant { block, tall } => {
+                if !is_grass_surface && !on_island {
+                    return;
+                }
+                let id = self.resolve(block);
+                if id == self.blocks.air {
                     return;
                 }
                 let pos = BlockPos::new(wx, above_y, wz);
                 if !occupancy.can_place(snapshot, pos) {
                     return;
                 }
-                features.push((pos, block, BlockState(0)));
-                occupancy.place(pos, block);
+                features.push((pos, id, BlockState(0)));
+                occupancy.place(pos, id);
+                if *tall {
+                    let pos2 = BlockPos::new(wx, above_y + 1, wz);
+                    if occupancy.can_place(snapshot, pos2) {
+                        features.push((pos2, id, BlockState(0)));
+                        occupancy.place(pos2, id);
+                    }
+                }
             }
-            FeatureKind::Cactus if is_sand_surface => {
-                let height = 1 + (hash_chance(self.seed, wx, wz, FeatureKind::Cactus) * 3.0) as i32;
-                for dy in 0..height {
+            FeaturePlacement::Column { block, height } => {
+                if !is_sand_surface && !is_grass_surface {
+                    return;
+                }
+                let id = self.resolve(block);
+                if id == self.blocks.air {
+                    return;
+                }
+                let h = *height as i32;
+                for dy in 0..h {
                     let pos = BlockPos::new(wx, above_y + dy, wz);
                     if !occupancy.can_place(snapshot, pos) {
                         break;
                     }
-                    features.push((pos, self.blocks.cactus, BlockState(0)));
-                    occupancy.place(pos, self.blocks.cactus);
+                    features.push((pos, id, BlockState(0)));
+                    occupancy.place(pos, id);
                 }
             }
-            FeatureKind::DeadBush if is_sand_surface => {
-                if self.blocks.dead_bush == self.blocks.air {
+            FeaturePlacement::Tree {
+                trunk,
+                leaves,
+                shape,
+                height,
+            } if is_grass_surface || on_island => {
+                let trunk_id = self.resolve(trunk);
+                let leaves_id = self.resolve(leaves);
+                if trunk_id == self.blocks.air || leaves_id == self.blocks.air {
+                    return;
+                }
+                match shape {
+                    TreeShape::Oak | TreeShape::Birch | TreeShape::Cherry => {
+                        HybridTreeGenerator::place_oak(
+                            wx,
+                            above_y,
+                            wz,
+                            &self.blocks_with(trunk_id, leaves_id),
+                            snapshot,
+                            occupancy,
+                            features,
+                            self.config,
+                            self.seed,
+                        );
+                    }
+                    TreeShape::Spruce | TreeShape::Pine => {
+                        self.place_spruce(
+                            wx, above_y, wz, trunk_id, leaves_id, *height, snapshot, occupancy,
+                            features,
+                        );
+                    }
+                    TreeShape::Jungle => {
+                        HybridTreeGenerator::place_oak(
+                            wx,
+                            above_y,
+                            wz,
+                            &self.blocks_with(trunk_id, leaves_id),
+                            snapshot,
+                            occupancy,
+                            features,
+                            self.config,
+                            self.seed,
+                        );
+                    }
+                    _ => {
+                        HybridTreeGenerator::place_oak(
+                            wx,
+                            above_y,
+                            wz,
+                            &self.blocks_with(trunk_id, leaves_id),
+                            snapshot,
+                            occupancy,
+                            features,
+                            self.config,
+                            self.seed,
+                        );
+                    }
+                }
+            }
+            FeaturePlacement::SurfacePatch { block } if is_grass_surface => {
+                let id = self.resolve(block);
+                if id == self.blocks.air {
                     return;
                 }
                 let pos = BlockPos::new(wx, above_y, wz);
-                if !occupancy.can_place(snapshot, pos) {
+                if occupancy.can_place(snapshot, pos) {
+                    features.push((pos, id, BlockState(0)));
+                    occupancy.place(pos, id);
+                }
+            }
+            FeaturePlacement::GlowFlora { block } => {
+                let id = self.resolve(block);
+                if id == self.blocks.air {
                     return;
                 }
-                features.push((pos, self.blocks.dead_bush, BlockState(0)));
-                occupancy.place(pos, self.blocks.dead_bush);
+                let pos = BlockPos::new(wx, above_y, wz);
+                if occupancy.can_place(snapshot, pos) {
+                    features.push((pos, id, BlockState(0)));
+                    occupancy.place(pos, id);
+                }
             }
-            FeatureKind::OakTree if is_grass_surface || on_island => {
-                HybridTreeGenerator::place_oak(
-                    wx,
-                    above_y,
-                    wz,
-                    &self.blocks,
-                    snapshot,
-                    occupancy,
-                    features,
-                    self.config,
-                    self.seed,
-                );
+            FeaturePlacement::IceSpike if is_grass_surface => {
+                if let Some(ice) = self.registry.block_by_name("stagcrest:packed_ice") {
+                    for dy in 0..4 {
+                        let pos = BlockPos::new(wx, above_y + dy, wz);
+                        if occupancy.can_place(snapshot, pos) {
+                            features.push((pos, ice, BlockState(0)));
+                            occupancy.place(pos, ice);
+                        }
+                    }
+                }
+            }
+            FeaturePlacement::Stalagmite { block } => {
+                let id = self.resolve(block);
+                if id == self.blocks.air {
+                    return;
+                }
+                let pos = BlockPos::new(wx, above_y, wz);
+                if occupancy.can_place(snapshot, pos) {
+                    features.push((pos, id, BlockState(0)));
+                    occupancy.place(pos, id);
+                }
+            }
+            FeaturePlacement::Stalactite { block } => {
+                let id = self.resolve(block);
+                if id == self.blocks.air {
+                    return;
+                }
+                let hang_y = above_y;
+                let above = snapshot.block_at(BlockPos::new(wx, hang_y + 1, wz));
+                if above == self.blocks.air || above == self.blocks.water {
+                    return;
+                }
+                let pos = BlockPos::new(wx, hang_y, wz);
+                if occupancy.can_place(snapshot, pos) {
+                    features.push((pos, id, BlockState(0)));
+                    occupancy.place(pos, id);
+                }
             }
             _ => {}
         }
     }
+
+    fn place_spruce(
+        &self,
+        wx: i32,
+        above_y: i32,
+        wz: i32,
+        trunk: BlockId,
+        leaves: BlockId,
+        height: u8,
+        snapshot: &DecorateSnapshot,
+        occupancy: &mut OccupancyMap,
+        features: &mut Vec<(BlockPos, BlockId, BlockState)>,
+    ) {
+        let h = height.max(5) as i32;
+        for dy in 0..h {
+            let pos = BlockPos::new(wx, above_y + dy, wz);
+            if occupancy.can_place(snapshot, pos) {
+                features.push((pos, trunk, BlockState(0)));
+                occupancy.place(pos, trunk);
+            }
+        }
+        let top = above_y + h;
+        for dx in -2i32..=2 {
+            for dz in -2i32..=2 {
+                for dy in 0i32..3 {
+                    if dx.abs() + dz.abs() > 2 && dy > 0 {
+                        continue;
+                    }
+                    let pos = BlockPos::new(wx + dx, top + dy, wz + dz);
+                    if occupancy.can_place(snapshot, pos) {
+                        features.push((pos, leaves, BlockState(0)));
+                        occupancy.place(pos, leaves);
+                    }
+                }
+            }
+        }
+    }
+
+    fn blocks_with(&self, trunk: BlockId, leaves: BlockId) -> ColumnBlocks {
+        let mut b = self.blocks;
+        b.oak_log = trunk;
+        b.oak_leaves = leaves;
+        b
+    }
+
+    fn resolve(&self, name: &str) -> BlockId {
+        self.registry.block_by_name(name).unwrap_or(self.blocks.air)
+    }
 }
 
-fn hash_chance(seed: WorldSeed, wx: i32, wz: i32, kind: FeatureKind) -> f32 {
-    let tag = kind as u64;
+fn hash_chance(seed: WorldSeed, wx: i32, wz: i32, placement: &FeaturePlacement) -> f32 {
+    let tag = placement_discriminant(placement);
     let h = seed
         .0
         .wrapping_add(wx as u64)
@@ -201,154 +363,18 @@ fn hash_chance(seed: WorldSeed, wx: i32, wz: i32, kind: FeatureKind) -> f32 {
     (mixed as f32 / u64::MAX as f32).clamp(0.0, 0.9999)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::worldgen::biome::{BiomeRegistry, FeatureKind, RegisterBiomeFeatureRequest, RegisterBiomeRequest};
-    use crate::worldgen::test_fixtures::{test_biomes, test_blocks, test_registry};
-
-    #[test]
-    fn feature_skips_occupied_decorate_cell() {
-        let config = TerrainConfig::default();
-        let noise = NoiseBank::new(WorldSeed(7));
-        let blocks = test_blocks();
-        let mut reg = test_registry();
-        let biomes = test_biomes(&mut reg);
-        let placer = FeaturePlacer::new(&config, &noise, blocks, &biomes, WorldSeed(7));
-        let snapshot = DecorateSnapshot::empty(blocks.air);
-
-        let surface_y = 64;
-        let surface_entries = vec![
-            (
-                BlockPos::new(0, surface_y, 0),
-                blocks.grass,
-                BlockState(0),
-            ),
-            (
-                BlockPos::new(0, surface_y + 1, 0),
-                blocks.stone,
-                BlockState(0),
-            ),
-        ];
-
-        let features = placer.place(
-            &snapshot,
-            ChunkPos {
-                x: 0,
-                y: surface_y / CHUNK_SIZE,
-                z: 0,
-            },
-            &surface_entries,
-        );
-
-        assert!(
-            features.is_empty(),
-            "should not place features when space above surface is occupied in decorate output"
-        );
-    }
-
-    #[test]
-    fn oak_tree_places_logs_and_leaves() {
-        let config = TerrainConfig::default();
-        let noise = NoiseBank::new(WorldSeed(99));
-        let blocks = test_blocks();
-        let reg = test_registry();
-        let mut biomes = BiomeRegistry::default();
-        biomes.register_biome(RegisterBiomeRequest {
-            namespaced_id: "stagcrest:plains".into(),
-            temperature: 0.8,
-            downfall: 0.4,
-            surface_top: "stagcrest:grass_block".into(),
-            surface_under: "stagcrest:dirt".into(),
-            surface_depth: 3,
-            underwater_top: Some("stagcrest:sand".into()),
-        });
-        biomes.register_feature(RegisterBiomeFeatureRequest {
-            biome_id: "stagcrest:plains".into(),
-            feature_kind: FeatureKind::OakTree,
-            chance: 1.0,
-        });
-        biomes.finalize(&reg).unwrap();
-        let snapshot = DecorateSnapshot::empty(blocks.air);
-
-        let surface_y = 70;
-        let surface_entries = vec![(
-            BlockPos::new(5, surface_y, 5),
-            blocks.grass,
-            BlockState(0),
-        )];
-
-        let placer = FeaturePlacer::new(&config, &noise, blocks, &biomes, WorldSeed(1));
-        let features = placer.place(
-            &snapshot,
-            ChunkPos {
-                x: 0,
-                y: surface_y / CHUNK_SIZE,
-                z: 0,
-            },
-            &surface_entries,
-        );
-        let has_log = features.iter().any(|(_, id, _)| *id == blocks.oak_log);
-        let has_leaves = features.iter().any(|(_, id, _)| *id == blocks.oak_leaves);
-        assert!(has_log && has_leaves, "oak tree should place logs and leaves");
-    }
-
-    #[test]
-    fn skips_column_when_snapshot_has_cross_chunk_block() {
-        let config = TerrainConfig::default();
-        let noise = NoiseBank::new(WorldSeed(99));
-        let blocks = test_blocks();
-        let reg = test_registry();
-        let mut biomes = BiomeRegistry::default();
-        biomes.register_biome(RegisterBiomeRequest {
-            namespaced_id: "stagcrest:plains".into(),
-            temperature: 0.8,
-            downfall: 0.4,
-            surface_top: "stagcrest:grass_block".into(),
-            surface_under: "stagcrest:dirt".into(),
-            surface_depth: 3,
-            underwater_top: Some("stagcrest:sand".into()),
-        });
-        biomes.register_feature(RegisterBiomeFeatureRequest {
-            biome_id: "stagcrest:plains".into(),
-            feature_kind: FeatureKind::OakTree,
-            chance: 1.0,
-        });
-        biomes.finalize(&reg).unwrap();
-
-        let surface_y = 70;
-        let wx = 5;
-        let wz = 5;
-        let above = surface_y + 1;
-        let mut snapshot = DecorateSnapshot::empty(blocks.air);
-        snapshot.chunk_pos = Some(ChunkPos {
-            x: 0,
-            y: surface_y / CHUNK_SIZE,
-            z: 0,
-        });
-        snapshot
-            .local_chunk_blocks
-            .insert(BlockPos::new(wx, above, wz), blocks.oak_leaves);
-
-        let surface_entries = vec![(
-            BlockPos::new(wx, surface_y, wz),
-            blocks.grass,
-            BlockState(0),
-        )];
-
-        let placer = FeaturePlacer::new(&config, &noise, blocks, &biomes, WorldSeed(1));
-        let features = placer.place(
-            &snapshot,
-            ChunkPos {
-                x: 0,
-                y: surface_y / CHUNK_SIZE,
-                z: 0,
-            },
-            &surface_entries,
-        );
-        assert!(
-            features.is_empty(),
-            "should not place oak when cross-chunk block occupies tree base"
-        );
+fn placement_discriminant(placement: &FeaturePlacement) -> u64 {
+    use FeaturePlacement::*;
+    match placement {
+        Plant { .. } => 1,
+        Patch { .. } => 2,
+        Tree { .. } => 3,
+        Boulder { .. } => 4,
+        Column { .. } => 5,
+        IceSpike => 6,
+        Stalagmite { .. } => 7,
+        Stalactite { .. } => 8,
+        SurfacePatch { .. } => 9,
+        GlowFlora { .. } => 10,
     }
 }

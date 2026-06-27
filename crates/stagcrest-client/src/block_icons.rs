@@ -4,8 +4,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use stagcrest_mesh::{build_single_block_icon_mesh, ChunkMesh};
 use stagcrest_protocol::{
-    decode_power_tint, BlockGeometry, BlockId, BlockState, TINT_POWER_BASE, TINT_WATER,
-    torch_state, TorchAttachment,
+    decode_power_tint, torch_state, BlockGeometry, BlockId, BlockState, TorchAttachment,
+    TINT_POWER_BASE, TINT_WATER,
 };
 
 use crate::game::ModContext;
@@ -276,10 +276,7 @@ fn collect_triangles(
     out: &mut Vec<Triangle>,
 ) {
     let (verts, indices) = match bucket {
-        1 => (
-            &mesh.transparent_vertices,
-            &mesh.transparent_indices,
-        ),
+        1 => (&mesh.transparent_vertices, &mesh.transparent_indices),
         2 => (&mesh.cutout_vertices, &mesh.cutout_indices),
         _ => (&mesh.opaque_vertices, &mesh.opaque_indices),
     };
@@ -350,9 +347,17 @@ fn rasterize_triangle(
     power_bright: [f32; 3],
 ) {
     let min_x = tri.p0[0].min(tri.p1[0]).min(tri.p2[0]).floor().max(0.0) as i32;
-    let max_x = tri.p0[0].max(tri.p1[0]).max(tri.p2[0]).ceil().min(size - 1.0) as i32;
+    let max_x = tri.p0[0]
+        .max(tri.p1[0])
+        .max(tri.p2[0])
+        .ceil()
+        .min(size - 1.0) as i32;
     let min_y = tri.p0[1].min(tri.p1[1]).min(tri.p2[1]).floor().max(0.0) as i32;
-    let max_y = tri.p0[1].max(tri.p1[1]).max(tri.p2[1]).ceil().min(size - 1.0) as i32;
+    let max_y = tri.p0[1]
+        .max(tri.p1[1])
+        .max(tri.p2[1])
+        .ceil()
+        .min(size - 1.0) as i32;
 
     let area = edge(tri.p0, tri.p1, tri.p2);
     if area.abs() < 1e-6 {

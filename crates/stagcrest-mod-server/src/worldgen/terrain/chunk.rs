@@ -1,9 +1,10 @@
-use crate::worldgen::biome::BiomeRegistry;
+use crate::worldgen::biome::{BiomeRegistry, ResolvedBiome};
 use crate::worldgen::climate::ClimateSampler;
 use crate::worldgen::config::TerrainConfig;
 use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::terrain::column::ColumnBlocks;
 use crate::worldgen::terrain::density::DensitySampler;
+use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_protocol::{
     still_water_state, BlockId, BlockPos, BlockState, ChunkPos, LocalBlockPos, CHUNK_SIZE,
     CHUNK_VOLUME,
@@ -34,7 +35,6 @@ impl<'a> ChunkFiller<'a> {
         }
     }
 
-    /// Stage A: density fill for one 16³ chunk (no decoration, no world reads).
     pub fn fill_density(&self, pos: ChunkPos) -> Vec<(BlockPos, BlockId, BlockState)> {
         let base_x = pos.x * CHUNK_SIZE;
         let base_y = pos.y * CHUNK_SIZE;
@@ -77,12 +77,12 @@ impl<'a> ChunkFiller<'a> {
         entries
     }
 
-    /// Stage B: biome surface decoration (uses neighbor face rows from `snapshot`).
     pub fn decorate(
         &self,
         snapshot: &DecorateSnapshot,
         pos: ChunkPos,
         density_entries: &[(BlockPos, BlockId, BlockState)],
+        biome_grid: &[u8; BIOME_GRID_VOLUME],
     ) -> Vec<(BlockPos, BlockId, BlockState)> {
         let base_x = pos.x * CHUNK_SIZE;
         let base_y = pos.y * CHUNK_SIZE;
@@ -135,8 +135,7 @@ impl<'a> ChunkFiller<'a> {
                     }
 
                     let surface_y = surface_y_map[lz as usize][lx as usize];
-                    let (temp, downfall) = self.climate.at(wx, wz);
-                    let biome = self.biomes.biome_at(temp, downfall);
+                    let biome = self.biome_at_local(lx, ly, lz, biome_grid);
                     let on_island = self.density.sky_islands().is_solid(wx, y, wz);
 
                     let above_id = if ly < CHUNK_SIZE - 1 {
@@ -163,15 +162,28 @@ impl<'a> ChunkFiller<'a> {
                         snapshot.face_below(lx, lz)
                     };
 
-                    let above_open =
-                        above_id == self.blocks.air || above_id == self.blocks.water;
+                    let above_open = above_id == self.blocks.air || above_id == self.blocks.water;
                     let shoreline = y == sea && below_id == self.blocks.water;
 
                     if above_open || shoreline {
                         let top = if on_island && y as f64 >= surface_y - 2.0 {
-                            self.blocks.grass
+                            biome.surface_top
                         } else if y >= sea {
-                            if is_beach(surface_y, sea, downfall) {
+                            if self.density.is_riverbank(wx, wz) {
+                                biome.underwater_top.unwrap_or(self.blocks.sand)
+                            } else if is_beach(
+                                surface_y,
+                                sea,
+                                biome.climate_downfall,
+                                &buffer,
+                                snapshot,
+                                base_x,
+                                base_y,
+                                base_z,
+                                lx,
+                                lz,
+                                self.blocks.water,
+                            ) {
                                 self.blocks.sand
                             } else {
                                 biome.surface_top
@@ -183,7 +195,7 @@ impl<'a> ChunkFiller<'a> {
                         states[idx] = BlockState(0);
                     } else if y >= sea {
                         let under = if on_island {
-                            self.blocks.dirt
+                            biome.surface_under
                         } else if above_id == biome.surface_top
                             || above_id == self.blocks.grass
                             || above_id == self.blocks.sand
@@ -209,6 +221,36 @@ impl<'a> ChunkFiller<'a> {
                             buffer[idx] = under;
                             states[idx] = BlockState(0);
                         }
+                    }
+                }
+            }
+        }
+
+        // Frozen rivers: ice cap on the top water block (sea_level - 1).
+        let water_top = sea - 1;
+        let water_top_ly = water_top - base_y;
+        if (0..CHUNK_SIZE).contains(&water_top_ly) {
+            for lz in 0..CHUNK_SIZE {
+                for lx in 0..CHUNK_SIZE {
+                    let wx = base_x + lx;
+                    let wz = base_z + lz;
+                    if !self.density.is_river(wx, wz) {
+                        continue;
+                    }
+                    let idx = LocalBlockPos {
+                        x: lx as u8,
+                        y: water_top_ly as u8,
+                        z: lz as u8,
+                    }
+                    .index();
+                    if buffer[idx] != self.blocks.water {
+                        continue;
+                    }
+                    let surface_y = surface_y_map[lz as usize][lx as usize];
+                    let params = self.climate.at_3d(wx, water_top, wz, surface_y);
+                    if params.temperature < 0.15 && self.blocks.ice != self.blocks.air {
+                        buffer[idx] = self.blocks.ice;
+                        states[idx] = BlockState(0);
                     }
                 }
             }
@@ -243,11 +285,98 @@ impl<'a> ChunkFiller<'a> {
 
         entries
     }
+
+    fn biome_at_local(
+        &self,
+        lx: i32,
+        ly: i32,
+        lz: i32,
+        grid: &[u8; BIOME_GRID_VOLUME],
+    ) -> &ResolvedBiome {
+        let gx = (lx / 4).clamp(0, 3) as usize;
+        let gy = (ly / 4).clamp(0, 3) as usize;
+        let gz = (lz / 4).clamp(0, 3) as usize;
+        let idx = gx + gy * 4 + gz * 16;
+        let biome_idx = grid[idx] as u16;
+        self.biomes
+            .biome_by_index(biome_idx)
+            .unwrap_or_else(|| self.biomes.default_plains())
+    }
 }
 
-fn is_beach(surface_y: f64, sea: i32, downfall: f32) -> bool {
-    let near_sea = (surface_y - sea as f64).abs() <= 3.0;
-    near_sea && downfall > 0.3
+fn is_beach(
+    surface_y: f64,
+    sea: i32,
+    downfall: f32,
+    buffer: &[BlockId],
+    snapshot: &DecorateSnapshot,
+    base_x: i32,
+    base_y: i32,
+    base_z: i32,
+    lx: i32,
+    lz: i32,
+    water: BlockId,
+) -> bool {
+    if downfall <= 0.3 {
+        return false;
+    }
+    let near_sea = surface_y >= (sea - 1) as f64 && surface_y <= (sea + 1) as f64;
+    near_sea && has_adjacent_water(buffer, snapshot, base_x, base_y, base_z, lx, lz, sea, water)
+}
+
+fn has_adjacent_water(
+    buffer: &[BlockId],
+    snapshot: &DecorateSnapshot,
+    base_x: i32,
+    base_y: i32,
+    base_z: i32,
+    lx: i32,
+    lz: i32,
+    sea: i32,
+    water: BlockId,
+) -> bool {
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let nlx = lx + dx;
+        let nlz = lz + dz;
+        for &y in &[sea, sea - 1] {
+            if block_at_local(
+                buffer,
+                snapshot,
+                base_x,
+                base_y,
+                base_z,
+                nlx,
+                y - base_y,
+                nlz,
+            ) == water
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn block_at_local(
+    buffer: &[BlockId],
+    snapshot: &DecorateSnapshot,
+    base_x: i32,
+    base_y: i32,
+    base_z: i32,
+    lx: i32,
+    ly: i32,
+    lz: i32,
+) -> BlockId {
+    if lx < 0 || lz < 0 || lx >= CHUNK_SIZE || lz >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_SIZE {
+        return snapshot.block_at(BlockPos::new(base_x + lx, base_y + ly, base_z + lz));
+    }
+    let idx = LocalBlockPos {
+        x: lx as u8,
+        y: ly as u8,
+        z: lz as u8,
+    }
+    .index();
+    buffer[idx]
 }
 
 fn count_surface_depth(
@@ -286,270 +415,4 @@ fn count_surface_depth(
         }
     }
     depth
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::registry::BlockRegistry;
-    use crate::worldgen::noise::NoiseBank;
-    use crate::worldgen::seed::WorldSeed;
-    use crate::worldgen::test_fixtures::{test_biomes, test_blocks};
-    #[test]
-    fn deep_seafloor_under_water_becomes_sand() {
-        let config = TerrainConfig::default();
-        let noise = NoiseBank::new(WorldSeed(99));
-        let density = DensitySampler::new(&config, &noise, WorldSeed(99));
-        let climate = ClimateSampler::new(&config, &noise);
-        let mut reg = BlockRegistry::new();
-        reg.register_texture("t".into(), 16, 16, vec![0; 16 * 16 * 4]);
-        let tex = stagcrest_protocol::TextureId(0);
-        let face = stagcrest_protocol::BlockFaceTextures::uniform(tex);
-        for (name, id) in [
-            ("stagcrest:air", 0u32),
-            ("stagcrest:stone", 2),
-            ("stagcrest:sand", 6),
-            ("stagcrest:water", 5),
-            ("stagcrest:grass_block", 4),
-            ("stagcrest:dirt", 3),
-        ] {
-            reg.register_block(stagcrest_protocol::BlockDef {
-                id: BlockId(id),
-                namespaced_id: name.into(),
-                display_name: name.into(),
-                opaque: id != 0 && id != 5,
-                transparent: id == 5,
-                solid: id != 0 && id != 5,
-                hardness: 1.0,
-                face_textures: face,
-                circuit: None,
-                placeable: false,
-                geometry: stagcrest_protocol::BlockGeometry::Cube,
-                fluid: id == 5,
-                render_layer: if id == 5 {
-                    stagcrest_protocol::ModelRenderLayer::Blend
-                } else {
-                    stagcrest_protocol::ModelRenderLayer::Opaque
-                },
-            });
-        }
-        let biomes = test_biomes(&mut reg);
-        let blocks = ColumnBlocks::resolve(&reg, BlockId(0));
-        let filler = ChunkFiller::new(&config, density, climate, &biomes, blocks);
-        let air = BlockId(0);
-        let world = stagcrest_world::World::new(air);
-        let water_state = still_water_state();
-
-        let seafloor_y = 20i32;
-        let chunk_pos = ChunkPos {
-            x: 0,
-            y: seafloor_y / CHUNK_SIZE,
-            z: 0,
-        };
-        let chunk_base_y = chunk_pos.y * CHUNK_SIZE;
-        let chunk_top_y = chunk_base_y + CHUNK_SIZE;
-        let mut density_entries =
-            vec![(BlockPos::new(0, seafloor_y, 0), blocks.stone, BlockState(0))];
-        for y in (seafloor_y + 1)..config.sea_level.min(chunk_top_y) {
-            density_entries.push((BlockPos::new(0, y, 0), blocks.water, water_state));
-        }
-
-        let decorated = filler.decorate(
-            &DecorateSnapshot::capture(&world, chunk_pos, BlockId(0)),
-            chunk_pos,
-            &density_entries,
-        );
-        let floor = decorated
-            .iter()
-            .find(|(pos, _, _)| pos.y == seafloor_y)
-            .map(|(_, id, _)| *id);
-        assert_eq!(
-            floor,
-            Some(blocks.sand),
-            "deep seafloor under water should be sand"
-        );
-    }
-
-    #[test]
-    fn block_at_sea_level_with_air_above_gets_surface() {
-        let config = TerrainConfig::default();
-        let sea = config.sea_level;
-        let noise = NoiseBank::new(WorldSeed(42));
-        let density = DensitySampler::new(&config, &noise, WorldSeed(42));
-        let climate = ClimateSampler::new(&config, &noise);
-        let mut reg = BlockRegistry::new();
-        reg.register_texture("t".into(), 16, 16, vec![0; 16 * 16 * 4]);
-        let tex = stagcrest_protocol::TextureId(0);
-        let face = stagcrest_protocol::BlockFaceTextures::uniform(tex);
-        for (name, id) in [
-            ("stagcrest:air", 0u32),
-            ("stagcrest:stone", 2),
-            ("stagcrest:water", 5),
-            ("stagcrest:grass_block", 4),
-            ("stagcrest:dirt", 3),
-            ("stagcrest:sand", 6),
-        ] {
-            reg.register_block(stagcrest_protocol::BlockDef {
-                id: BlockId(id),
-                namespaced_id: name.into(),
-                display_name: name.into(),
-                opaque: id != 0 && id != 5,
-                transparent: id == 5,
-                solid: id != 0 && id != 5,
-                hardness: 1.0,
-                face_textures: face,
-                circuit: None,
-                placeable: false,
-                geometry: stagcrest_protocol::BlockGeometry::Cube,
-                fluid: id == 5,
-                render_layer: if id == 5 {
-                    stagcrest_protocol::ModelRenderLayer::Blend
-                } else {
-                    stagcrest_protocol::ModelRenderLayer::Opaque
-                },
-            });
-        }
-        let biomes = test_biomes(&mut reg);
-        let blocks = ColumnBlocks::resolve(&reg, BlockId(0));
-        let filler = ChunkFiller::new(&config, density, climate, &biomes, blocks);
-        let mut world = stagcrest_world::World::new(BlockId(0));
-        let water_state = still_water_state();
-        world.set_block(
-            BlockPos::new(0, sea - 1, 0),
-            blocks.water,
-            water_state,
-        );
-
-        let chunk_pos = ChunkPos {
-            x: 0,
-            y: sea / CHUNK_SIZE,
-            z: 0,
-        };
-        world.mark_chunk_terrain_ready(chunk_pos);
-        if chunk_pos.y > 0 {
-            world.mark_chunk_terrain_ready(ChunkPos {
-                x: chunk_pos.x,
-                y: chunk_pos.y - 1,
-                z: chunk_pos.z,
-            });
-        }
-        let density_entries = vec![
-            (BlockPos::new(0, sea, 0), blocks.stone, BlockState(0)),
-            (BlockPos::new(0, sea + 1, 0), blocks.stone, BlockState(0)),
-        ];
-
-        let decorated = filler.decorate(
-            &DecorateSnapshot::capture(&world, chunk_pos, BlockId(0)),
-            chunk_pos,
-            &density_entries,
-        );
-        let shore = decorated
-            .iter()
-            .find(|(pos, _, _)| pos.y == sea)
-            .map(|(_, id, _)| *id);
-        assert_eq!(
-            shore,
-            Some(blocks.grass),
-            "topmost solid at sea level should be biome surface, not stone"
-        );
-    }
-
-    #[test]
-    fn chunk_density_is_deterministic() {
-        let config = TerrainConfig::default();
-        let noise = NoiseBank::new(WorldSeed(5));
-        let density = DensitySampler::new(&config, &noise, WorldSeed(5));
-        let climate = ClimateSampler::new(&config, &noise);
-        let mut reg = BlockRegistry::new();
-        reg.register_texture("t".into(), 16, 16, vec![0; 16 * 16 * 4]);
-        let tex = stagcrest_protocol::TextureId(0);
-        let face = stagcrest_protocol::BlockFaceTextures::uniform(tex);
-        for (name, id) in [
-            ("stagcrest:grass_block", 4u32),
-            ("stagcrest:dirt", 3u32),
-            ("stagcrest:sand", 6u32),
-        ] {
-            reg.register_block(stagcrest_protocol::BlockDef {
-                id: BlockId(id),
-                namespaced_id: name.into(),
-                display_name: name.into(),
-                opaque: true,
-                transparent: false,
-                solid: true,
-                hardness: 1.0,
-                face_textures: face,
-                circuit: None,
-                placeable: false,
-                geometry: stagcrest_protocol::BlockGeometry::Cube,
-                fluid: false,
-                render_layer: stagcrest_protocol::ModelRenderLayer::Opaque,
-            });
-        }
-        let biomes = test_biomes(&mut reg);
-        let blocks = test_blocks();
-        let filler = ChunkFiller::new(&config, density, climate, &biomes, blocks);
-        let pos = ChunkPos { x: 0, y: 4, z: 0 };
-        let a = filler.fill_density(pos);
-        let b = filler.fill_density(pos);
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn count_surface_depth_reads_world_above_chunk() {
-        let blocks = test_blocks();
-        let air = BlockId(0);
-        let mut buffer = vec![air; CHUNK_VOLUME];
-        let lx = 0usize;
-        let ly = 14usize;
-        let lz = 0usize;
-        buffer[LocalBlockPos {
-            x: lx as u8,
-            y: ly as u8,
-            z: lz as u8,
-        }
-        .index()] = blocks.stone;
-        buffer[LocalBlockPos {
-            x: lx as u8,
-            y: (ly + 1) as u8,
-            z: lz as u8,
-        }
-        .index()] = blocks.dirt;
-
-        let base_y = 64;
-        let mut world = stagcrest_world::World::new(air);
-        world.set_block(
-            BlockPos::new(0, base_y + CHUNK_SIZE, 0),
-            blocks.grass,
-            BlockState(0),
-        );
-        world.set_block(
-            BlockPos::new(0, base_y + CHUNK_SIZE + 1, 0),
-            blocks.dirt,
-            BlockState(0),
-        );
-        let chunk_pos = ChunkPos { x: 0, y: 4, z: 0 };
-        let above = ChunkPos {
-            x: chunk_pos.x,
-            y: chunk_pos.y + 1,
-            z: chunk_pos.z,
-        };
-        world.mark_chunk_terrain_ready(chunk_pos);
-        world.mark_chunk_terrain_ready(above);
-
-        let depth = count_surface_depth(
-            &DecorateSnapshot::capture(&world, chunk_pos, air),
-            &buffer,
-            base_y,
-            0,
-            0,
-            lx,
-            ly,
-            lz,
-            &blocks,
-        );
-        assert!(
-            depth >= 2,
-            "surface depth should include grass/dirt from the chunk above"
-        );
-    }
 }

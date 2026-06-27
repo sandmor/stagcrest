@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    BlockModel, ModelAxis, ModelElement, ModelFace, ModelRenderLayer, ModelRotation,
-    ModelTexture, ModelVariant, TorchAttachment,
+    BlockModel, ModelAxis, ModelElement, ModelFace, ModelRenderLayer, ModelRotation, ModelTexture,
+    ModelVariant, TorchAttachment,
 };
 
 const S: f32 = 1.0 / 16.0;
@@ -99,24 +99,9 @@ fn wall_torch_model(y_rotation: f32) -> BlockModel {
     ns[SOUTH] = Some(ModelFace::FULL);
 
     let elements = vec![
-        element(
-            [-1.0, 3.5, 7.0],
-            [1.0, 13.5, 9.0],
-            Some(lean),
-            cap,
-        ),
-        element(
-            [-1.0, 3.5, 0.0],
-            [1.0, 19.5, 16.0],
-            Some(lean),
-            we,
-        ),
-        element(
-            [-8.0, 3.5, 7.0],
-            [8.0, 19.5, 9.0],
-            Some(lean),
-            ns,
-        ),
+        element([-1.0, 3.5, 7.0], [1.0, 13.5, 9.0], Some(lean), cap),
+        element([-1.0, 3.5, 0.0], [1.0, 19.5, 16.0], Some(lean), we),
+        element([-8.0, 3.5, 7.0], [8.0, 19.5, 9.0], Some(lean), ns),
     ];
 
     BlockModel {

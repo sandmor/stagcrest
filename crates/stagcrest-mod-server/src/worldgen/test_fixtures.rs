@@ -1,31 +1,6 @@
 use crate::registry::BlockRegistry;
-use crate::worldgen::biome::{BiomeRegistry, RegisterBiomeRequest};
 use crate::worldgen::terrain::ColumnBlocks;
 use stagcrest_protocol::{BlockDef, BlockFaceTextures, BlockGeometry, BlockId, TextureId};
-
-pub fn test_biomes(registry: &mut BlockRegistry) -> BiomeRegistry {
-    let mut biomes = BiomeRegistry::default();
-    biomes.register_biome(RegisterBiomeRequest {
-        namespaced_id: "stagcrest:plains".into(),
-        temperature: 0.8,
-        downfall: 0.4,
-        surface_top: "stagcrest:grass_block".into(),
-        surface_under: "stagcrest:dirt".into(),
-        surface_depth: 3,
-        underwater_top: Some("stagcrest:sand".into()),
-    });
-    biomes.register_biome(RegisterBiomeRequest {
-        namespaced_id: "stagcrest:desert".into(),
-        temperature: 2.0,
-        downfall: 0.0,
-        surface_top: "stagcrest:sand".into(),
-        surface_under: "stagcrest:sand".into(),
-        surface_depth: 4,
-        underwater_top: Some("stagcrest:sand".into()),
-    });
-    biomes.finalize(registry).unwrap();
-    biomes
-}
 
 pub fn test_blocks() -> ColumnBlocks {
     ColumnBlocks {
@@ -44,6 +19,7 @@ pub fn test_blocks() -> ColumnBlocks {
         cactus: BlockId(13),
         dead_bush: BlockId(14),
         water: BlockId(5),
+        ice: BlockId(16),
         air: BlockId(0),
     }
 }

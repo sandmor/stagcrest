@@ -1,6 +1,7 @@
 use stagcrest_protocol::manifest::ContentManifest;
 
 use crate::atlas::TextureAtlas;
+use crate::biome::BiomeRegistryClient;
 use crate::colormap::ColormapSet;
 use crate::models::ModelRegistry;
 use crate::registry::BlockRegistry;
@@ -11,6 +12,7 @@ pub struct ContentRuntime {
     pub atlas: TextureAtlas,
     pub models: ModelRegistry,
     pub colormaps: ColormapSet,
+    pub biomes: BiomeRegistryClient,
     pub loaded_mods: Vec<String>,
 }
 
@@ -19,12 +21,14 @@ impl ContentRuntime {
         let registry = BlockRegistry::from_snapshot(manifest.registry);
         let atlas = TextureAtlas::from_snapshot(&manifest.atlas);
         let colormaps = ColormapSet::from_snapshot(&manifest.colormaps);
+        let biomes = BiomeRegistryClient::from_snapshot(manifest.biomes);
         Self {
             loaded_mods: manifest.loaded_mods,
             registry,
             atlas,
             models: ModelRegistry::new(),
             colormaps,
+            biomes,
         }
     }
 }

@@ -73,9 +73,8 @@ fn start_connection_system(
 
     if let Some(addr) = net.connect_addr.clone() {
         let net_config = net.net_config.clone();
-        state.tcp_connect = Some(IoTaskPool::get().spawn(async move {
-            connect_tcp(&addr, net_config).await
-        }));
+        state.tcp_connect =
+            Some(IoTaskPool::get().spawn(async move { connect_tcp(&addr, net_config).await }));
         return;
     }
 
@@ -88,10 +87,7 @@ fn start_connection_system(
     }
 }
 
-fn poll_tcp_connect_system(
-    mut state: ResMut<LoadingState>,
-    mut net: ResMut<GameNetClient>,
-) {
+fn poll_tcp_connect_system(mut state: ResMut<LoadingState>, mut net: ResMut<GameNetClient>) {
     let Some(task) = state.tcp_connect.as_mut() else {
         return;
     };
@@ -148,7 +144,8 @@ fn poll_connection_system(
                     config.render_distance,
                     config.vertical_render_distance,
                 );
-                let world = WorldReplica(stagcrest_world::World::with_lru_capacity(lru_cap, air));
+                let world =
+                    WorldReplica::new(stagcrest_world::World::with_lru_capacity(lru_cap, air));
 
                 let fluid_anim = fluid_anim_uniform(&runtime.registry, runtime.atlas.height);
 
@@ -157,6 +154,7 @@ fn poll_connection_system(
                     atlas: runtime.atlas.clone(),
                     models: runtime.models,
                     colormaps: runtime.colormaps,
+                    biomes: runtime.biomes,
                 });
                 commands.insert_resource(world);
                 commands.insert_resource(BlockAtlasResource {
@@ -178,32 +176,22 @@ fn poll_connection_system(
     }
 }
 
-fn fluid_anim_uniform(
-    registry: &stagcrest_mod_client::BlockRegistry,
-    atlas_height: u32,
-) -> Vec4 {
+fn fluid_anim_uniform(registry: &stagcrest_mod_client::BlockRegistry, atlas_height: u32) -> Vec4 {
     let Some(tex_id) = registry.texture_by_name("stagcrest:water_still") else {
         return Vec4::ONE;
     };
-    let anim = registry
-        .texture_animation(tex_id)
-        .cloned()
-        .or_else(|| {
-            registry.textures().find(|t| t.id == tex_id).and_then(|t| {
-                stagcrest_mod_client::infer_vertical_strip_animation(t.width, t.height)
-            })
-        });
+    let anim = registry.texture_animation(tex_id).cloned().or_else(|| {
+        registry
+            .textures()
+            .find(|t| t.id == tex_id)
+            .and_then(|t| stagcrest_mod_client::infer_vertical_strip_animation(t.width, t.height))
+    });
     let Some(anim) = anim else {
         return Vec4::ONE;
     };
     let frame_uv_step = anim.frame_height as f32 / atlas_height.max(1) as f32;
     let frametime_secs = (anim.frametime_ticks as f32 / 20.0).max(0.05);
-    Vec4::new(
-        anim.frame_count as f32,
-        frame_uv_step,
-        frametime_secs,
-        0.0,
-    )
+    Vec4::new(anim.frame_count as f32, frame_uv_step, frametime_secs, 0.0)
 }
 
 fn loading_ui(
@@ -281,10 +269,7 @@ fn loading_ui(
 }
 
 fn loading_button_system(
-    mut interaction: Query<
-        (&Interaction, &LoadingAction),
-        (Changed<Interaction>, With<Button>),
-    >,
+    mut interaction: Query<(&Interaction, &LoadingAction), (Changed<Interaction>, With<Button>)>,
     mut next_state: ResMut<NextState<AppState>>,
     mut state: ResMut<LoadingState>,
 ) {

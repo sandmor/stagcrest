@@ -101,7 +101,10 @@ pub struct TcpTransport {
     config: NetConfig,
 }
 
-fn apply_tcp_tuning_std(stream: &std::net::TcpStream, config: &NetConfig) -> Result<(), TransportError> {
+fn apply_tcp_tuning_std(
+    stream: &std::net::TcpStream,
+    config: &NetConfig,
+) -> Result<(), TransportError> {
     stream
         .set_nodelay(config.tcp_nodelay)
         .map_err(|e| TransportError::Io(e.to_string()))?;
@@ -115,8 +118,8 @@ fn apply_tcp_tuning_std(stream: &std::net::TcpStream, config: &NetConfig) -> Res
 
 impl TcpTransport {
     pub fn connect_blocking(addr: &str, config: NetConfig) -> Result<Self, TransportError> {
-        let stream = std::net::TcpStream::connect(addr)
-            .map_err(|e| TransportError::Io(e.to_string()))?;
+        let stream =
+            std::net::TcpStream::connect(addr).map_err(|e| TransportError::Io(e.to_string()))?;
         apply_tcp_tuning_std(&stream, &config)?;
         stream
             .set_nonblocking(true)
@@ -225,7 +228,7 @@ pub async fn spawn_tcp_session(
 
     let (mut read_half, mut write_half) = stream.into_split();
 
-  // Reader task
+    // Reader task
     let reader_cfg = config.clone();
     tokio::spawn(async move {
         let mut buf = Vec::new();
@@ -316,9 +319,7 @@ pub async fn send_message(
     } else {
         &session.outgoing_priority
     };
-    tx.send(msg)
-        .await
-        .map_err(|_| TransportError::Closed)
+    tx.send(msg).await.map_err(|_| TransportError::Closed)
 }
 
 #[cfg(test)]
@@ -361,6 +362,7 @@ mod tests {
         let bulk = GameMessage::Server(ServerMessage::ChunkSnapshot(ChunkSnapshot {
             pos: stagcrest_protocol::ChunkPos { x: 0, y: 0, z: 0 },
             compressed: vec![],
+            biome_grid: None,
         }));
         assert!(bulk.is_bulk());
 

@@ -4,9 +4,9 @@ mod mesh_snapshot;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_client::{
-    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for, sample_colormap_rgb,
-    ColormapSet, is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face,
-    BlockRegistry, ModelRegistry, PowerLookup,
+    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for,
+    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face, sample_colormap_rgb,
+    BlockRegistry, ColormapSet, ModelRegistry, PowerLookup,
 };
 use stagcrest_protocol::{
     fluid_flowing, BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TextureId,
@@ -18,9 +18,7 @@ use std::collections::{HashMap, HashSet};
 pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
-pub use mesh_snapshot::{
-    capture_power_grid, MeshClimateSnapshot, MeshSnapshot,
-};
+pub use mesh_snapshot::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -462,7 +460,10 @@ fn emit_cube_faces(
             Vec3::new(0.0, -1.0, 0.0),
             face_texture_for(face_textures, -1.0),
         ),
-        (Vec3::new(0.0, 1.0, 0.0), face_texture_for(face_textures, 1.0)),
+        (
+            Vec3::new(0.0, 1.0, 0.0),
+            face_texture_for(face_textures, 1.0),
+        ),
         (Vec3::new(0.0, 0.0, -1.0), face_textures.sides),
         (Vec3::new(0.0, 0.0, 1.0), face_textures.sides),
         (Vec3::new(-1.0, 0.0, 0.0), face_textures.sides),
@@ -654,10 +655,7 @@ fn face_tint_mul(
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
 ) -> [f32; 3] {
-    let kind = if matches!(
-        face_tex.overlay_tint,
-        TintKind::Grass | TintKind::Foliage
-    ) {
+    let kind = if matches!(face_tex.overlay_tint, TintKind::Grass | TintKind::Foliage) {
         face_tex.overlay_tint
     } else {
         face_tex.tint
@@ -769,15 +767,16 @@ fn emit_face_from_texture(
     column_tints: Option<&ColumnTintCache>,
 ) {
     let uv_rect = registry.atlas_uv(face_tex.texture);
-    let overlay_uv = face_tex
-        .overlay
-        .map(|id| registry.atlas_uv(id))
-        .unwrap_or(stagcrest_protocol::AtlasRect {
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-        });
+    let overlay_uv =
+        face_tex
+            .overlay
+            .map(|id| registry.atlas_uv(id))
+            .unwrap_or(stagcrest_protocol::AtlasRect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            });
     let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
     emit_face(
         mesh,
@@ -811,15 +810,16 @@ fn emit_quad(
     double_sided: bool,
 ) {
     let uv_rect = registry.atlas_uv(face_tex.texture);
-    let overlay_uv = face_tex
-        .overlay
-        .map(|id| registry.atlas_uv(id))
-        .unwrap_or(stagcrest_protocol::AtlasRect {
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-        });
+    let overlay_uv =
+        face_tex
+            .overlay
+            .map(|id| registry.atlas_uv(id))
+            .unwrap_or(stagcrest_protocol::AtlasRect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            });
 
     let (verts, indices) = block_model::mesh_buffers(mesh, bucket);
 

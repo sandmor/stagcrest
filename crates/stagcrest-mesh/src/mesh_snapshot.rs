@@ -61,7 +61,9 @@ impl MeshSnapshot {
     }
 
     pub(crate) fn block_at(&self, lx: i32, ly: i32, lz: i32) -> Option<ChunkBlock> {
-        if (0..CHUNK_SIZE).contains(&lx) && (0..CHUNK_SIZE).contains(&ly) && (0..CHUNK_SIZE).contains(&lz)
+        if (0..CHUNK_SIZE).contains(&lx)
+            && (0..CHUNK_SIZE).contains(&ly)
+            && (0..CHUNK_SIZE).contains(&lz)
         {
             let local = LocalBlockPos {
                 x: lx as u8,
@@ -79,7 +81,11 @@ impl MeshSnapshot {
     }
 }
 
-fn capture_halo(world: &World, pos: ChunkPos, air: stagcrest_protocol::BlockId) -> HashMap<BlockPos, ChunkBlock> {
+fn capture_halo(
+    world: &World,
+    pos: ChunkPos,
+    air: stagcrest_protocol::BlockId,
+) -> HashMap<BlockPos, ChunkBlock> {
     let base_x = pos.x * CHUNK_SIZE;
     let base_y = pos.y * CHUNK_SIZE;
     let base_z = pos.z * CHUNK_SIZE;
@@ -87,7 +93,12 @@ fn capture_halo(world: &World, pos: ChunkPos, air: stagcrest_protocol::BlockId) 
     for lx in -1..=CHUNK_SIZE {
         for ly in -1..=CHUNK_SIZE {
             for lz in -1..=CHUNK_SIZE {
-                if lx >= 0 && lx < CHUNK_SIZE && ly >= 0 && ly < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE
+                if lx >= 0
+                    && lx < CHUNK_SIZE
+                    && ly >= 0
+                    && ly < CHUNK_SIZE
+                    && lz >= 0
+                    && lz < CHUNK_SIZE
                 {
                     continue;
                 }
@@ -105,10 +116,7 @@ fn capture_halo(world: &World, pos: ChunkPos, air: stagcrest_protocol::BlockId) 
     halo
 }
 
-pub fn capture_power_grid(
-    pos: ChunkPos,
-    power: Option<&dyn PowerLookup>,
-) -> [u8; CHUNK_VOLUME] {
+pub fn capture_power_grid(pos: ChunkPos, power: Option<&dyn PowerLookup>) -> [u8; CHUNK_VOLUME] {
     let mut grid = [0u8; CHUNK_VOLUME];
     let Some(power) = power else {
         return grid;

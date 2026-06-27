@@ -7,6 +7,13 @@ pub enum TerrainLayer {
     ElevationMid,
     ElevationHigh,
     Roughness,
+    Continentalness,
+    Erosion,
+    PeaksValleys,
+    Ridges,
+    River,
+    RiverB,
+    CaveBiomeHumidity,
     SkyIslandPlacement,
     SkyIslandShape,
     Temperature,
@@ -18,11 +25,18 @@ pub enum TerrainLayer {
 }
 
 impl TerrainLayer {
-    pub const ALL: [TerrainLayer; 12] = [
+    pub const ALL: [TerrainLayer; 19] = [
         TerrainLayer::ElevationLow,
         TerrainLayer::ElevationMid,
         TerrainLayer::ElevationHigh,
         TerrainLayer::Roughness,
+        TerrainLayer::Continentalness,
+        TerrainLayer::Erosion,
+        TerrainLayer::PeaksValleys,
+        TerrainLayer::Ridges,
+        TerrainLayer::River,
+        TerrainLayer::RiverB,
+        TerrainLayer::CaveBiomeHumidity,
         TerrainLayer::SkyIslandPlacement,
         TerrainLayer::SkyIslandShape,
         TerrainLayer::Temperature,

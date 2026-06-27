@@ -78,6 +78,9 @@ pub struct ChunkSnapshot {
     pub pos: ChunkPos,
     /// LZ4-compressed inactive chunk wire bytes.
     pub compressed: Vec<u8>,
+    /// 4×4×4 biome index grid (64 bytes).
+    #[serde(default)]
+    pub biome_grid: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -18,6 +18,7 @@ pub struct ColumnBlocks {
     pub cactus: BlockId,
     pub dead_bush: BlockId,
     pub water: BlockId,
+    pub ice: BlockId,
     pub air: BlockId,
 }
 
@@ -42,6 +43,7 @@ impl ColumnBlocks {
             cactus: block(registry, "stagcrest:cactus"),
             dead_bush: block(registry, "stagcrest:dead_bush"),
             water: block(registry, "stagcrest:water"),
+            ice: block(registry, "stagcrest:ice"),
             air,
         }
     }

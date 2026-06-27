@@ -44,8 +44,8 @@ pub(crate) fn sync_block_outline(
         return;
     };
 
-    let air = world.0.air();
-    let (id, state) = world.0.get_block(hit.block);
+    let air = world.air();
+    let (id, state) = world.get_block(hit.block);
     let Some(def) = ctx.registry.block(id) else {
         *visibility = Visibility::Hidden;
         *last = (None, None);

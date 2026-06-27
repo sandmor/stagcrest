@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    repeater_powered, AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures,
-    FaceTexture, TextureAnimation, TextureDef, TextureId, TintKind, torch_lit,
+    repeater_powered, torch_lit, AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState,
+    BlockTextures, FaceTexture, TextureAnimation, TextureDef, TextureId, TintKind,
 };
 use std::collections::HashMap;
 

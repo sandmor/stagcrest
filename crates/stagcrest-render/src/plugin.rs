@@ -6,7 +6,7 @@ use stagcrest_mesh::{ChunkMesh, MeshCache};
 use stagcrest_mod_client::TextureAtlas;
 use stagcrest_protocol::ChunkPos;
 
-use crate::voxel_material::{VoxelMaterial, voxel_vertex_layout};
+use crate::voxel_material::{voxel_vertex_layout, VoxelMaterial};
 
 #[derive(Resource, Default)]
 pub struct MeshCacheResource(pub MeshCache);
@@ -273,10 +273,10 @@ fn sync_one(
     let mesh_handle = meshes.add(mesh_data);
     for (entity, chunk) in existing {
         if chunk.pos == pos && chunk.bucket == bucket {
-            commands.entity(entity).remove::<Aabb>().insert((
-                Mesh3d(mesh_handle.clone()),
-                MeshMaterial3d(mat.clone()),
-            ));
+            commands
+                .entity(entity)
+                .remove::<Aabb>()
+                .insert((Mesh3d(mesh_handle.clone()), MeshMaterial3d(mat.clone())));
             return;
         }
     }
@@ -292,10 +292,7 @@ fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
     use bevy::render::render_asset::RenderAssetUsages;
 
     let (vertices, indices) = match bucket {
-        1 => (
-            &chunk.transparent_vertices,
-            &chunk.transparent_indices,
-        ),
+        1 => (&chunk.transparent_vertices, &chunk.transparent_indices),
         2 => (&chunk.cutout_vertices, &chunk.cutout_indices),
         _ => (&chunk.opaque_vertices, &chunk.opaque_indices),
     };
@@ -311,10 +308,7 @@ fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
     );
     mesh.insert_attribute(
         crate::voxel_material::ATTRIBUTE_OVERLAY_UV,
-        vertices
-            .iter()
-            .map(|v| v.overlay_uv)
-            .collect::<Vec<_>>(),
+        vertices.iter().map(|v| v.overlay_uv).collect::<Vec<_>>(),
     );
     mesh.insert_attribute(
         crate::voxel_material::ATTRIBUTE_BLOCK_TINT,

@@ -52,10 +52,10 @@ impl ModHost {
         packs: Option<&ResourcePackLoader>,
     ) -> Result<(), ModError> {
         let content = reader.read_bytes("mods/mods.toml")?;
-        let manifest: ModsManifest =
-            toml::from_str(std::str::from_utf8(&content).map_err(|e| {
-                ModError::Message(format!("mods.toml is not valid UTF-8: {e}"))
-            })?)?;
+        let manifest: ModsManifest = toml::from_str(
+            std::str::from_utf8(&content)
+                .map_err(|e| ModError::Message(format!("mods.toml is not valid UTF-8: {e}")))?,
+        )?;
 
         for mod_entry in manifest.mods {
             self.load_mod(reader, &mod_entry, packs)?;
@@ -119,11 +119,7 @@ impl Default for ModHost {
 
 pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) {
     let mut face_textures = reg
-        .resolve_face_textures(
-            &json.top_texture,
-            &json.bottom_texture,
-            &json.sides_texture,
-        )
+        .resolve_face_textures(&json.top_texture, &json.bottom_texture, &json.sides_texture)
         .unwrap_or(BlockFaceTextures::uniform(stagcrest_protocol::TextureId(0)));
 
     apply_block_face_tints(&json.namespaced_id, json.fluid, &mut face_textures, reg);
@@ -174,7 +170,9 @@ fn resolve_render_layer(transparent: bool) -> stagcrest_protocol::ModelRenderLay
     }
 }
 
-fn render_layer_from_sdk(layer: stagcrest_mod_sdk::RenderLayer) -> stagcrest_protocol::ModelRenderLayer {
+fn render_layer_from_sdk(
+    layer: stagcrest_mod_sdk::RenderLayer,
+) -> stagcrest_protocol::ModelRenderLayer {
     match layer {
         stagcrest_mod_sdk::RenderLayer::Opaque => stagcrest_protocol::ModelRenderLayer::Opaque,
         stagcrest_mod_sdk::RenderLayer::Blend => stagcrest_protocol::ModelRenderLayer::Blend,
@@ -184,13 +182,13 @@ fn render_layer_from_sdk(layer: stagcrest_mod_sdk::RenderLayer) -> stagcrest_pro
 
 pub fn load_mods(repo_root: &std::path::Path) -> Result<ModHost, ModError> {
     let reader = crate::assets::FsAssetReader::new(repo_root);
-    let mut packs = ResourcePackLoader::load(&reader).ok();
-    if let Some(packs) = packs.as_mut() {
+    let packs = ResourcePackLoader::load(repo_root, &reader).ok();
+    if let Some(packs) = packs.as_ref() {
         packs.validate(&reader);
         packs.warm_block_textures(&reader, DEFAULT_MC_BLOCK_TEXTURES);
     }
     let mut host = ModHost::new();
-    if let Some(packs) = packs.as_mut() {
+    if let Some(packs) = packs.as_ref() {
         register_pack_fluid_textures(&mut host.registry, packs, &reader);
         register_pack_plant_textures(&mut host.registry, packs, &reader);
     }
@@ -200,7 +198,7 @@ pub fn load_mods(repo_root: &std::path::Path) -> Result<ModHost, ModError> {
 
 fn register_pack_plant_textures(
     registry: &mut BlockRegistry,
-    packs: &mut ResourcePackLoader,
+    packs: &ResourcePackLoader,
     reader: &dyn crate::assets::AssetReader,
 ) {
     for (namespaced_id, mc_name) in [
@@ -228,7 +226,7 @@ fn register_pack_plant_textures(
 
 fn register_pack_fluid_textures(
     registry: &mut BlockRegistry,
-    packs: &mut ResourcePackLoader,
+    packs: &ResourcePackLoader,
     reader: &dyn crate::assets::AssetReader,
 ) {
     for (namespaced_id, mc_name) in [

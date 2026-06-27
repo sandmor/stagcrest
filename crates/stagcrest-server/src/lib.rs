@@ -12,8 +12,8 @@ use stagcrest_mod_server::{
     ModHost, TerrainGenerator, WorldGenState, WorldSeed, SEA_LEVEL,
 };
 use stagcrest_net::{
-    ClientMessage, GameMessage, GameTransport, InProcessTransport, NetConfig, ServerMessage,
-    send_message, spawn_tcp_session,
+    send_message, spawn_tcp_session, ClientMessage, GameMessage, GameTransport, InProcessTransport,
+    NetConfig, ServerMessage,
 };
 use stagcrest_protocol::{BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
@@ -73,10 +73,12 @@ pub struct GameServer {
 }
 
 impl GameServer {
-    pub fn bootstrap(config: ServerConfig) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub fn bootstrap(
+        config: ServerConfig,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut mod_host = load_mods(&config.mods_root)?;
         let reader = stagcrest_mod_server::FsAssetReader::new(&config.mods_root);
-        let packs = stagcrest_mod_server::ResourcePackLoader::load(&reader).ok();
+        let packs = stagcrest_mod_server::ResourcePackLoader::load(&config.mods_root, &reader).ok();
         let colormaps = ColormapSet::load(&reader, packs.as_ref());
 
         let registry = std::mem::take(&mut mod_host.registry);
@@ -87,7 +89,8 @@ impl GameServer {
         let column_blocks = ColumnBlocks::resolve(&registry, air);
 
         let mut session = WorldSession::open(&config.world_name)?;
-        let lru_cap = streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
+        let lru_cap =
+            streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
         let world = World::with_lru_capacity(lru_cap, air);
         let mut terrain = WorldGenState::new(WorldSeed(config.world_seed));
         let generator = terrain.generator().clone();
@@ -172,6 +175,7 @@ impl GameServer {
                 &mut self.session,
                 self.column_blocks,
                 &self.biomes,
+                &self.registry,
                 &self.generator,
                 &self.stream_state,
                 &mut self.last_center,
@@ -242,10 +246,7 @@ impl GameServer {
 pub fn spawn_local(
     config: ServerConfig,
 ) -> Result<
-    (
-        std::thread::JoinHandle<()>,
-        InProcessTransport,
-    ),
+    (std::thread::JoinHandle<()>, InProcessTransport),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let mut server = GameServer::bootstrap(config)?;

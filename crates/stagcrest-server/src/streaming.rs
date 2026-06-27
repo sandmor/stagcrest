@@ -1,8 +1,8 @@
 use std::collections::{HashSet, VecDeque};
 
 use stagcrest_mod_server::{
-    world_chunk_y_bounds, BiomeRegistry, ChunkGenData, ColumnBlocks, DecorateSnapshot,
-    TerrainGenerator, WorldGenState,
+    world_chunk_y_bounds, BiomeRegistry, BlockRegistry, ChunkGenData, ColumnBlocks,
+    DecorateSnapshot, TerrainGenerator, WorldGenState,
 };
 use stagcrest_net::ChunkSnapshot;
 use stagcrest_protocol::{BlockId, BlockPos, ChunkPos, CHUNK_SIZE};
@@ -40,6 +40,7 @@ impl StreamingPipeline {
         session: &mut WorldSession,
         column_blocks: ColumnBlocks,
         biomes: &BiomeRegistry,
+        registry: &BlockRegistry,
         generator: &TerrainGenerator,
         stream: &TerrainStreamState,
         last_center: &mut Option<ChunkPos>,
@@ -109,7 +110,7 @@ impl StreamingPipeline {
             if !world.is_generated(pos) || self.sent_to_client.contains(&pos) {
                 continue;
             }
-            if let Some(snapshot) = chunk_snapshot(world, pos) {
+            if let Some(snapshot) = chunk_snapshot(world, pos, terrain) {
                 self.sent_to_client.insert(pos);
                 result.snapshots.push(snapshot);
             }
@@ -134,7 +135,7 @@ impl StreamingPipeline {
                         session.stored_chunks.insert(pos);
                         self.clear_work(pos);
                         if self.sent_to_client.insert(pos) {
-                            if let Some(snapshot) = chunk_snapshot(world, pos) {
+                            if let Some(snapshot) = chunk_snapshot(world, pos, terrain) {
                                 result.snapshots.push(snapshot);
                             }
                         }
@@ -155,16 +156,22 @@ impl StreamingPipeline {
             if let Some(data) = self.deferred_decorate.pop_front() {
                 let pos = data.pos;
                 let snapshot = DecorateSnapshot::capture(world, pos, air);
-                let entries =
-                    generator.decorate_chunk_offline(column_blocks, biomes, &data, &snapshot);
+                let decorated = generator.decorate_chunk_offline(
+                    column_blocks,
+                    biomes,
+                    registry,
+                    &data,
+                    &snapshot,
+                );
                 terrain.mark_chunk_generated(pos);
+                terrain.store_biome_grid(pos, decorated.biome_grid);
                 if !world.is_generated(pos) {
-                    world.set_blocks(entries);
+                    world.set_blocks(decorated.blocks);
                     world.finalize_generated_chunk(pos);
                 }
                 self.pass2_pending.remove(&pos);
                 if self.sent_to_client.insert(pos) {
-                    if let Some(snapshot) = chunk_snapshot(world, pos) {
+                    if let Some(snapshot) = chunk_snapshot(world, pos, terrain) {
                         result.snapshots.push(snapshot);
                     }
                 }
@@ -262,7 +269,11 @@ impl StreamingPipeline {
         for cx in (center.x - horizontal_radius)..=(center.x + horizontal_radius) {
             for cz in (center.z - horizontal_radius)..=(center.z + horizontal_radius) {
                 for cy in y_min..=y_max {
-                    let pos = ChunkPos { x: cx, y: cy, z: cz };
+                    let pos = ChunkPos {
+                        x: cx,
+                        y: cy,
+                        z: cz,
+                    };
                     let chunk_center_x = cx * CHUNK_SIZE + 8;
                     let chunk_center_y = cy * CHUNK_SIZE + 8;
                     let chunk_center_z = cz * CHUNK_SIZE + 8;
@@ -355,12 +366,10 @@ impl StreamingPipeline {
             .retain(|&pos| chunk_in_stream(pos, stream, horizontal_radius, vertical_radius));
         self.pending_persist
             .retain(|&(p, _)| chunk_in_stream(p, stream, horizontal_radius, vertical_radius));
-        self.deferred_decorate.retain(|data| {
-            chunk_in_stream(data.pos, stream, horizontal_radius, vertical_radius)
-        });
-        self.pass2_pending.retain(|pos, _| {
-            chunk_in_stream(*pos, stream, horizontal_radius, vertical_radius)
-        });
+        self.deferred_decorate
+            .retain(|data| chunk_in_stream(data.pos, stream, horizontal_radius, vertical_radius));
+        self.pass2_pending
+            .retain(|pos, _| chunk_in_stream(*pos, stream, horizontal_radius, vertical_radius));
     }
 }
 
@@ -381,11 +390,13 @@ fn chunk_in_stream(
         && (pos.y - stream.center_y).abs() <= vertical_radius
 }
 
-fn chunk_snapshot(world: &World, pos: ChunkPos) -> Option<ChunkSnapshot> {
+fn chunk_snapshot(world: &World, pos: ChunkPos, terrain: &WorldGenState) -> Option<ChunkSnapshot> {
     let inactive = world.pack_chunk_for_storage(pos)?;
     let wire = inactive.encode_wire();
+    let biome_grid = terrain.biome_grid(pos).map(|g| g.to_vec());
     Some(ChunkSnapshot {
         pos,
         compressed: compress_stored(&wire),
+        biome_grid,
     })
 }

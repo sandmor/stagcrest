@@ -3,15 +3,13 @@ mod repeater;
 mod torch;
 
 use stagcrest_protocol::{
-    mount_variant, repeater_variant, BlockModel, BlockState, ModelId, ModelVariant,
-    torch_attachment,
+    mount_variant, repeater_variant, torch_attachment, BlockModel, BlockState, ModelId,
+    ModelVariant,
 };
 
 pub fn model_variant_for_block(namespaced_id: &str, state: BlockState) -> ModelVariant {
     match namespaced_id {
-        "stagcrest:redstone_torch" => {
-            torch::torch_variant_from_attachment(torch_attachment(state))
-        }
+        "stagcrest:redstone_torch" => torch::torch_variant_from_attachment(torch_attachment(state)),
         "stagcrest:lever" | "stagcrest:stone_button" => mount_variant(state),
         "stagcrest:repeater" => repeater_variant(state),
         _ => 0,

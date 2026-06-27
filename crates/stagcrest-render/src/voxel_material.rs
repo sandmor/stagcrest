@@ -1,12 +1,12 @@
+use bevy::asset::{load_internal_asset, weak_handle, Handle};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef};
+use bevy::render::render_resource::Shader;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderRef, SpecializedMeshPipelineError,
     VertexAttribute, VertexBufferLayout, VertexFormat, VertexStepMode,
 };
-use bevy::asset::{load_internal_asset, weak_handle, Handle};
-use bevy::render::render_resource::Shader;
 
 pub const VOXEL_SHADER_HANDLE: Handle<Shader> =
     weak_handle!("a7c3e891-4f2b-4d1e-9c8a-0123456789ab");

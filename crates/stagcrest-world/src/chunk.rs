@@ -82,11 +82,7 @@ impl Chunk {
     }
 
     pub fn to_inactive(&self) -> Result<InactiveChunk, StorageFormatError> {
-        InactiveChunk::from_indices(
-            self.palette.clone(),
-            self.states.clone(),
-            &self.indices,
-        )
+        InactiveChunk::from_indices(self.palette.clone(), self.states.clone(), &self.indices)
     }
 
     pub fn from_inactive(chunk: &InactiveChunk) -> Result<Self, StorageFormatError> {

@@ -4,13 +4,7 @@ use super::output::repeater_input_power;
 use super::{EvalContext, EvalResult};
 
 pub fn evaluate(ctx: &EvalContext<'_>, output: u8, prev_input: u8) -> EvalResult {
-    let input = repeater_input_power(
-        ctx.circuit,
-        ctx.pos,
-        ctx.state,
-        ctx.world,
-        ctx.registry,
-    );
+    let input = repeater_input_power(ctx.circuit, ctx.pos, ctx.state, ctx.world, ctx.registry);
     if input == prev_input {
         return EvalResult::Unchanged;
     }

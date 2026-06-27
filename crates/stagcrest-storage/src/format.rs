@@ -69,7 +69,12 @@ impl InactiveChunk {
                     palette_len: palette_ids.len(),
                 });
             }
-            write_bits(&mut packed_indices, bits_per_index, cell, palette_idx as u32);
+            write_bits(
+                &mut packed_indices,
+                bits_per_index,
+                cell,
+                palette_idx as u32,
+            );
         }
         Ok(Self {
             version: INACTIVE_CHUNK_VERSION,
@@ -103,11 +108,7 @@ impl InactiveChunk {
         let palette_count = self.palette_ids.len() as u16;
         let packed_len = self.packed_indices.len() as u32;
         let mut out = Vec::with_capacity(
-            1 + 2
-                + self.palette_ids.len() * (4 + 2)
-                + 1
-                + 4
-                + self.packed_indices.len(),
+            1 + 2 + self.palette_ids.len() * (4 + 2) + 1 + 4 + self.packed_indices.len(),
         );
         out.push(self.version);
         out.extend_from_slice(&palette_count.to_le_bytes());
@@ -198,14 +199,18 @@ fn read_u8(bytes: &[u8], cursor: &mut usize) -> Result<u8, StorageFormatError> {
 
 fn read_u16(bytes: &[u8], cursor: &mut usize) -> Result<u16, StorageFormatError> {
     let end = cursor.saturating_add(2);
-    let slice = bytes.get(*cursor..end).ok_or(StorageFormatError::Truncated)?;
+    let slice = bytes
+        .get(*cursor..end)
+        .ok_or(StorageFormatError::Truncated)?;
     *cursor = end;
     Ok(u16::from_le_bytes([slice[0], slice[1]]))
 }
 
 fn read_u32(bytes: &[u8], cursor: &mut usize) -> Result<u32, StorageFormatError> {
     let end = cursor.saturating_add(4);
-    let slice = bytes.get(*cursor..end).ok_or(StorageFormatError::Truncated)?;
+    let slice = bytes
+        .get(*cursor..end)
+        .ok_or(StorageFormatError::Truncated)?;
     *cursor = end;
     Ok(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
@@ -224,8 +229,9 @@ mod tests {
         indices[1] = 2;
         indices[CHUNK_VOLUME - 1] = 1;
 
-        let packed = InactiveChunk::from_indices(palette_ids.clone(), palette_states.clone(), &indices)
-            .unwrap();
+        let packed =
+            InactiveChunk::from_indices(palette_ids.clone(), palette_states.clone(), &indices)
+                .unwrap();
         let back = packed.to_indices().unwrap();
         assert_eq!(back, indices);
 
@@ -245,8 +251,7 @@ mod tests {
                 indices[idx] = (x % 2) as u16;
             }
         }
-        let chunk =
-            InactiveChunk::from_indices(palette_ids, palette_states, &indices).unwrap();
+        let chunk = InactiveChunk::from_indices(palette_ids, palette_states, &indices).unwrap();
         let wire = chunk.encode_wire();
         let decoded = InactiveChunk::decode_wire(&wire).unwrap();
         assert_eq!(decoded, chunk);

@@ -36,7 +36,10 @@ impl<'a> CaveSampler<'a> {
         let wxf = wx as f64 * self.config.spaghetti_frequency;
         let wzf = wz as f64 * self.config.spaghetti_frequency;
         let yf = y as f64 * self.config.spaghetti_vertical_frequency;
-        let worm = self.noise.get(TerrainLayer::CaveSpaghetti).sample3d(wxf, yf, wzf);
+        let worm = self
+            .noise
+            .get(TerrainLayer::CaveSpaghetti)
+            .sample3d(wxf, yf, wzf);
         let ridge = (worm.abs() - self.config.spaghetti_thickness).max(0.0);
         ridge < self.config.spaghetti_threshold
     }
@@ -45,7 +48,10 @@ impl<'a> CaveSampler<'a> {
         let wxf = wx as f64 * self.config.noodle_frequency;
         let wzf = wz as f64 * self.config.noodle_frequency;
         let yf = y as f64 * self.config.noodle_vertical_frequency;
-        let worm = self.noise.get(TerrainLayer::CaveNoodle).sample3d(wxf, yf, wzf);
+        let worm = self
+            .noise
+            .get(TerrainLayer::CaveNoodle)
+            .sample3d(wxf, yf, wzf);
         (worm.abs() - self.config.noodle_thickness).max(0.0) < self.config.noodle_threshold
     }
 }

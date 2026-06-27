@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use stagcrest_protocol::{
-    AttachFace, BlockDef, BlockGeometry, BlockPos, BlockState, CircuitKind, Facing, ModelId,
     mount_face, mount_facing, mount_on, repeater_delay_ticks, repeater_facing, repeater_powered,
-    torch_attachment, torch_lit, TorchAttachment,
+    torch_attachment, torch_lit, AttachFace, BlockDef, BlockGeometry, BlockPos, BlockState,
+    ChunkPos, CircuitKind, Facing, ModelId, TorchAttachment,
 };
 use stagcrest_world::RaycastHit;
 
@@ -196,6 +196,7 @@ fn format_debug_text(
     ];
 
     lines.extend(format_environment_section(env, config));
+    lines.extend(format_biome_section(mod_ctx, world, block_pos, chunk));
     lines.push(String::new());
     lines.extend(format_net_section(net));
     lines.push(String::new());
@@ -208,7 +209,7 @@ fn format_debug_text(
         .map(|def| def.namespaced_id.as_str())
         .unwrap_or("-");
     let chunk_count = world
-        .map(|w| w.0.loaded_chunk_positions().count())
+        .map(|w| w.loaded_chunk_positions().count())
         .unwrap_or(0);
 
     lines.push(format!("{} {selected_name}", pad_label("Selected")));
@@ -228,10 +229,7 @@ fn format_net_section(net: Option<&GameNetClient>) -> Vec<String> {
         return vec![format!("{} -", pad_label("Net"))];
     };
 
-    let addr = net
-        .connect_addr
-        .as_deref()
-        .unwrap_or("embedded");
+    let addr = net.connect_addr.as_deref().unwrap_or("embedded");
     let mut lines = vec![format!(
         "{} {} ({})",
         pad_label("Net"),
@@ -261,10 +259,11 @@ fn format_environment_section(env: &PlayerEnvironment, config: &GameConfig) -> V
 
     vec![
         format!(
-            "{} temp {:.2}  rain {:.2}",
+            "{} temp {:.2}  rain {:.2}  fog {:.3}",
             pad_label("Climate"),
             env.temperature,
-            env.downfall
+            env.downfall,
+            env.fog_density
         ),
         format!(
             "{} {submerged}  {:.0}%",
@@ -272,6 +271,41 @@ fn format_environment_section(env: &PlayerEnvironment, config: &GameConfig) -> V
             env.submersion * 100.0
         ),
         format!("{} {}", pad_label("Seed"), config.world_seed),
+    ]
+}
+
+fn format_biome_at(mod_ctx: &ModContext, world: &WorldReplica, block_pos: BlockPos) -> String {
+    let Some(idx) = world.biome_at(block_pos) else {
+        return "-".to_string();
+    };
+    mod_ctx
+        .biomes
+        .biome_by_index(idx)
+        .map(|b| format!("{} (#{})", b.namespaced_id, idx))
+        .unwrap_or_else(|| format!("#{} (unknown)", idx))
+}
+
+fn format_biome_section(
+    mod_ctx: Option<&ModContext>,
+    world: Option<&WorldReplica>,
+    block_pos: BlockPos,
+    chunk: ChunkPos,
+) -> Vec<String> {
+    let (Some(ctx), Some(world)) = (mod_ctx, world) else {
+        return vec![format!("{} -", pad_label("Biome"))];
+    };
+
+    let player_biome = format_biome_at(ctx, world, block_pos);
+    let grid = if world.biome_grid(chunk).is_some() {
+        "yes"
+    } else {
+        "no"
+    };
+    let count = ctx.biomes.biomes.len();
+
+    vec![
+        format!("{} {}  grid {grid}", pad_label("Biome"), player_biome),
+        format!("{} {count}", pad_label("Biomes")),
     ]
 }
 
@@ -291,7 +325,7 @@ fn format_target_section(
         return vec![format!("{} -", pad_label("Target"))];
     };
 
-    let (id, state) = world.0.get_block(hit.block);
+    let (id, state) = world.get_block(hit.block);
     let Some(def) = ctx.registry.block(id) else {
         return vec![
             format!("{} unknown id {}", pad_label("Target"), id.0),
@@ -322,6 +356,9 @@ fn format_target_section(
         ),
     ];
 
+    let target_biome = format_biome_at(ctx, world, hit.block);
+    lines.push(format!("        biome {target_biome}"));
+
     if let Some(decoded) = format_block_state(def, state) {
         let mut detail = format!("        {decoded}");
         if let Some(node) = def.circuit {
@@ -329,10 +366,7 @@ fn format_target_section(
         }
         lines.push(detail);
     } else if let Some(node) = def.circuit {
-        lines.push(format!(
-            "        {}",
-            format_circuit_kind(node.kind)
-        ));
+        lines.push(format!("        {}", format_circuit_kind(node.kind)));
     }
 
     let flags = format_flags(def);

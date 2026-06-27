@@ -23,7 +23,9 @@ impl TextureAtlas {
                 return result;
             }
             if atlas_size >= MAX_ATLAS {
-                tracing::error!("texture atlas exceeded {MAX_ATLAS}px; some textures may be missing");
+                tracing::error!(
+                    "texture atlas exceeded {MAX_ATLAS}px; some textures may be missing"
+                );
                 return try_pack(&textures, atlas_size).unwrap_or_else(empty_atlas);
             }
             atlas_size *= 2;
@@ -41,11 +43,8 @@ fn empty_atlas() -> TextureAtlas {
 }
 
 fn try_pack(textures: &[TextureDef], atlas_size: u32) -> Option<TextureAtlas> {
-    let mut img: RgbaImage = ImageBuffer::from_pixel(
-        atlas_size,
-        atlas_size,
-        image::Rgba([0, 0, 0, 0]),
-    );
+    let mut img: RgbaImage =
+        ImageBuffer::from_pixel(atlas_size, atlas_size, image::Rgba([0, 0, 0, 0]));
     let mut placements = Vec::new();
     let mut x = 0u32;
     let mut y = 0u32;

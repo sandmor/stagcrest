@@ -93,10 +93,7 @@ fn setup_inventory(
     spawn_hotbar(&mut commands);
 }
 
-fn cleanup_inventory_resources(
-    mut commands: Commands,
-    mut ui: ResMut<InventoryUiState>,
-) {
+fn cleanup_inventory_resources(mut commands: Commands, mut ui: ResMut<InventoryUiState>) {
     ui.open = false;
     ui.search.clear();
     ui.cursor = None;

@@ -1,8 +1,8 @@
-use bevy::prelude::*;
 use crate::block_outline;
 use crate::game::AppState;
 use crate::player::{self, FlyCamera};
 use crate::targeting::BlockTarget;
+use bevy::prelude::*;
 use stagcrest_render::BlockOutlineMarker;
 
 pub struct PausePlugin;
@@ -25,7 +25,10 @@ impl Plugin for PausePlugin {
                 pause_button_system.run_if(in_state(AppState::Paused)),
             ),
         )
-        .add_systems(OnEnter(AppState::Paused), (spawn_pause_menu, hide_block_outline_on_pause))
+        .add_systems(
+            OnEnter(AppState::Paused),
+            (spawn_pause_menu, hide_block_outline_on_pause),
+        )
         .add_systems(OnExit(AppState::Paused), cleanup_pause);
     }
 }

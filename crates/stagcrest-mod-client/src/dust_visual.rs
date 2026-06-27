@@ -1,4 +1,7 @@
-use stagcrest_protocol::{encode_power_tint, repeater_connects_toward, repeater_facing, BlockId, BlockState, CircuitKind, FaceTexture, ModelId, TintKind, BlockGeometry};
+use stagcrest_protocol::{
+    encode_power_tint, repeater_connects_toward, repeater_facing, BlockGeometry, BlockId,
+    BlockState, CircuitKind, FaceTexture, ModelId, TintKind,
+};
 
 use crate::registry::BlockRegistry;
 
@@ -74,9 +77,7 @@ fn dust_texture_name(connections: DustConnections) -> &'static str {
     match connections.count() {
         0 => "stagcrest:redstone_dust_dot",
         1 => "stagcrest:redstone_dust_line",
-        2 if connections.0 == 0b0101 || connections.0 == 0b1010 => {
-            "stagcrest:redstone_dust_line"
-        }
+        2 if connections.0 == 0b0101 || connections.0 == 0b1010 => "stagcrest:redstone_dust_line",
         2 => "stagcrest:redstone_dust_corner",
         3 => "stagcrest:redstone_dust_t",
         _ => "stagcrest:redstone_dust_cross",

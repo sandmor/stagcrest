@@ -106,7 +106,10 @@ impl World {
     pub fn remove_chunk(
         &mut self,
         pos: ChunkPos,
-    ) -> Option<(Option<stagcrest_storage::InactiveChunk>, crate::arena::ChunkMeta)> {
+    ) -> Option<(
+        Option<stagcrest_storage::InactiveChunk>,
+        crate::arena::ChunkMeta,
+    )> {
         self.arena.remove(pos)
     }
 

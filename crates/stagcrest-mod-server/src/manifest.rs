@@ -27,6 +27,7 @@ impl ModHost {
                 water_w: colormaps.water_w,
                 water_h: colormaps.water_h,
             },
+            biomes: self.biome_registry.to_client_snapshot(),
         }
     }
 }

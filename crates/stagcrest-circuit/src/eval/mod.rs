@@ -40,9 +40,7 @@ pub fn dispatch(ctx: &EvalContext<'_>, kind: CircuitKind, prev_input: u8) -> Eva
         CircuitKind::Wire { falloff } => wire::evaluate(ctx, falloff),
         CircuitKind::Switch { output } => switch::evaluate(ctx.state, output),
         CircuitKind::Inverter { output } => inverter::evaluate(ctx, output),
-        CircuitKind::Delay { output, delay } => {
-            delay::evaluate(ctx, output, delay, prev_input)
-        }
+        CircuitKind::Delay { output, delay } => delay::evaluate(ctx, output, delay, prev_input),
         CircuitKind::Repeater { output } => repeater::evaluate(ctx, output, prev_input),
     }
 }

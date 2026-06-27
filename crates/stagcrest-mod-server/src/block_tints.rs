@@ -77,7 +77,6 @@ pub fn face_texture_for(face_textures: &BlockFaceTextures, normal_y: f32) -> Fac
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stagcrest_protocol::{BlockId, TextureId};
 
     #[test]
     fn fluid_blocks_get_water_tint() {
@@ -88,6 +87,5 @@ mod tests {
         apply_block_face_tints("stagcrest:water", true, &mut faces, &registry);
         assert_eq!(faces.top.tint, TintKind::Water);
         assert_eq!(faces.sides.tint, TintKind::Water);
-        let _ = (BlockId(0), TextureId(0));
     }
 }

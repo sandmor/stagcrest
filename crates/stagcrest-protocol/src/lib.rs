@@ -1,9 +1,7 @@
 pub mod block_model;
 pub mod manifest;
 
-pub use manifest::{
-    AtlasSnapshot, ColormapSnapshot, ContentManifest, RegistrySnapshot,
-};
+pub use manifest::{AtlasSnapshot, ColormapSnapshot, ContentManifest, RegistrySnapshot};
 
 use serde::{Deserialize, Serialize};
 
@@ -510,13 +508,26 @@ impl BlockTextures {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CircuitKind {
-    Source { level: u8 },
-    Inverter { output: u8 },
-    Wire { falloff: u8 },
-    Switch { output: u8 },
-    Delay { output: u8, delay: u8 },
+    Source {
+        level: u8,
+    },
+    Inverter {
+        output: u8,
+    },
+    Wire {
+        falloff: u8,
+    },
+    Switch {
+        output: u8,
+    },
+    Delay {
+        output: u8,
+        delay: u8,
+    },
     /// Directional delay; tick count lives in block state (`repeater_delay_ticks`).
-    Repeater { output: u8 },
+    Repeater {
+        output: u8,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

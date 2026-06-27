@@ -1,7 +1,9 @@
 use crate::worldgen::config::TerrainConfig;
 use crate::worldgen::noise::NoiseBank;
+use crate::worldgen::seed::TerrainLayer;
 use crate::worldgen::seed::WorldSeed;
 
+/// Cohesive floating sky islands using 3D dome-density fields.
 pub struct SkyIslandSampler<'a> {
     config: &'a TerrainConfig,
     noise: &'a NoiseBank,
@@ -22,34 +24,56 @@ impl<'a> SkyIslandSampler<'a> {
             return false;
         }
 
-        let placement = self
-            .noise
-            .get(crate::worldgen::seed::TerrainLayer::SkyIslandPlacement)
-            .sample2d(
-                wx as f64 * self.config.island_placement_frequency,
-                wz as f64 * self.config.island_placement_frequency,
-            );
+        let placement = self.noise.get(TerrainLayer::SkyIslandPlacement).sample2d(
+            wx as f64 * self.config.island_placement_frequency,
+            wz as f64 * self.config.island_placement_frequency,
+        );
         if placement <= self.config.island_placement_threshold {
             return false;
         }
 
         let center_y = self.island_center_y(wx, wz);
-        let radius = self.island_radius(wx, wz);
-        let dy = (y - center_y).abs();
-        if dy > radius {
+        let radius = self.island_radius(wx, wz) as f64;
+        let dy = (y - center_y) as f64;
+
+        // Only generate in the band around center
+        if dy.abs() > radius * 1.5 {
             return false;
         }
 
-        let blob = self
-            .noise
-            .get(crate::worldgen::seed::TerrainLayer::SkyIslandShape)
-            .sample3d(
-                (wx - center_y / 4) as f64 * self.config.island_blob_frequency,
-                (y - center_y) as f64 * self.config.island_blob_frequency,
-                (wz + center_y / 3) as f64 * self.config.island_blob_frequency,
-            );
+        // Dome density: dense on top, tapering underside
+        let horizontal_dist = {
+            let hx = (wx % 32) as f64 / 32.0;
+            let hz = (wz % 32) as f64 / 32.0;
+            ((hx - 0.5).powi(2) + (hz - 0.5).powi(2)).sqrt()
+        };
 
-        blob > self.config.island_blob_threshold
+        let dome = if dy >= 0.0 {
+            // Upper dome: solid top
+            1.0 - (dy / radius).clamp(0.0, 1.0)
+        } else {
+            // Underside taper
+            let t = (-dy / (radius * 0.8)).clamp(0.0, 1.0);
+            (1.0 - t).powf(self.config.island_dome_strength)
+        };
+
+        let blob = self.noise.get(TerrainLayer::SkyIslandShape).sample3d(
+            wx as f64 * self.config.island_blob_frequency,
+            (y - center_y) as f64 * self.config.island_blob_frequency,
+            wz as f64 * self.config.island_blob_frequency,
+        );
+
+        let density = dome * (blob * 0.5 + 0.5) - horizontal_dist * 0.3;
+        density > self.config.island_blob_threshold
+    }
+
+    pub fn island_surface_y(&self, wx: i32, wz: i32) -> Option<i32> {
+        if !self.config.sky_islands_enabled {
+            return None;
+        }
+        let center = self.island_center_y(wx, wz);
+        let radius = self.island_radius(wx, wz);
+        Some(center + radius / 2)
     }
 
     fn island_center_y(&self, wx: i32, wz: i32) -> i32 {
@@ -70,7 +94,6 @@ impl<'a> SkyIslandSampler<'a> {
             .0
             .wrapping_add((wx as u64).wrapping_mul(3))
             .wrapping_add((wz as u64).wrapping_mul(7));
-        let span = 9i32;
-        8 + (h % span as u64) as i32
+        16 + (h % 16) as i32
     }
 }

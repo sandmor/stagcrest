@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    BlockDef, BlockGeometry, BlockId, BlockPos, BlockState, CircuitKind, CircuitNodeDef,
-    ModelId, set_torch_lit, torch_lit,
+    set_torch_lit, torch_lit, BlockDef, BlockGeometry, BlockId, BlockPos, BlockState, CircuitKind,
+    CircuitNodeDef, ModelId,
 };
 use stagcrest_world::World;
 

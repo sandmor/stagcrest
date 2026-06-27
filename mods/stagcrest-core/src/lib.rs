@@ -1,4 +1,6 @@
+mod blocks_extra;
 mod content;
+mod fallback;
 mod worldgen;
 
 pub use content::register_content;
@@ -18,6 +20,18 @@ impl stagcrest_mod_sdk::ContentRegistrar for WasmRegistrar {
 
     fn register_biome(&mut self, req: stagcrest_mod_sdk::RegisterBiomeRequest) -> i32 {
         stagcrest_mod_sdk::register_biome(req)
+    }
+
+    fn register_feature(&mut self, req: stagcrest_mod_sdk::RegisterFeatureRequest) -> i32 {
+        stagcrest_mod_sdk::register_feature(req)
+    }
+
+    fn register_river_config(&mut self, req: stagcrest_mod_sdk::RegisterRiverConfigRequest) -> i32 {
+        stagcrest_mod_sdk::register_river_config(req)
+    }
+
+    fn register_cave_config(&mut self, req: stagcrest_mod_sdk::RegisterCaveConfigRequest) -> i32 {
+        stagcrest_mod_sdk::register_cave_config(req)
     }
 
     fn register_biome_feature(

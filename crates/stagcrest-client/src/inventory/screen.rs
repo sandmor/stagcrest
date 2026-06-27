@@ -1,5 +1,5 @@
 use super::hotbar::{InventoryScreenSlot, SlotIcon};
-use super::state::{filtered_placeable, InventoryUiState, MAIN_SLOTS, HOTBAR_SLOTS};
+use super::state::{filtered_placeable, InventoryUiState, HOTBAR_SLOTS, MAIN_SLOTS};
 use crate::block_icons::BlockIconCache;
 use crate::game::ModContext;
 use bevy::prelude::*;
@@ -189,26 +189,24 @@ fn spawn_catalog_cell(
             BorderRadius::all(Val::Px(4.0)),
         ))
         .with_children(|cell| {
-            cell.spawn((
-                Node {
-                    width: Val::Px(40.0),
-                    height: Val::Px(40.0),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|icon_box| {
-                icon_box.spawn((
-                    ImageNode::new(icons.get(block_id)).with_mode(NodeImageMode::Auto),
-                    Node {
-                        width: Val::Px(40.0),
-                        height: Val::Px(40.0),
-                        ..default()
-                    },
-                ));
-            });
+            cell.spawn((Node {
+                width: Val::Px(40.0),
+                height: Val::Px(40.0),
+                overflow: Overflow::clip(),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },))
+                .with_children(|icon_box| {
+                    icon_box.spawn((
+                        ImageNode::new(icons.get(block_id)).with_mode(NodeImageMode::Auto),
+                        Node {
+                            width: Val::Px(40.0),
+                            height: Val::Px(40.0),
+                            ..default()
+                        },
+                    ));
+                });
             cell.spawn((
                 Text::new(name),
                 TextFont {
@@ -224,10 +222,7 @@ fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize) {
     let kind = super::state::SlotKind::Main(index);
     parent
         .spawn((
-            InventoryScreenSlot {
-                kind,
-                index,
-            },
+            InventoryScreenSlot { kind, index },
             Button,
             Node {
                 width: Val::Px(52.0),
@@ -243,30 +238,28 @@ fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize) {
             BorderRadius::all(Val::Px(4.0)),
         ))
         .with_children(|slot| {
-            slot.spawn((
-                Node {
-                    width: Val::Px(40.0),
-                    height: Val::Px(40.0),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|icon_box| {
-                icon_box.spawn((
-                    super::hotbar::empty_slot_image(),
-                    Node {
-                        width: Val::Px(40.0),
-                        height: Val::Px(40.0),
-                        ..default()
-                    },
-                    SlotIcon {
-                        kind,
-                        icon_index: index,
-                    },
-                ));
-            });
+            slot.spawn((Node {
+                width: Val::Px(40.0),
+                height: Val::Px(40.0),
+                overflow: Overflow::clip(),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },))
+                .with_children(|icon_box| {
+                    icon_box.spawn((
+                        super::hotbar::empty_slot_image(),
+                        Node {
+                            width: Val::Px(40.0),
+                            height: Val::Px(40.0),
+                            ..default()
+                        },
+                        SlotIcon {
+                            kind,
+                            icon_index: index,
+                        },
+                    ));
+                });
         });
 }
 
@@ -274,10 +267,7 @@ fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
     let kind = super::state::SlotKind::Hotbar(index);
     parent
         .spawn((
-            InventoryScreenSlot {
-                kind,
-                index,
-            },
+            InventoryScreenSlot { kind, index },
             Button,
             Node {
                 width: Val::Px(52.0),
@@ -293,34 +283,35 @@ fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
             BorderRadius::all(Val::Px(4.0)),
         ))
         .with_children(|slot| {
-            slot.spawn((
-                Node {
-                    width: Val::Px(40.0),
-                    height: Val::Px(40.0),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|icon_box| {
-                icon_box.spawn((
-                    super::hotbar::empty_slot_image(),
-                    Node {
-                        width: Val::Px(40.0),
-                        height: Val::Px(40.0),
-                        ..default()
-                    },
-                    SlotIcon {
-                        kind,
-                        icon_index: index + MAIN_SLOTS,
-                    },
-                ));
-            });
+            slot.spawn((Node {
+                width: Val::Px(40.0),
+                height: Val::Px(40.0),
+                overflow: Overflow::clip(),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },))
+                .with_children(|icon_box| {
+                    icon_box.spawn((
+                        super::hotbar::empty_slot_image(),
+                        Node {
+                            width: Val::Px(40.0),
+                            height: Val::Px(40.0),
+                            ..default()
+                        },
+                        SlotIcon {
+                            kind,
+                            icon_index: index + MAIN_SLOTS,
+                        },
+                    ));
+                });
         });
 }
 
-pub fn update_search_label(ui: Res<InventoryUiState>, mut labels: Query<&mut Text, With<SearchLabel>>) {
+pub fn update_search_label(
+    ui: Res<InventoryUiState>,
+    mut labels: Query<&mut Text, With<SearchLabel>>,
+) {
     if !ui.is_changed() {
         return;
     }

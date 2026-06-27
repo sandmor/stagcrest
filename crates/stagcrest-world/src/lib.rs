@@ -5,5 +5,5 @@ mod world;
 
 pub use arena::{ChunkGenPhase, ChunkMeta};
 pub use chunk::{Chunk, ChunkBlock, ChunkNeighborhood, ChunkView};
-pub use raycast::{RaycastHit, raycast_blocks};
+pub use raycast::{raycast_blocks, RaycastHit};
 pub use world::{ChunkViewRef, EvictedChunk, World};

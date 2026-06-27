@@ -125,17 +125,38 @@ impl MeshScheduler {
             return;
         }
         self.pending.retain(|&pos, _| {
-            chunk_in_stream(pos, center_x, center_y, center_z, horizontal_radius, vertical_radius)
+            chunk_in_stream(
+                pos,
+                center_x,
+                center_y,
+                center_z,
+                horizontal_radius,
+                vertical_radius,
+            )
         });
         self.mesh_version.retain(|pos, _| {
-            chunk_in_stream(*pos, center_x, center_y, center_z, horizontal_radius, vertical_radius)
+            chunk_in_stream(
+                *pos,
+                center_x,
+                center_y,
+                center_z,
+                horizontal_radius,
+                vertical_radius,
+            )
         });
         let out_of_stream: Vec<_> = self
             .in_progress
             .iter()
             .copied()
             .filter(|pos| {
-                !chunk_in_stream(*pos, center_x, center_y, center_z, horizontal_radius, vertical_radius)
+                !chunk_in_stream(
+                    *pos,
+                    center_x,
+                    center_y,
+                    center_z,
+                    horizontal_radius,
+                    vertical_radius,
+                )
             })
             .collect();
         for pos in out_of_stream {
@@ -173,6 +194,7 @@ impl MeshScheduler {
         world: &stagcrest_world::World,
         ctx: &crate::game::ModContext,
         power: Option<&crate::world_replica::CircuitPowerOverlay>,
+        replica: Option<&crate::world_replica::WorldReplica>,
     ) -> bool {
         if self.mesh_in_flight >= MAX_MESH_IN_FLIGHT {
             return false;
@@ -213,7 +235,7 @@ impl MeshScheduler {
                 continue;
             }
 
-            let Some(snapshot) = capture_mesh_snapshot(req.pos, world, ctx, power) else {
+            let Some(snapshot) = capture_mesh_snapshot(req.pos, world, ctx, power, replica) else {
                 deferred.push(req);
                 continue;
             };
@@ -305,16 +327,31 @@ fn capture_mesh_snapshot(
     world: &stagcrest_world::World,
     ctx: &crate::game::ModContext,
     power: Option<&crate::world_replica::CircuitPowerOverlay>,
+    replica: Option<&crate::world_replica::WorldReplica>,
 ) -> Option<MeshSnapshot> {
     let power_lookup = power.map(|p| p as &dyn stagcrest_mod_client::PowerLookup);
     let power_grid = capture_power_grid(pos, power_lookup);
+
+    let climate = replica.and_then(|r| {
+        let grid = r.biome_grid(pos)?;
+        let wx = pos.x * CHUNK_SIZE + CHUNK_SIZE / 2;
+        let wz = pos.z * CHUNK_SIZE + CHUNK_SIZE / 2;
+        let biome_idx = r.biome_at(BlockPos::new(wx, pos.y * CHUNK_SIZE, wz))?;
+        let biome = ctx.biomes.biome_by_index(biome_idx)?;
+        Some(stagcrest_mesh::MeshClimateSnapshot {
+            colormaps: Arc::new(ctx.colormaps.clone()),
+            temperature: biome.temperature,
+            downfall: biome.downfall,
+        })
+    });
+
     MeshSnapshot::capture(
         pos,
         world,
         Arc::new(ctx.registry.clone()),
         Arc::new(ctx.models.clone()),
         power_grid,
-        None,
+        climate,
     )
 }
 
@@ -328,9 +365,7 @@ pub fn mesh_dispatch(
     scheduler.background_dispatched_this_frame = 0;
     scheduler.rebuild_heap_from_pending();
     let mut spins = 0;
-    while spins < 64
-        && scheduler.dispatch_one(&world.0, &ctx, power.as_deref())
-    {
+    while spins < 64 && scheduler.dispatch_one(&*world, &ctx, power.as_deref(), Some(&world)) {
         spins += 1;
     }
 }
@@ -372,14 +407,14 @@ pub fn mesh_recover_unmeshed(
     )
     .chunk_pos();
 
-    for pos in world.0.loaded_chunk_positions() {
+    for pos in world.loaded_chunk_positions() {
         if (pos.x - center_chunk.x).abs() > h
             || (pos.z - center_chunk.z).abs() > h
             || (pos.y - center_chunk.y).abs() > v
         {
             continue;
         }
-        if !world.0.is_generated(pos) || !world.0.has_chunk(pos) {
+        if !world.is_generated(pos) || !world.has_chunk(pos) {
             continue;
         }
         if cache.0.get(pos).is_some() {
@@ -402,19 +437,19 @@ pub fn mesh_drain_dirty(
     camera: Query<&Transform, With<crate::player::FlyCamera>>,
 ) {
     let Ok(cam) = camera.single() else { return };
-    let dirty = world.0.take_dirty_chunks();
+    let dirty = world.take_dirty_chunks();
     let mut scheduled = 0usize;
     for pos in dirty {
         if scheduled >= MAX_DIRTY_DRAIN_PER_FRAME {
-            world.0.dirty_chunks.insert(pos);
+            world.dirty_chunks.insert(pos);
             continue;
         }
-        if !world.0.is_generated(pos) {
-            world.0.dirty_chunks.insert(pos);
+        if !world.is_generated(pos) {
+            world.dirty_chunks.insert(pos);
             continue;
         }
-        if !world.0.has_chunk(pos) {
-            world.0.dirty_chunks.insert(pos);
+        if !world.has_chunk(pos) {
+            world.dirty_chunks.insert(pos);
             continue;
         }
         scheduler.request(
@@ -432,20 +467,20 @@ pub fn circuit_flush_mesh(
     camera: Query<&Transform, With<crate::player::FlyCamera>>,
 ) {
     let Ok(cam) = camera.single() else { return };
-    let dirty = world.0.take_dirty_chunks();
+    let dirty = world.take_dirty_chunks();
     for pos in dirty {
-        if !world.0.is_generated(pos) {
-            world.0.dirty_chunks.insert(pos);
+        if !world.is_generated(pos) {
+            world.dirty_chunks.insert(pos);
             continue;
         }
-        if world.0.has_chunk(pos) {
+        if world.has_chunk(pos) {
             scheduler.request(
                 pos,
                 RemeshUrgency::Circuit,
                 chunk_distance_sq_from_camera(cam, pos),
             );
         } else {
-            world.0.dirty_chunks.insert(pos);
+            world.dirty_chunks.insert(pos);
         }
     }
 }
@@ -549,9 +584,10 @@ mod tests {
                 water_w: 1,
                 water_h: 1,
             },
+            biomes: stagcrest_mod_client::BiomeRegistryClient::default(),
         };
 
-        assert!(!sched.dispatch_one(&world, &ctx, None));
+        assert!(!sched.dispatch_one(&world, &ctx, None, None));
         assert!(sched.pending.contains_key(&pos));
     }
 }

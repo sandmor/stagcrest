@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use stagcrest_mod_client::sample_colormap_rgb;
+use stagcrest_mod_client::{sample_colormap_rgb, BiomeRegistryClient, InterpolatedEnvironment};
 use stagcrest_protocol::BlockPos;
 
 use crate::game::ModContext;
@@ -16,6 +16,11 @@ pub struct PlayerEnvironment {
     pub temperature: f32,
     pub downfall: f32,
     pub water_tint: [f32; 3],
+    pub fog_color: [f32; 3],
+    pub fog_density: f32,
+    pub sky_color: [f32; 3],
+    pub grass_tint: [f32; 3],
+    pub foliage_tint: [f32; 3],
 }
 
 impl Default for PlayerEnvironment {
@@ -26,7 +31,12 @@ impl Default for PlayerEnvironment {
             eye_block: BlockPos::new(0, 0, 0),
             temperature: 0.8,
             downfall: 0.4,
-            water_tint: [0.2, 0.4, 0.7],
+            water_tint: [0.25, 0.45, 0.9],
+            fog_color: [0.75, 0.85, 1.0],
+            fog_density: 0.01,
+            sky_color: [0.47, 0.65, 1.0],
+            grass_tint: [0.57, 0.74, 0.35],
+            foliage_tint: [0.48, 0.78, 0.35],
         }
     }
 }
@@ -52,7 +62,7 @@ pub fn update_player_environment(
 
     env.submerged = match (mod_ctx.as_deref(), world.as_deref()) {
         (Some(ctx), Some(world)) => {
-            let (id, _) = world.0.get_block(eye_block);
+            let (id, _) = world.get_block(eye_block);
             ctx.registry.block(id).is_some_and(|def| def.fluid)
         }
         _ => false,
@@ -66,14 +76,45 @@ pub fn update_player_environment(
         env.submersion = (env.submersion - SUBMERSION_LERP_SPEED * dt).max(target);
     }
 
-    if let Some(ctx) = mod_ctx.as_deref() {
+    if let (Some(ctx), Some(world)) = (mod_ctx.as_deref(), world.as_deref()) {
+        let interp = sample_biome_environment(&ctx.biomes, world, eye_block);
+        env.temperature = interp.temperature;
+        env.downfall = interp.downfall;
+        env.fog_color = interp.fog_color;
+        env.fog_density = interp.fog_density;
+        env.sky_color = interp.sky_color;
+        env.water_tint = if env.submersion > 0.5 {
+            interp.water_fog_color
+        } else {
+            interp.water_color
+        };
+
         let cm = &ctx.colormaps;
-        env.water_tint = sample_colormap_rgb(
-            &cm.water,
-            cm.water_w,
-            cm.water_h,
-            env.temperature,
-            env.downfall,
-        );
+        env.grass_tint = interp.grass_color.unwrap_or_else(|| {
+            sample_colormap_rgb(
+                &cm.grass,
+                cm.grass_w,
+                cm.grass_h,
+                interp.temperature,
+                interp.downfall,
+            )
+        });
+        env.foliage_tint = interp.foliage_color.unwrap_or_else(|| {
+            sample_colormap_rgb(
+                &cm.foliage,
+                cm.foliage_w,
+                cm.foliage_h,
+                interp.temperature,
+                interp.downfall,
+            )
+        });
     }
+}
+
+fn sample_biome_environment(
+    biomes: &BiomeRegistryClient,
+    world: &WorldReplica,
+    pos: BlockPos,
+) -> InterpolatedEnvironment {
+    biomes.interpolate_at(pos, |chunk| world.biome_grid(chunk).map(|g| *g))
 }

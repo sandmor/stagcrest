@@ -2,9 +2,14 @@ use crate::host::register_block_host;
 use crate::registry::BlockRegistry;
 use crate::resourcepack::ResourcePackLoader;
 use crate::runtime::memory::{read_utf8, write_bytes};
-use crate::worldgen::{register_biome_feature_host, register_biome_host, BiomeRegistry};
+use crate::worldgen::{
+    register_biome_feature_host, register_biome_host, register_cave_config_host,
+    register_feature_host, register_river_config_host, BiomeRegistry,
+};
 use stagcrest_mod_sdk::{
-    RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest, RegisterTextureRequest,
+    RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest,
+    RegisterCaveConfigRequest, RegisterFeatureRequest, RegisterRiverConfigRequest,
+    RegisterTextureRequest,
 };
 use std::ptr;
 use wasmi::*;
@@ -22,7 +27,9 @@ struct HostState {
 }
 
 fn guest_memory(caller: &Caller<'_, HostState>) -> Option<Memory> {
-    caller.get_export("memory").and_then(|export| export.into_memory())
+    caller
+        .get_export("memory")
+        .and_then(|export| export.into_memory())
 }
 
 fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
@@ -30,8 +37,7 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
         "stagcrest_host",
         "register_block",
         |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
-            let memory = guest_memory(&caller)
-                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let json = read_utf8(&memory, &caller, ptr, len)
                 .ok_or_else(|| Error::new("invalid register_block payload"))?;
             let req: RegisterBlockRequest = serde_json::from_str(&json)
@@ -46,8 +52,7 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
         "stagcrest_host",
         "register_texture",
         |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
-            let memory = guest_memory(&caller)
-                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let json = read_utf8(&memory, &caller, ptr, len)
                 .ok_or_else(|| Error::new("invalid register_texture payload"))?;
             let req: RegisterTextureRequest = serde_json::from_str(&json)
@@ -60,8 +65,8 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
                     Some(&*caller.data().packs)
                 }
             };
-            let animation = packs
-                .and_then(|p| p.animation_for_stagcrest_texture(&req.namespaced_id));
+            let animation =
+                packs.and_then(|p| p.animation_for_stagcrest_texture(&req.namespaced_id));
             registry.register_texture_with_animation(
                 req.namespaced_id,
                 req.width,
@@ -77,8 +82,7 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
         "stagcrest_host",
         "register_biome",
         |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
-            let memory = guest_memory(&caller)
-                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let json = read_utf8(&memory, &caller, ptr, len)
                 .ok_or_else(|| Error::new("invalid register_biome payload"))?;
             let req: RegisterBiomeRequest = serde_json::from_str(&json)
@@ -91,10 +95,54 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
 
     linker.func_wrap(
         "stagcrest_host",
+        "register_feature",
+        |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
+            let json = read_utf8(&memory, &caller, ptr, len)
+                .ok_or_else(|| Error::new("invalid register_feature payload"))?;
+            let req: RegisterFeatureRequest = serde_json::from_str(&json)
+                .map_err(|e| Error::new(format!("register_feature json: {e}")))?;
+            let biome_registry = unsafe { &mut *caller.data().biome_registry };
+            register_feature_host(biome_registry, req);
+            Ok(0)
+        },
+    )?;
+
+    linker.func_wrap(
+        "stagcrest_host",
+        "register_river_config",
+        |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
+            let json = read_utf8(&memory, &caller, ptr, len)
+                .ok_or_else(|| Error::new("invalid register_river_config payload"))?;
+            let req: RegisterRiverConfigRequest = serde_json::from_str(&json)
+                .map_err(|e| Error::new(format!("register_river_config json: {e}")))?;
+            let biome_registry = unsafe { &mut *caller.data().biome_registry };
+            register_river_config_host(biome_registry, req);
+            Ok(0)
+        },
+    )?;
+
+    linker.func_wrap(
+        "stagcrest_host",
+        "register_cave_config",
+        |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
+            let json = read_utf8(&memory, &caller, ptr, len)
+                .ok_or_else(|| Error::new("invalid register_cave_config payload"))?;
+            let req: RegisterCaveConfigRequest = serde_json::from_str(&json)
+                .map_err(|e| Error::new(format!("register_cave_config json: {e}")))?;
+            let biome_registry = unsafe { &mut *caller.data().biome_registry };
+            register_cave_config_host(biome_registry, req);
+            Ok(0)
+        },
+    )?;
+
+    linker.func_wrap(
+        "stagcrest_host",
         "register_biome_feature",
         |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
-            let memory = guest_memory(&caller)
-                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let json = read_utf8(&memory, &caller, ptr, len)
                 .ok_or_else(|| Error::new("invalid register_biome_feature payload"))?;
             let req: RegisterBiomeFeatureRequest = serde_json::from_str(&json)
@@ -109,8 +157,7 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
         "stagcrest_host",
         "log_message",
         |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<(), Error> {
-            let memory = guest_memory(&caller)
-                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let msg = read_utf8(&memory, &caller, ptr, len)
                 .ok_or_else(|| Error::new("invalid log_message payload"))?;
             tracing::info!(target: "mod", "{msg}");
@@ -127,8 +174,7 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
          out_ptr: i32,
          out_max: i32|
          -> Result<i32, Error> {
-            let memory = guest_memory(&caller)
-                .ok_or_else(|| Error::new("missing guest memory"))?;
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let name = read_utf8(&memory, &caller, name_ptr, name_len)
                 .ok_or_else(|| Error::new("invalid texture name"))?;
             let packs = unsafe {
@@ -150,13 +196,9 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
                 "rgba": rgba,
             });
             let bytes = payload.to_string();
-            let Some(written) = write_bytes(
-                &memory,
-                &mut caller,
-                out_ptr,
-                out_max,
-                bytes.as_bytes(),
-            ) else {
+            let Some(written) =
+                write_bytes(&memory, &mut caller, out_ptr, out_max, bytes.as_bytes())
+            else {
                 return Ok(-2);
             };
             Ok(written)
@@ -173,10 +215,7 @@ pub fn load_mod(ctx: &mut ModLoadContext<'_>, wasm_bytes: &[u8]) -> Result<(), S
     let state = HostState {
         registry: ctx.registry as *mut BlockRegistry,
         biome_registry: ctx.biome_registry as *mut BiomeRegistry,
-        packs: ctx
-            .packs
-            .map(|p| p as *const _)
-            .unwrap_or(ptr::null()),
+        packs: ctx.packs.map(|p| p as *const _).unwrap_or(ptr::null()),
     };
     let mut store = Store::new(&engine, state);
     let mut linker = Linker::new(&engine);

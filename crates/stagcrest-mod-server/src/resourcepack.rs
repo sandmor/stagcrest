@@ -1,7 +1,9 @@
-use crate::assets::{AssetError, AssetReader};
+use crate::assets::{AssetError, AssetReader, FsAssetReader};
 use serde::Deserialize;
 use stagcrest_protocol::TextureAnimation;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 /// Minecraft block texture names referenced by bundled mods (used for web preload).
 pub const DEFAULT_MC_BLOCK_TEXTURES: &[&str] = &[
@@ -85,16 +87,18 @@ enum McMetaFrame {
 }
 
 pub struct ResourcePackLoader {
+    repo_root: PathBuf,
     pack_roots: Vec<String>,
-    block_textures: HashMap<String, BlockTextureEntry>,
+    block_textures: RefCell<HashMap<String, BlockTextureEntry>>,
 }
 
 impl ResourcePackLoader {
-    pub fn load(reader: &dyn AssetReader) -> Result<Self, AssetError> {
+    pub fn load(repo_root: impl AsRef<Path>, reader: &dyn AssetReader) -> Result<Self, AssetError> {
         let pack_roots = Self::read_manifest(reader)?;
         Ok(Self {
+            repo_root: repo_root.as_ref().to_path_buf(),
             pack_roots,
-            block_textures: HashMap::new(),
+            block_textures: RefCell::new(HashMap::new()),
         })
     }
 
@@ -136,16 +140,14 @@ impl ResourcePackLoader {
         }
     }
 
-    pub fn warm_block_textures(&mut self, reader: &dyn AssetReader, names: &[&str]) {
+    pub fn warm_block_textures(&self, reader: &dyn AssetReader, names: &[&str]) {
         for name in names {
             self.ensure_block_texture(reader, name);
         }
     }
 
-    pub fn ensure_block_texture(&mut self, reader: &dyn AssetReader, name: &str) {
-        if !self.block_textures.contains_key(name) {
-            self.try_load_block_texture(reader, name);
-        }
+    pub fn ensure_block_texture(&self, reader: &dyn AssetReader, name: &str) {
+        let _ = self.load_mc_block_texture_with_reader(reader, name);
     }
 
     fn block_texture_path(pack_root: &str, mc_name: &str) -> String {
@@ -222,8 +224,8 @@ impl ResourcePackLoader {
         })
     }
 
-    fn try_load_block_texture(&mut self, reader: &dyn AssetReader, name: &str) {
-        if self.block_textures.contains_key(name) {
+    fn try_load_block_texture(&self, reader: &dyn AssetReader, name: &str) {
+        if self.block_textures.borrow().contains_key(name) {
             return;
         }
         for pack in &self.pack_roots {
@@ -243,7 +245,7 @@ impl ResourcePackLoader {
                         };
                         let animation =
                             animation.or_else(|| Self::infer_vertical_strip_animation(w, h));
-                        self.block_textures.insert(
+                        self.block_textures.borrow_mut().insert(
                             name.to_string(),
                             BlockTextureEntry {
                                 width: w,
@@ -259,14 +261,30 @@ impl ResourcePackLoader {
         }
     }
 
-    pub fn load_mc_block_texture(&self, name: &str) -> Option<(u32, u32, Vec<u8>)> {
+    fn load_mc_block_texture_with_reader(
+        &self,
+        reader: &dyn AssetReader,
+        name: &str,
+    ) -> Option<(u32, u32, Vec<u8>)> {
+        if let Some(e) = self.block_textures.borrow().get(name) {
+            return Some((e.width, e.height, e.rgba.clone()));
+        }
+        self.try_load_block_texture(reader, name);
         self.block_textures
+            .borrow()
             .get(name)
             .map(|e| (e.width, e.height, e.rgba.clone()))
     }
 
+    pub fn load_mc_block_texture(&self, name: &str) -> Option<(u32, u32, Vec<u8>)> {
+        let reader = FsAssetReader::new(&self.repo_root);
+        self.load_mc_block_texture_with_reader(&reader, name)
+    }
+
     pub fn animation_for_mc_texture(&self, name: &str) -> Option<TextureAnimation> {
+        let _ = self.load_mc_block_texture(name);
         self.block_textures
+            .borrow()
             .get(name)
             .and_then(|e| e.animation.clone())
     }

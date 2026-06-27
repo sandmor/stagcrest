@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use stagcrest_net::{
-    ClientHello, ClientMessage, GameMessage, GameTransport, NetConfig,
-    PROTOCOL_VERSION, ServerMessage,
+    ClientHello, ClientMessage, GameMessage, GameTransport, NetConfig, ServerMessage,
+    PROTOCOL_VERSION,
 };
 use stagcrest_protocol::manifest::ContentManifest;
 use stagcrest_server::{spawn_local, ServerConfig};

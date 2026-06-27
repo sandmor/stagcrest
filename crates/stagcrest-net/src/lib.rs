@@ -6,7 +6,7 @@ pub mod transport;
 pub use config::NetConfig;
 pub use message::{
     BlockUpdate, ChunkSnapshot, ClientHello, ClientMessage, GameMessage, HelloReject, InitialState,
-    PlayerAction, PlayerActionKind, PlayerAck, PlayerPose, ServerHello, ServerMessage,
+    PlayerAck, PlayerAction, PlayerActionKind, PlayerPose, ServerHello, ServerMessage,
 };
 pub use transport::{
     send_message, spawn_tcp_session, AsyncTcpSession, GameTransport, InProcessTransport,

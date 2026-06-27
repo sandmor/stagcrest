@@ -5,7 +5,9 @@ use stagcrest_mod_sdk::{
 
 pub fn register_content(reg: &mut impl ContentRegistrar) {
     register_textures(reg);
+    crate::blocks_extra::register_extra_textures(reg);
     register_blocks(reg);
+    crate::blocks_extra::register_extra_blocks(reg);
     crate::worldgen::register_worldgen(reg);
     reg.log("stagcrest-core registered");
 }
@@ -23,11 +25,7 @@ fn fluid_mask_texture(reg: &mut impl ContentRegistrar, name: &str, alpha: u8) {
     });
 }
 
-fn register_fluid_texture_from_pack(
-    reg: &mut impl ContentRegistrar,
-    id: &str,
-    _mc_name: &str,
-) {
+fn register_fluid_texture_from_pack(reg: &mut impl ContentRegistrar, id: &str, _mc_name: &str) {
     // Host preloads fluid textures (large animation strips) before mod init.
     // register_texture skips when the namespaced id is already registered.
     fluid_mask_texture(reg, id, 180);
@@ -65,7 +63,7 @@ fn cutout_fallback_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
-fn register_plant_texture_from_pack(
+pub(crate) fn register_plant_texture_from_pack(
     reg: &mut impl ContentRegistrar,
     id: &str,
     mc_name: &str,
@@ -88,7 +86,7 @@ fn register_plant_texture_from_pack(
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
-fn register_texture_from_pack(
+pub(crate) fn register_texture_from_pack(
     reg: &mut impl ContentRegistrar,
     id: &str,
     mc_name: &str,
@@ -114,12 +112,7 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     solid_color_texture(reg, "stagcrest:air", 0, 0, 0);
     register_texture_from_pack(reg, "stagcrest:stone", "stone", (120, 120, 120));
     register_texture_from_pack(reg, "stagcrest:dirt", "dirt", (134, 96, 67));
-    register_texture_from_pack(
-        reg,
-        "stagcrest:grass_top",
-        "grass_block_top",
-        (95, 159, 53),
-    );
+    register_texture_from_pack(reg, "stagcrest:grass_top", "grass_block_top", (95, 159, 53));
     register_texture_from_pack(
         reg,
         "stagcrest:grass_side",
@@ -132,18 +125,8 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
         "grass_block_side_overlay",
         (134, 96, 67),
     );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:cobblestone",
-        "cobblestone",
-        (100, 100, 100),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:oak_planks",
-        "oak_planks",
-        (162, 130, 78),
-    );
+    register_texture_from_pack(reg, "stagcrest:cobblestone", "cobblestone", (100, 100, 100));
+    register_texture_from_pack(reg, "stagcrest:oak_planks", "oak_planks", (162, 130, 78));
     register_texture_from_pack(reg, "stagcrest:glass", "glass", (200, 230, 255));
     register_fluid_texture_from_pack(reg, "stagcrest:water_still", "water_still");
     register_fluid_texture_from_pack(reg, "stagcrest:water_flow", "water_flow");
@@ -197,18 +180,8 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
         (200, 0, 0),
     );
     register_texture_from_pack(reg, "stagcrest:lever", "lever", (100, 100, 100));
-    register_texture_from_pack(
-        reg,
-        "stagcrest:repeater",
-        "repeater",
-        (180, 160, 140),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:repeater_on",
-        "repeater_on",
-        (200, 180, 160),
-    );
+    register_texture_from_pack(reg, "stagcrest:repeater", "repeater", (180, 160, 140));
+    register_texture_from_pack(reg, "stagcrest:repeater_on", "repeater_on", (200, 180, 160));
     register_texture_from_pack(
         reg,
         "stagcrest:smooth_stone",
@@ -235,18 +208,8 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     );
     register_plant_texture_from_pack(reg, "stagcrest:dandelion", "dandelion", (255, 220, 0));
     register_plant_texture_from_pack(reg, "stagcrest:poppy", "poppy", (200, 40, 40));
-    register_texture_from_pack(
-        reg,
-        "stagcrest:cactus_side",
-        "cactus_side",
-        (85, 140, 60),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:cactus_top",
-        "cactus_top",
-        (95, 150, 65),
-    );
+    register_texture_from_pack(reg, "stagcrest:cactus_side", "cactus_side", (85, 140, 60));
+    register_texture_from_pack(reg, "stagcrest:cactus_top", "cactus_top", (95, 150, 65));
     register_plant_texture_from_pack(reg, "stagcrest:dead_bush", "dead_bush", (140, 110, 70));
 }
 
@@ -275,7 +238,7 @@ fn register_layered_cross_plant(
     });
 }
 
-fn register_solid_block(
+pub(crate) fn register_solid_block(
     reg: &mut impl ContentRegistrar,
     id: &str,
     name: &str,

@@ -1,4 +1,3 @@
-
 #[cfg(test)]
 mod persistence_tests {
     use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
@@ -7,10 +6,8 @@ mod persistence_tests {
 
     #[test]
     fn native_redb_persist_reload_roundtrip() {
-        let dir = std::env::temp_dir().join(format!(
-            "stagcrest_persist_test_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("stagcrest_persist_test_{}", std::process::id()));
         let _ = std::fs::remove_file(dir.join("world.redb"));
         let storage = RedbChunkStorage::open(dir.join("world.redb")).unwrap();
 

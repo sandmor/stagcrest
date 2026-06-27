@@ -9,7 +9,10 @@ pub fn init_circuit_blocks(circuit: &mut CircuitWorld, world: &World, registry: 
     }
 }
 
-fn find_circuit_blocks(world: &World, registry: &BlockRegistry) -> Vec<stagcrest_protocol::BlockPos> {
+fn find_circuit_blocks(
+    world: &World,
+    registry: &BlockRegistry,
+) -> Vec<stagcrest_protocol::BlockPos> {
     let mut out = Vec::new();
     for cpos in world.loaded_chunk_positions() {
         if !world.is_generated(cpos) {

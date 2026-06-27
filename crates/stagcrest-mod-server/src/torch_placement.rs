@@ -1,4 +1,4 @@
-use stagcrest_protocol::{BlockPos, BlockState, TorchAttachment, torch_state};
+use stagcrest_protocol::{torch_state, BlockPos, BlockState, TorchAttachment};
 
 /// Whether a torch at `place_pos` has solid support for the given attachment.
 pub fn torch_can_attach(

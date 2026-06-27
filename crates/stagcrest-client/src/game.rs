@@ -8,7 +8,9 @@ use crate::world_replica::{apply_power_batch, CircuitPowerOverlay, WorldReplica}
 use crate::{block_outline, debug_overlay, player, targeting};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
-use stagcrest_mod_client::{BlockRegistry, ColormapSet, ModelRegistry, TextureAtlas, SEA_LEVEL};
+use stagcrest_mod_client::{
+    BiomeRegistryClient, BlockRegistry, ColormapSet, ModelRegistry, TextureAtlas, SEA_LEVEL,
+};
 use stagcrest_net::ServerMessage;
 use stagcrest_render::{
     spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, UnderwaterEffect,
@@ -30,6 +32,7 @@ pub struct ModContext {
     pub atlas: TextureAtlas,
     pub models: ModelRegistry,
     pub colormaps: ColormapSet,
+    pub biomes: BiomeRegistryClient,
 }
 
 #[derive(Resource)]
@@ -252,6 +255,7 @@ fn update_voxel_camera(
 fn sync_underwater_vision(
     env: Res<PlayerEnvironment>,
     mut ambient: ResMut<AmbientLight>,
+    mut clear: ResMut<ClearColor>,
     mut camera: Query<(&mut UnderwaterEffect, &mut DistanceFog), With<player::FlyCamera>>,
 ) {
     let Ok((mut effect, mut fog)) = camera.single_mut() else {
@@ -261,12 +265,23 @@ fn sync_underwater_vision(
     let s = env.submersion;
     effect.set(env.water_tint, s);
 
-    fog.color = Color::srgba(
-        env.water_tint[0],
-        env.water_tint[1],
-        env.water_tint[2],
-        s * 0.85,
-    );
+    clear.0 = Color::srgba(env.sky_color[0], env.sky_color[1], env.sky_color[2], 1.0);
 
-    ambient.brightness = DRY_AMBIENT_BRIGHTNESS * (1.0 - s) + WET_AMBIENT_BRIGHTNESS * s;
+    if s > 0.01 {
+        fog.color = Color::srgba(
+            env.water_tint[0],
+            env.water_tint[1],
+            env.water_tint[2],
+            s * 0.85,
+        );
+        ambient.brightness = 200.0 * (1.0 - s) + 80.0 * s;
+    } else {
+        fog.color = Color::srgba(
+            env.fog_color[0],
+            env.fog_color[1],
+            env.fog_color[2],
+            env.fog_density,
+        );
+        ambient.brightness = 800.0;
+    }
 }

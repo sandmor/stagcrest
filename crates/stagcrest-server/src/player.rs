@@ -24,10 +24,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
 
     match action.kind {
         PlayerActionKind::Break => {
-            if !server
-                .world
-                .is_chunk_interactive(action.target.chunk_pos())
-            {
+            if !server.world.is_chunk_interactive(action.target.chunk_pos()) {
                 return ack(false, "chunk not interactive");
             }
             let (id, _) = server.world.get_block(action.target);
@@ -37,9 +34,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             {
                 return ack(false, "bedrock");
             }
-            server
-                .world
-                .set_block(action.target, air, BlockState(0));
+            server.world.set_block(action.target, air, BlockState(0));
             server
                 .circuit
                 .notify_block_changed(action.target, &server.world, registry);
@@ -63,11 +58,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             }
 
             if let Some(pose) = server.latest_pose {
-                let min = Vec3::new(
-                    place_pos.x as f32,
-                    place_pos.y as f32,
-                    place_pos.z as f32,
-                );
+                let min = Vec3::new(place_pos.x as f32, place_pos.y as f32, place_pos.z as f32);
                 let max = min + Vec3::ONE;
                 let pos = pose.position();
                 if pos.x >= min.x
@@ -102,17 +93,17 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                     state
                 }
                 Some("stagcrest:lever") | Some("stagcrest:stone_button") => {
-                    let Some(state) = validate_mount_placement(
-                        is_solid_at, place_pos, 0, -1, 0, dir_x, dir_z,
-                    ) else {
+                    let Some(state) =
+                        validate_mount_placement(is_solid_at, place_pos, 0, -1, 0, dir_x, dir_z)
+                    else {
                         return ack(false, "invalid mount placement");
                     };
                     state
                 }
                 Some("stagcrest:repeater") => {
-                    let Some(state) = validate_repeater_placement(
-                        is_solid_at, place_pos, 0, -1, 0, dir_x, dir_z,
-                    ) else {
+                    let Some(state) =
+                        validate_repeater_placement(is_solid_at, place_pos, 0, -1, 0, dir_x, dir_z)
+                    else {
                         return ack(false, "invalid repeater placement");
                     };
                     state
@@ -134,10 +125,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             ack(true, "")
         }
         PlayerActionKind::Toggle => {
-            if !server
-                .world
-                .is_chunk_interactive(action.target.chunk_pos())
-            {
+            if !server.world.is_chunk_interactive(action.target.chunk_pos()) {
                 return ack(false, "chunk not interactive");
             }
             let (hit_id, _) = server.world.get_block(action.target);
@@ -145,11 +133,9 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 return ack(false, "unknown block");
             };
             if is_repeater(def) {
-                server.circuit.cycle_repeater_delay(
-                    action.target,
-                    &mut server.world,
-                    registry,
-                );
+                server
+                    .circuit
+                    .cycle_repeater_delay(action.target, &mut server.world, registry);
             } else if is_player_toggleable(def) {
                 server
                     .circuit

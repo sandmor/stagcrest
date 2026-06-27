@@ -1,5 +1,5 @@
 use crate::registry::{BlockRegistry, PowerLookup};
-use stagcrest_protocol::{BlockPos, BlockState, CircuitKind, set_torch_lit};
+use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, CircuitKind};
 use stagcrest_world::World;
 use std::collections::HashMap;
 
@@ -39,12 +39,7 @@ impl CircuitWorld {
         self.queue.enqueue_evaluate(pos);
     }
 
-    pub fn notify_block_changed(
-        &mut self,
-        pos: BlockPos,
-        world: &World,
-        registry: &BlockRegistry,
-    ) {
+    pub fn notify_block_changed(&mut self, pos: BlockPos, world: &World, registry: &BlockRegistry) {
         self.queue.cancel_delay(pos);
         self.delay_input.remove(&pos);
 
@@ -246,15 +241,19 @@ impl PowerLookup for CircuitWorld {
 mod tests {
     use super::*;
     use stagcrest_protocol::{
-        BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind, CircuitNodeDef,
-        Facing, ModelId, ModelRenderLayer, TextureId, repeater_state,
+        repeater_state, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind,
+        CircuitNodeDef, Facing, ModelId, ModelRenderLayer, TextureId,
     };
 
     fn test_block(id: BlockId, kind: CircuitKind) -> BlockDef {
         test_block_with_geometry(id, kind, BlockGeometry::Cube)
     }
 
-    fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeometry) -> BlockDef {
+    fn test_block_with_geometry(
+        id: BlockId,
+        kind: CircuitKind,
+        geometry: BlockGeometry,
+    ) -> BlockDef {
         BlockDef {
             id,
             namespaced_id: format!("test:{id:?}"),
@@ -272,7 +271,15 @@ mod tests {
         }
     }
 
-    fn setup_registry() -> (BlockRegistry, BlockId, BlockId, BlockId, BlockId, BlockId, BlockId) {
+    fn setup_registry() -> (
+        BlockRegistry,
+        BlockId,
+        BlockId,
+        BlockId,
+        BlockId,
+        BlockId,
+        BlockId,
+    ) {
         let mut reg = BlockRegistry::new();
         let source = BlockId(1);
         let wire = BlockId(2);
@@ -281,19 +288,10 @@ mod tests {
         let delay = BlockId(5);
         let repeater = BlockId(6);
 
-        reg.register_block(test_block(
-            source,
-            CircuitKind::Source { level: 15 },
-        ));
+        reg.register_block(test_block(source, CircuitKind::Source { level: 15 }));
         reg.register_block(test_block(wire, CircuitKind::Wire { falloff: 1 }));
-        reg.register_block(test_block(
-            inverter,
-            CircuitKind::Inverter { output: 15 },
-        ));
-        reg.register_block(test_block(
-            switch,
-            CircuitKind::Switch { output: 15 },
-        ));
+        reg.register_block(test_block(inverter, CircuitKind::Inverter { output: 15 }));
+        reg.register_block(test_block(switch, CircuitKind::Switch { output: 15 }));
         reg.register_block(test_block(
             delay,
             CircuitKind::Delay {
@@ -493,11 +491,7 @@ mod tests {
         );
         populate_chunks(
             &mut world,
-            &[
-                BlockPos::new(0, 0, 0),
-                BlockPos::new(1, 0, 0),
-                repeater_pos,
-            ],
+            &[BlockPos::new(0, 0, 0), BlockPos::new(1, 0, 0), repeater_pos],
         );
 
         circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);

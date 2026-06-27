@@ -1,4 +1,8 @@
-use crate::{RegisterBlockRequest, RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterTextureRequest};
+use crate::{
+    RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest,
+    RegisterCaveConfigRequest, RegisterFeatureRequest, RegisterRiverConfigRequest,
+    RegisterTextureRequest,
+};
 use serde::Deserialize;
 
 const PACK_TEXTURE_BUF: usize = 256 * 1024;
@@ -12,14 +16,16 @@ extern "C" {
     #[link_name = "log_message"]
     fn host_log_message(ptr: i32, len: i32);
     #[link_name = "load_texture_from_pack"]
-    fn host_load_texture_from_pack(
-        name_ptr: i32,
-        name_len: i32,
-        out_ptr: i32,
-        out_max: i32,
-    ) -> i32;
+    fn host_load_texture_from_pack(name_ptr: i32, name_len: i32, out_ptr: i32, out_max: i32)
+        -> i32;
     #[link_name = "register_biome"]
     fn host_register_biome(ptr: i32, len: i32) -> i32;
+    #[link_name = "register_feature"]
+    fn host_register_feature(ptr: i32, len: i32) -> i32;
+    #[link_name = "register_river_config"]
+    fn host_register_river_config(ptr: i32, len: i32) -> i32;
+    #[link_name = "register_cave_config"]
+    fn host_register_cave_config(ptr: i32, len: i32) -> i32;
     #[link_name = "register_biome_feature"]
     fn host_register_biome_feature(ptr: i32, len: i32) -> i32;
 }
@@ -51,6 +57,21 @@ pub fn register_biome(req: RegisterBiomeRequest) -> i32 {
     unsafe { with_utf8(&json, |ptr, len| host_register_biome(ptr, len)) }
 }
 
+pub fn register_feature(req: RegisterFeatureRequest) -> i32 {
+    let json = serde_json::to_string(&req).expect("serialize RegisterFeatureRequest");
+    unsafe { with_utf8(&json, |ptr, len| host_register_feature(ptr, len)) }
+}
+
+pub fn register_river_config(req: RegisterRiverConfigRequest) -> i32 {
+    let json = serde_json::to_string(&req).expect("serialize RegisterRiverConfigRequest");
+    unsafe { with_utf8(&json, |ptr, len| host_register_river_config(ptr, len)) }
+}
+
+pub fn register_cave_config(req: RegisterCaveConfigRequest) -> i32 {
+    let json = serde_json::to_string(&req).expect("serialize RegisterCaveConfigRequest");
+    unsafe { with_utf8(&json, |ptr, len| host_register_cave_config(ptr, len)) }
+}
+
 pub fn register_biome_feature(req: RegisterBiomeFeatureRequest) -> i32 {
     let json = serde_json::to_string(&req).expect("serialize RegisterBiomeFeatureRequest");
     unsafe { with_utf8(&json, |ptr, len| host_register_biome_feature(ptr, len)) }
@@ -65,8 +86,6 @@ pub fn log(msg: &str) {
     }
 }
 
-/// Load a Minecraft-format block texture from host resource packs.
-/// Returns `None` if the host has no matching texture.
 pub fn load_texture_from_pack(mc_name: &str) -> Option<(u32, u32, Vec<u8>)> {
     let mut out = vec![0u8; PACK_TEXTURE_BUF];
     let written = unsafe {

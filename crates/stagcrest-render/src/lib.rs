@@ -1,5 +1,5 @@
-mod plugin;
 mod outline;
+mod plugin;
 mod underwater;
 mod voxel_material;
 

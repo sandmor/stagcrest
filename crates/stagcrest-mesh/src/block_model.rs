@@ -86,10 +86,8 @@ fn emit_element(
     bucket: MeshBucket,
     registry: &BlockRegistry,
 ) {
-    let transformed: [[f32; 3]; 8] =
-        element_corners_block_local(element, model_rotation).map(|p| {
-            [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]]
-        });
+    let transformed: [[f32; 3]; 8] = element_corners_block_local(element, model_rotation)
+        .map(|p| [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]]);
 
     let atlas_uv = registry.atlas_uv(face_tex.texture);
     let overlay_atlas = face_tex
@@ -164,10 +162,7 @@ fn box_corners(from: [f32; 3], to: [f32; 3]) -> [[f32; 3]; 8] {
 }
 
 /// Element corners in block-local space after element and model rotation.
-fn element_corners_block_local(
-    element: &ModelElement,
-    model_rotation: [f32; 3],
-) -> [[f32; 3]; 8] {
+fn element_corners_block_local(element: &ModelElement, model_rotation: [f32; 3]) -> [[f32; 3]; 8] {
     box_corners(element.from, element.to).map(|mut p| {
         if let Some(rot) = element.rotation {
             p = rotate_local(p, rot);
@@ -319,7 +314,10 @@ impl SelectionBounds {
     }
 }
 
-pub fn block_selection_bounds(geometry: BlockGeometry, model: Option<&BlockModel>) -> SelectionBounds {
+pub fn block_selection_bounds(
+    geometry: BlockGeometry,
+    model: Option<&BlockModel>,
+) -> SelectionBounds {
     match geometry {
         BlockGeometry::Cube => SelectionBounds::cube(),
         BlockGeometry::Flat => SelectionBounds::flat(),

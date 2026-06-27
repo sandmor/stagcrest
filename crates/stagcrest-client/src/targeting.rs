@@ -40,13 +40,13 @@ pub fn update_block_target(
 
     let origin = glam::Vec3::new(cam.translation.x, cam.translation.y, cam.translation.z);
     let dir = glam::Vec3::new(cam.forward().x, cam.forward().y, cam.forward().z);
-    let air = world.0.air();
+    let air = world.air();
 
     target.hit = stagcrest_world::raycast_blocks(origin, dir, 8.0, |pos| {
-        if !world.0.is_chunk_interactive(pos.chunk_pos()) {
+        if !world.is_chunk_interactive(pos.chunk_pos()) {
             return false;
         }
-        let (id, _) = world.0.get_block(pos);
+        let (id, _) = world.get_block(pos);
         ctx.registry
             .block(id)
             .map(|d| is_targetable_block(id, d, air))

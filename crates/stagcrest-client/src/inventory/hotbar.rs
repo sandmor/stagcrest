@@ -53,27 +53,28 @@ fn spawn_world_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
             BorderRadius::all(Val::Px(4.0)),
         ))
         .with_children(|slot| {
-            slot.spawn((
-                Node {
-                    width: Val::Px(40.0),
-                    height: Val::Px(40.0),
-                    overflow: Overflow::clip(),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-            ))
-            .with_children(|icon_box| {
-                icon_box.spawn((
-                    empty_slot_image(),
-                    Node {
-                        width: Val::Px(40.0),
-                        height: Val::Px(40.0),
-                        ..default()
-                    },
-                    SlotIcon { kind, icon_index: index },
-                ));
-            });
+            slot.spawn((Node {
+                width: Val::Px(40.0),
+                height: Val::Px(40.0),
+                overflow: Overflow::clip(),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },))
+                .with_children(|icon_box| {
+                    icon_box.spawn((
+                        empty_slot_image(),
+                        Node {
+                            width: Val::Px(40.0),
+                            height: Val::Px(40.0),
+                            ..default()
+                        },
+                        SlotIcon {
+                            kind,
+                            icon_index: index,
+                        },
+                    ));
+                });
         });
 }
 
