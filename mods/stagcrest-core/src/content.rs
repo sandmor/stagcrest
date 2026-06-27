@@ -108,6 +108,26 @@ pub(crate) fn register_texture_from_pack(
     solid_color_texture(reg, id, r, g, b);
 }
 
+/// Register a texture only when the resource pack provides it (no solid-color fallback).
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
+pub(crate) fn register_optional_texture_from_pack(
+    reg: &mut impl ContentRegistrar,
+    id: &str,
+    mc_name: &str,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some((w, h, rgba)) = stagcrest_mod_sdk::load_texture_from_pack(mc_name) {
+            reg.register_texture(RegisterTextureRequest {
+                namespaced_id: id.to_string(),
+                width: w,
+                height: h,
+                rgba,
+            });
+        }
+    }
+}
+
 fn register_textures(reg: &mut impl ContentRegistrar) {
     solid_color_texture(reg, "stagcrest:air", 0, 0, 0);
     register_texture_from_pack(reg, "stagcrest:stone", "stone", (120, 120, 120));
@@ -145,22 +165,11 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     );
     register_texture_from_pack(
         reg,
-        "stagcrest:redstone_dust_corner",
-        "redstone_dust_corner0",
+        "stagcrest:redstone_dust_line1",
+        "redstone_dust_line1",
         (180, 0, 0),
     );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_dust_t",
-        "redstone_dust_t0",
-        (180, 0, 0),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_dust_cross",
-        "redstone_dust_cross0",
-        (200, 0, 0),
-    );
+    register_optional_texture_from_pack(reg, "stagcrest:redstone_dust_overlay", "redstone_dust_overlay");
     register_texture_from_pack(
         reg,
         "stagcrest:redstone_torch_off",

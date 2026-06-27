@@ -4,9 +4,10 @@ mod mesh_snapshot;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_client::{
-    dust_connections_from_neighbors, dust_vertex_tint, face_texture_for,
-    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_face, sample_colormap_rgb,
-    BlockRegistry, ColormapSet, ModelRegistry, PowerLookup,
+    compute_dust_connections, dust_shows_dot, dust_vertex_tint, face_texture_for,
+    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_textures, sample_colormap_rgb,
+    BlockRegistry, ColormapSet, DustConnections, DustSide, DustTextures, ModelRegistry,
+    PowerLookup,
 };
 use stagcrest_protocol::{
     fluid_flowing, BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TextureId,
@@ -133,11 +134,12 @@ fn build_single_block_mesh_internal(
     let mut mesh = ChunkMesh::default();
 
     if def.namespaced_id == "stagcrest:redstone_dust" {
-        let face_tex = resolve_dust_face(registry, Default::default(), power);
-        emit_flat(
+        let textures = resolve_dust_textures(registry);
+        emit_dust(
             &mut mesh,
             [0.0, 0.0, 0.0],
-            face_tex,
+            DustConnections::icon_cross(),
+            textures,
             power,
             registry,
             0,
@@ -203,15 +205,12 @@ fn should_cull_face(
 fn neighbor_culls_face(
     block_def: &stagcrest_protocol::BlockDef,
     neighbor_def: Option<&stagcrest_protocol::BlockDef>,
-    normal: Vec3,
+    _normal: Vec3,
 ) -> bool {
     let Some(neighbor) = neighbor_def else {
         return false;
     };
     if block_def.fluid && neighbor.fluid {
-        return true;
-    }
-    if normal.y > 0.5 && matches!(neighbor.geometry, BlockGeometry::Flat) {
         return true;
     }
     neighbor.opaque && neighbor.solid
@@ -309,21 +308,33 @@ pub(crate) fn build_chunk_mesh_neighbors(
                     }
                 }
 
-                let dust_face = if def.namespaced_id == "stagcrest:redstone_dust" {
-                    let connections = dust_connections_from_neighbors(|dx, _, dz| {
-                        let Some(neighbor) = neighbor_at(x + dx, y, z + dz) else {
-                            return false;
-                        };
-                        neighbor.id != air
-                            && is_dust_connectable_neighbor(
-                                registry,
-                                neighbor.id,
-                                neighbor.state,
-                                -dx,
-                                -dz,
-                            )
-                    });
-                    Some(resolve_dust_face(registry, connections, block_power))
+                let dust_connections = if def.namespaced_id == "stagcrest:redstone_dust" {
+                    Some(compute_dust_connections(
+                        |dx, dy, dz| {
+                            let Some(neighbor) = neighbor_at(x + dx, y + dy, z + dz) else {
+                                return false;
+                            };
+                            neighbor.id != air
+                                && is_dust_connectable_neighbor(
+                                    registry,
+                                    neighbor.id,
+                                    neighbor.state,
+                                    -dx,
+                                    -dz,
+                                )
+                        },
+                        |dx, dy, dz| {
+                            let Some(neighbor) = neighbor_at(x + dx, y + dy, z + dz) else {
+                                return false;
+                            };
+                            if neighbor.id == air {
+                                return false;
+                            }
+                            registry
+                                .block(neighbor.id)
+                                .is_some_and(|n| n.opaque && n.solid)
+                        },
+                    ))
                 } else {
                     None
                 };
@@ -358,7 +369,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
                             normal,
                         )
                     },
-                    dust_face,
+                    dust_connections,
                 );
             }
         }
@@ -385,7 +396,7 @@ fn emit_block_geometry(
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
     mut should_cull: impl FnMut(Vec3) -> bool,
-    dust_face: Option<FaceTexture>,
+    dust_connections: Option<DustConnections>,
 ) {
     match geometry {
         BlockGeometry::Cube => emit_cube_faces(
@@ -403,20 +414,37 @@ fn emit_block_geometry(
             &mut should_cull,
         ),
         BlockGeometry::Flat => {
-            let face_tex = dust_face.unwrap_or(face_textures.sides);
-            emit_flat(
-                mesh,
-                origin,
-                face_tex,
-                power,
-                registry,
-                wx,
-                wz,
-                lx,
-                lz,
-                climate,
-                column_tints,
-            );
+            if let Some(connections) = dust_connections {
+                let textures = resolve_dust_textures(registry);
+                emit_dust(
+                    mesh,
+                    origin,
+                    connections,
+                    textures,
+                    power,
+                    registry,
+                    wx,
+                    wz,
+                    lx,
+                    lz,
+                    climate,
+                    column_tints,
+                );
+            } else {
+                emit_flat(
+                    mesh,
+                    origin,
+                    face_textures.sides,
+                    power,
+                    registry,
+                    wx,
+                    wz,
+                    lx,
+                    lz,
+                    climate,
+                    column_tints,
+                );
+            }
         }
         BlockGeometry::Cross => {
             emit_cross_plants(
@@ -489,6 +517,323 @@ fn emit_cube_faces(
             climate,
             column_tints,
         );
+    }
+}
+
+const DUST_LAYER_EPS: f32 = 0.001;
+const DUST_UP_UV: [f32; 4] = [3.0, 0.0, 13.0, 16.0];
+const FULL_TILE_UV: [f32; 4] = [0.0, 0.0, 16.0, 16.0];
+
+fn offset_corners(corners: [[f32; 3]; 4], axis: usize, delta: f32) -> [[f32; 3]; 4] {
+    corners.map(|mut c| {
+        c[axis] += delta;
+        c
+    })
+}
+
+fn texture_uv_corners(
+    registry: &BlockRegistry,
+    tex_id: TextureId,
+    sub: [f32; 4],
+) -> [(f32, f32); 4] {
+    let uv_rect = registry.atlas_uv(tex_id);
+    let (aw, ah) = registry.atlas_dimensions();
+    let anim_meta = registry.texture_animation(tex_id);
+    let frame_h = anim_meta
+        .map(|anim| anim.frame_height.min(uv_rect.h))
+        .or_else(|| {
+            if uv_rect.h > uv_rect.w && uv_rect.w > 0 && uv_rect.h % uv_rect.w == 0 {
+                Some(uv_rect.w)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(uv_rect.h);
+
+    let x = uv_rect.x as f32;
+    let y = uv_rect.y as f32;
+    let w = uv_rect.w as f32;
+    let h = frame_h as f32;
+
+    let su0 = x + sub[0] / 16.0 * w;
+    let sv0 = y + sub[1] / 16.0 * h;
+    let su1 = x + sub[2] / 16.0 * w;
+    let sv1 = y + sub[3] / 16.0 * h;
+
+    // Inset to texel centers within the sub-rect so corners never bleed into atlas neighbors.
+    let u0 = (su0 + 0.5).min(su1) / aw as f32;
+    let u1 = (su1 - 0.5).max(su0) / aw as f32;
+    let v0 = (sv0 + 0.5).min(sv1) / ah as f32;
+    let v1 = (sv1 - 0.5).max(sv0) / ah as f32;
+    [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_dust_quad_raw(
+    mesh: &mut ChunkMesh,
+    corners: [[f32; 3]; 4],
+    tex_id: TextureId,
+    uv_sub: [f32; 4],
+    power: u8,
+    power_tinted: bool,
+    registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+) {
+    let face_tex = FaceTexture {
+        texture: tex_id,
+        overlay: None,
+        tint: if power_tinted {
+            TintKind::PowerLevel
+        } else {
+            TintKind::None
+        },
+        overlay_tint: TintKind::None,
+    };
+    let uvs = texture_uv_corners(registry, tex_id, uv_sub);
+    let tint = if power_tinted {
+        dust_vertex_tint(power)
+    } else {
+        0.0
+    };
+    let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
+    let (verts, indices) = block_model::mesh_buffers(mesh, MeshBucket::Cutout);
+    let base = verts.len() as u32;
+    for (i, pos) in corners.iter().enumerate() {
+        verts.push(VoxelVertex {
+            position: *pos,
+            uv: [uvs[i].0, uvs[i].1],
+            overlay_uv: [0.0, 0.0],
+            tint,
+            overlay_tint: 0.0,
+            tint_mul,
+        });
+    }
+    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_dust_layer_pair(
+    mesh: &mut ChunkMesh,
+    corners: [[f32; 3]; 4],
+    line_tex: TextureId,
+    overlay_tex: Option<TextureId>,
+    uv_sub: [f32; 4],
+    normal_axis: usize,
+    power: u8,
+    registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+) {
+    if let Some(overlay_tex) = overlay_tex {
+        let overlay_rect = registry.atlas_uv(overlay_tex);
+        if overlay_rect.w > 0 && overlay_rect.h > 0 {
+            emit_dust_quad_raw(
+                mesh,
+                offset_corners(corners, normal_axis, -DUST_LAYER_EPS),
+                overlay_tex,
+                uv_sub,
+                power,
+                false,
+                registry,
+                wx,
+                wz,
+                lx,
+                lz,
+                climate,
+                column_tints,
+            );
+        }
+    }
+    emit_dust_quad_raw(
+        mesh,
+        offset_corners(corners, normal_axis, DUST_LAYER_EPS),
+        line_tex,
+        uv_sub,
+        power,
+        true,
+        registry,
+        wx,
+        wz,
+        lx,
+        lz,
+        climate,
+        column_tints,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_dust(
+    mesh: &mut ChunkMesh,
+    origin: [f32; 3],
+    connections: DustConnections,
+    textures: DustTextures,
+    power: u8,
+    registry: &BlockRegistry,
+    wx: i32,
+    wz: i32,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+) {
+    let o = origin;
+    let line_y = o[1] + block_model::FLAT_Y + DUST_LAYER_EPS;
+    let y_bot = o[1] + 1.0 / 16.0;
+
+    if dust_shows_dot(connections) {
+        let dot = [
+            [o[0], line_y, o[2] + 1.0],
+            [o[0] + 1.0, line_y, o[2] + 1.0],
+            [o[0] + 1.0, line_y, o[2]],
+            [o[0], line_y, o[2]],
+        ];
+        emit_dust_layer_pair(
+            mesh,
+            dot,
+            textures.dot,
+            textures.overlay,
+            FULL_TILE_UV,
+            1,
+            power,
+            registry,
+            wx,
+            wz,
+            lx,
+            lz,
+            climate,
+            column_tints,
+        );
+    }
+
+    for (i, side) in connections.sides.iter().enumerate() {
+        match side {
+            DustSide::Side => {
+                let (line_tex, corners) = match i {
+                    0 => (
+                        textures.line_ns,
+                        [
+                            [o[0], line_y, o[2] + 0.5],
+                            [o[0] + 1.0, line_y, o[2] + 0.5],
+                            [o[0] + 1.0, line_y, o[2]],
+                            [o[0], line_y, o[2]],
+                        ],
+                    ),
+                    1 => (
+                        textures.line_ew,
+                        [
+                            [o[0] + 1.0, line_y, o[2] + 1.0],
+                            [o[0] + 1.0, line_y, o[2]],
+                            [o[0] + 0.5, line_y, o[2]],
+                            [o[0] + 0.5, line_y, o[2] + 1.0],
+                        ],
+                    ),
+                    2 => (
+                        textures.line_ns,
+                        [
+                            [o[0], line_y, o[2] + 1.0],
+                            [o[0] + 1.0, line_y, o[2] + 1.0],
+                            [o[0] + 1.0, line_y, o[2] + 0.5],
+                            [o[0], line_y, o[2] + 0.5],
+                        ],
+                    ),
+                    _ => (
+                        textures.line_ew,
+                        [
+                            [o[0], line_y, o[2]],
+                            [o[0], line_y, o[2] + 1.0],
+                            [o[0] + 0.5, line_y, o[2] + 1.0],
+                            [o[0] + 0.5, line_y, o[2]],
+                        ],
+                    ),
+                };
+                emit_dust_layer_pair(
+                    mesh,
+                    corners,
+                    line_tex,
+                    textures.overlay,
+                    FULL_TILE_UV,
+                    1,
+                    power,
+                    registry,
+                    wx,
+                    wz,
+                    lx,
+                    lz,
+                    climate,
+                    column_tints,
+                );
+            }
+            DustSide::Up => {
+                let (line_tex, corners, axis) = match i {
+                    0 => (
+                        textures.line_ns,
+                        [
+                            [o[0] + 3.0 / 16.0, y_bot, o[2]],
+                            [o[0] + 13.0 / 16.0, y_bot, o[2]],
+                            [o[0] + 13.0 / 16.0, o[1] + 1.0, o[2]],
+                            [o[0] + 3.0 / 16.0, o[1] + 1.0, o[2]],
+                        ],
+                        2,
+                    ),
+                    1 => (
+                        textures.line_ew,
+                        [
+                            [o[0] + 1.0, y_bot, o[2] + 3.0 / 16.0],
+                            [o[0] + 1.0, y_bot, o[2] + 13.0 / 16.0],
+                            [o[0] + 1.0, o[1] + 1.0, o[2] + 13.0 / 16.0],
+                            [o[0] + 1.0, o[1] + 1.0, o[2] + 3.0 / 16.0],
+                        ],
+                        0,
+                    ),
+                    2 => (
+                        textures.line_ns,
+                        [
+                            [o[0] + 3.0 / 16.0, y_bot, o[2] + 1.0],
+                            [o[0] + 13.0 / 16.0, y_bot, o[2] + 1.0],
+                            [o[0] + 13.0 / 16.0, o[1] + 1.0, o[2] + 1.0],
+                            [o[0] + 3.0 / 16.0, o[1] + 1.0, o[2] + 1.0],
+                        ],
+                        2,
+                    ),
+                    _ => (
+                        textures.line_ew,
+                        [
+                            [o[0], y_bot, o[2] + 3.0 / 16.0],
+                            [o[0], y_bot, o[2] + 13.0 / 16.0],
+                            [o[0], o[1] + 1.0, o[2] + 13.0 / 16.0],
+                            [o[0], o[1] + 1.0, o[2] + 3.0 / 16.0],
+                        ],
+                        0,
+                    ),
+                };
+                emit_dust_layer_pair(
+                    mesh,
+                    corners,
+                    line_tex,
+                    textures.overlay,
+                    DUST_UP_UV,
+                    axis,
+                    power,
+                    registry,
+                    wx,
+                    wz,
+                    lx,
+                    lz,
+                    climate,
+                    column_tints,
+                );
+            }
+            DustSide::None => {}
+        }
     }
 }
 
@@ -1004,12 +1349,12 @@ mod tests {
     }
 
     #[test]
-    fn grass_top_culled_under_flat_decoration() {
+    fn grass_top_not_culled_under_flat_decoration() {
         let grass = def(false, true, true);
         let mut plant = def(false, false, false);
         plant.geometry = BlockGeometry::Flat;
         plant.transparent = true;
-        assert!(neighbor_culls_face(&grass, Some(&plant), Vec3::Y));
+        assert!(!neighbor_culls_face(&grass, Some(&plant), Vec3::Y));
     }
 
     #[test]

@@ -52,6 +52,11 @@ fn is_water(tint: f32) -> bool {
     return tint >= 4.25 && tint < 5.0;
 }
 
+// Matches encode_power_tint(0..=15) in [3.0, 4.0], with margin before water at 4.25.
+fn is_power(tint: f32) -> bool {
+    return tint >= 2.875 && tint <= 4.125;
+}
+
 fn uses_vertex_tint_mul(tint_mul: vec3<f32>) -> bool {
     return length(tint_mul - vec3(1.0)) > 0.001;
 }
@@ -60,7 +65,7 @@ fn apply_tint(rgb: vec3<f32>, tint: f32, tint_mul: vec3<f32>) -> vec3<f32> {
     if is_water(tint) {
         return rgb * water_tint.rgb;
     }
-    if tint >= 3.0 {
+    if is_power(tint) {
         let power = clamp(tint - 3.0, 0.0, 1.0);
         let rs = mix(power_tint_dark.rgb, power_tint_bright.rgb, power);
         return rgb * rs;

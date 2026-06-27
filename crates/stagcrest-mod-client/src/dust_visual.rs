@@ -1,18 +1,55 @@
 use stagcrest_protocol::{
     encode_power_tint, repeater_connects_toward, repeater_facing, BlockGeometry, BlockId,
-    BlockState, CircuitKind, FaceTexture, ModelId, TintKind,
+    BlockState, CircuitKind, ModelId, TextureId,
 };
 
 use crate::registry::BlockRegistry;
 
-/// Horizontal connection bitmask: N=1, E=2, S=4, W=8.
+/// Per-direction redstone wire connection (matches vanilla `none` / `side` / `up`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DustConnections(pub u8);
+pub enum DustSide {
+    #[default]
+    None,
+    Side,
+    Up,
+}
+
+/// Horizontal wire layout: index 0 = north (-Z), 1 = east (+X), 2 = south (+Z), 3 = west (-X).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DustConnections {
+    pub sides: [DustSide; 4],
+}
 
 impl DustConnections {
+    pub const DIRECTIONS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+
     pub fn count(self) -> u32 {
-        self.0.count_ones()
+        self.sides.iter().filter(|s| **s != DustSide::None).count() as u32
     }
+
+    pub fn side(&self, index: usize) -> DustSide {
+        self.sides[index]
+    }
+
+    pub fn set_side(&mut self, index: usize, side: DustSide) {
+        self.sides[index] = side;
+    }
+
+    /// Inventory / icon preview: four-way cross.
+    pub fn icon_cross() -> Self {
+        Self {
+            sides: [DustSide::Side; 4],
+        }
+    }
+}
+
+/// Texture IDs for vanilla-style dust composition (dot + line0/line1 + overlay).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DustTextures {
+    pub dot: TextureId,
+    pub line_ns: TextureId,
+    pub line_ew: TextureId,
+    pub overlay: Option<TextureId>,
 }
 
 pub trait PowerLookup: Sync {
@@ -48,23 +85,25 @@ pub fn is_dust_connectable_neighbor(
     is_dust_connectable(registry, id)
 }
 
-/// Resolve dust texture from neighbor layout. Tint is always power-based (0–15 levels).
-pub fn resolve_dust_face(
-    registry: &BlockRegistry,
-    _connections: DustConnections,
-    _power: u8,
-) -> FaceTexture {
-    let texture_name = dust_texture_name(_connections);
-    let texture = registry
-        .texture_by_name(texture_name)
-        .or_else(|| registry.texture_by_name("stagcrest:redstone_dust_dot"))
-        .unwrap_or(stagcrest_protocol::TextureId(0));
-
-    FaceTexture {
-        texture,
-        overlay: None,
-        tint: TintKind::PowerLevel,
-        overlay_tint: TintKind::None,
+/// Resolve the four dust layer textures from the registry.
+pub fn resolve_dust_textures(registry: &BlockRegistry) -> DustTextures {
+    let lookup = |name: &str, fallback: &str| {
+        registry
+            .texture_by_name(name)
+            .or_else(|| registry.texture_by_name(fallback))
+            .unwrap_or(TextureId(0))
+    };
+    DustTextures {
+        dot: lookup("stagcrest:redstone_dust_dot", "stagcrest:redstone_dust_dot"),
+        line_ns: lookup(
+            "stagcrest:redstone_dust_line",
+            "stagcrest:redstone_dust_dot",
+        ),
+        line_ew: lookup(
+            "stagcrest:redstone_dust_line1",
+            "stagcrest:redstone_dust_line",
+        ),
+        overlay: registry.texture_by_name("stagcrest:redstone_dust_overlay"),
     }
 }
 
@@ -73,34 +112,94 @@ pub fn dust_vertex_tint(power: u8) -> f32 {
     encode_power_tint(power)
 }
 
-fn dust_texture_name(connections: DustConnections) -> &'static str {
-    match connections.count() {
-        0 => "stagcrest:redstone_dust_dot",
-        1 => "stagcrest:redstone_dust_line",
-        2 if connections.0 == 0b0101 || connections.0 == 0b1010 => "stagcrest:redstone_dust_line",
-        2 => "stagcrest:redstone_dust_corner",
-        3 => "stagcrest:redstone_dust_t",
-        _ => "stagcrest:redstone_dust_cross",
+/// Whether the center dot should be drawn (hidden on pure straight horizontal lines).
+pub fn dust_shows_dot(connections: DustConnections) -> bool {
+    let mut side_count = 0u32;
+    let mut up_count = 0u32;
+    let mut ns = false;
+    let mut ew = false;
+    for (i, side) in connections.sides.iter().enumerate() {
+        match side {
+            DustSide::None => {}
+            DustSide::Side => {
+                side_count += 1;
+                match i {
+                    0 | 2 => ns = true,
+                    _ => ew = true,
+                }
+            }
+            DustSide::Up => up_count += 1,
+        }
     }
+    if up_count > 0 {
+        return true;
+    }
+    if side_count == 2 && ns && !ew {
+        return false;
+    }
+    if side_count == 2 && ew && !ns {
+        return false;
+    }
+    true
 }
 
-/// Build connection mask from horizontal neighbors.
-pub fn dust_connections_from_neighbors<F>(mut is_connectable: F) -> DustConnections
-where
-    F: FnMut(i32, i32, i32) -> bool,
-{
-    let mut mask = 0u8;
-    if is_connectable(0, 0, -1) {
-        mask |= 1;
+/// Build per-direction connection states from local neighbor queries.
+///
+/// `connectable_at(dx, dy, dz)` — dust-connectable block at offset from dust.
+/// `full_cube_at(dx, dy, dz)` — opaque solid cube at offset (blocks vertical climb when capped).
+pub fn compute_dust_connections(
+    mut connectable_at: impl FnMut(i32, i32, i32) -> bool,
+    mut full_cube_at: impl FnMut(i32, i32, i32) -> bool,
+) -> DustConnections {
+    let mut connections = DustConnections::default();
+    for (i, &(dx, dz)) in DustConnections::DIRECTIONS.iter().enumerate() {
+        connections.sides[i] =
+            dust_side_for_direction(dx, dz, &mut connectable_at, &mut full_cube_at);
     }
-    if is_connectable(1, 0, 0) {
-        mask |= 2;
+    apply_single_connection_mirror(&mut connections);
+    connections
+}
+
+fn dust_side_for_direction(
+    dx: i32,
+    dz: i32,
+    connectable_at: &mut impl FnMut(i32, i32, i32) -> bool,
+    full_cube_at: &mut impl FnMut(i32, i32, i32) -> bool,
+) -> DustSide {
+    if connectable_at(dx, 0, dz) {
+        return DustSide::Side;
     }
-    if is_connectable(0, 0, 1) {
-        mask |= 4;
+    if full_cube_at(dx, 0, dz) {
+        if connectable_at(dx, 1, dz) && !full_cube_at(0, 1, 0) {
+            return DustSide::Up;
+        }
+    } else if connectable_at(dx, -1, dz) {
+        return DustSide::Side;
     }
-    if is_connectable(-1, 0, 0) {
-        mask |= 8;
+    DustSide::None
+}
+
+/// When exactly one direction connects, vanilla draws a line through the block.
+fn apply_single_connection_mirror(connections: &mut DustConnections) {
+    let active: Vec<usize> = connections
+        .sides
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| **s != DustSide::None)
+        .map(|(i, _)| i)
+        .collect();
+    if active.len() != 1 {
+        return;
     }
-    DustConnections(mask)
+    let i = active[0];
+    let opposite = match i {
+        0 => 2,
+        1 => 3,
+        2 => 0,
+        3 => 1,
+        _ => return,
+    };
+    if connections.sides[opposite] == DustSide::None {
+        connections.sides[opposite] = DustSide::Side;
+    }
 }
