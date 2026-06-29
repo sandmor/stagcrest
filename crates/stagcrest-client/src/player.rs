@@ -158,6 +158,11 @@ pub fn block_interaction(
             .map(|i| i.selected_index as u8)
             .unwrap_or(0),
         block_id: selected.0,
+        face_normal: [
+            hit.face_normal.x as i32,
+            hit.face_normal.y as i32,
+            hit.face_normal.z as i32,
+        ],
     });
     let _ = camera;
 }

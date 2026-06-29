@@ -12,8 +12,8 @@ use stagcrest_mod_server::{
     ModHost, TerrainGenerator, WorldGenState, WorldSeed, SEA_LEVEL,
 };
 use stagcrest_net::{
-    send_message, spawn_tcp_session, ClientMessage, GameMessage, GameTransport, InProcessTransport,
-    NetConfig, ServerMessage,
+    send_message, spawn_tcp_session, BlockUpdate, CircuitPowerBatch, ClientMessage, GameMessage,
+    GameTransport, InProcessTransport, NetConfig, ServerMessage,
 };
 use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
@@ -182,6 +182,22 @@ impl GameServer {
         net::handle_client_message(self, msg);
     }
 
+    pub(crate) fn broadcast_circuit_replication(&mut self) {
+        for (pos, id, state) in self.circuit.drain_visual_updates() {
+            self.queue_priority(GameMessage::Server(ServerMessage::BlockUpdate(BlockUpdate {
+                pos,
+                id,
+                state,
+            })));
+        }
+        let updates = self.circuit.drain_power_updates();
+        if !updates.is_empty() {
+            self.queue_priority(GameMessage::Server(ServerMessage::CircuitPowerBatch(
+                CircuitPowerBatch { updates },
+            )));
+        }
+    }
+
     pub fn tick(&mut self, dt_secs: f32) {
         const CIRCUIT_TICK_INTERVAL: f32 = 0.1;
 
@@ -189,6 +205,7 @@ impl GameServer {
         while self.circuit_accumulator >= CIRCUIT_TICK_INTERVAL {
             self.circuit_accumulator -= CIRCUIT_TICK_INTERVAL;
             self.circuit.tick(&mut self.world, &self.registry);
+            self.broadcast_circuit_replication();
         }
 
         if self.handshake_complete {
@@ -207,7 +224,14 @@ impl GameServer {
                 self.config.vertical_render_distance,
             );
             for snapshot in stream_result.snapshots {
+                let chunk = snapshot.pos;
                 self.queue_bulk(GameMessage::Server(ServerMessage::ChunkSnapshot(snapshot)));
+                let seed = self.circuit.power_in_chunk(chunk);
+                if !seed.is_empty() {
+                    self.queue_bulk(GameMessage::Server(ServerMessage::CircuitPowerBatch(
+                        CircuitPowerBatch { updates: seed },
+                    )));
+                }
             }
             for pos in stream_result.unloads {
                 self.queue_priority(GameMessage::Server(ServerMessage::ChunkUnload(pos)));

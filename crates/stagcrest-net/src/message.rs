@@ -67,6 +67,8 @@ pub struct PlayerAction {
     pub target: BlockPos,
     pub hotbar_slot: u8,
     pub block_id: BlockId,
+    /// Face normal pointing into `target` for Place actions (from the clicked block face).
+    pub face_normal: [i32; 3],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

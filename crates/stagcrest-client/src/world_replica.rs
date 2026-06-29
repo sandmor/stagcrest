@@ -134,7 +134,11 @@ pub fn apply_power_batch(
     mesh_scheduler: &mut MeshScheduler,
 ) {
     for (pos, power) in updates {
-        overlay.0.insert(pos, power);
+        if power == 0 {
+            overlay.0.remove(&pos);
+        } else {
+            overlay.0.insert(pos, power);
+        }
         mesh_scheduler.request(pos.chunk_pos(), RemeshUrgency::Circuit, 0);
     }
 }

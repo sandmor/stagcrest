@@ -1,5 +1,5 @@
 use crate::registry::BlockRegistry;
-use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, CircuitKind};
+use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, ChunkPos, CircuitKind};
 use stagcrest_world::World;
 use std::collections::HashMap;
 
@@ -14,6 +14,8 @@ pub struct CircuitWorld {
     queue: EventQueue,
     delay_input: HashMap<BlockPos, u8>,
     tick: u64,
+    visual_updates: Vec<(stagcrest_protocol::BlockId, BlockPos, BlockState)>,
+    power_updates: Vec<(BlockPos, u8)>,
 }
 
 impl CircuitWorld {
@@ -45,11 +47,34 @@ impl CircuitWorld {
 
         let (id, _) = world.get_block(pos);
         if registry.block(id).and_then(|d| d.circuit).is_none() {
-            self.power.remove(&pos);
+            if self.power.remove(&pos).is_some() {
+                self.power_updates.push((pos, 0));
+            }
         }
 
         self.queue_update(pos);
         self.enqueue_circuit_neighbors(pos, world, registry);
+    }
+
+    pub fn drain_visual_updates(
+        &mut self,
+    ) -> Vec<(BlockPos, stagcrest_protocol::BlockId, BlockState)> {
+        self.visual_updates
+            .drain(..)
+            .map(|(id, pos, state)| (pos, id, state))
+            .collect()
+    }
+
+    pub fn drain_power_updates(&mut self) -> Vec<(BlockPos, u8)> {
+        self.power_updates.drain(..).collect()
+    }
+
+    pub fn power_in_chunk(&self, chunk: ChunkPos) -> Vec<(BlockPos, u8)> {
+        self.power
+            .iter()
+            .filter(|(pos, _)| pos.chunk_pos() == chunk)
+            .map(|(pos, &level)| (*pos, level))
+            .collect()
     }
 
     pub fn tick(&mut self, world: &mut World, registry: &BlockRegistry) {
@@ -155,8 +180,11 @@ impl CircuitWorld {
         } else {
             self.power.insert(pos, new_power);
         }
+        self.power_updates.push((pos, new_power));
 
-        sync_block_state(world, pos, id, def, kind, state, new_power);
+        if let Some(new_state) = sync_block_state(world, pos, id, def, kind, state, new_power) {
+            self.visual_updates.push((id, pos, new_state));
+        }
         self.enqueue_circuit_neighbors(pos, world, registry);
     }
 
@@ -362,6 +390,16 @@ mod tests {
         assert_eq!(circuit.power_at(BlockPos::new(1, 0, 0)), 14);
         assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 13);
         assert_eq!(circuit.power_at(BlockPos::new(3, 0, 0)), 12);
+
+        let updates = circuit.drain_power_updates();
+        assert!(updates.contains(&(BlockPos::new(1, 0, 0), 14)));
+        assert!(updates.contains(&(BlockPos::new(2, 0, 0), 13)));
+        assert!(updates.contains(&(BlockPos::new(3, 0, 0), 12)));
+
+        let chunk = BlockPos::new(0, 0, 0).chunk_pos();
+        let seeded = circuit.power_in_chunk(chunk);
+        assert_eq!(seeded.len(), 4);
+        assert!(seeded.contains(&(BlockPos::new(1, 0, 0), 14)));
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub fn sync_block_state(
     kind: CircuitKind,
     state: BlockState,
     new_power: u8,
-) {
+) -> Option<BlockState> {
     match kind {
         CircuitKind::Wire { .. }
         | CircuitKind::Switch { .. }
@@ -21,19 +21,24 @@ pub fn sync_block_state(
             let powered = u16::from(new_power > 0);
             let new_bits = (state.0 & !1) | powered;
             if state.0 != new_bits {
-                world_blocks.set_block(pos, id, BlockState(new_bits));
+                let new_state = BlockState(new_bits);
+                world_blocks.set_block(pos, id, new_state);
+                return Some(new_state);
             }
         }
         CircuitKind::Inverter { .. } => {
             if matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch)) {
                 let lit = new_power > 0;
                 if torch_lit(state) != lit {
-                    world_blocks.set_block(pos, id, set_torch_lit(state, lit));
+                    let new_state = set_torch_lit(state, lit);
+                    world_blocks.set_block(pos, id, new_state);
+                    return Some(new_state);
                 }
             }
         }
         CircuitKind::Source { .. } => {}
     }
+    None
 }
 
 pub fn is_torch_geometry(def: &BlockDef) -> bool {

@@ -8,6 +8,13 @@ use stagcrest_protocol::{BlockPos, BlockState};
 
 use crate::GameServer;
 
+fn is_axis_face_normal(nx: i32, ny: i32, nz: i32) -> bool {
+    matches!(
+        (nx.abs(), ny.abs(), nz.abs()),
+        (1, 0, 0) | (0, 1, 0) | (0, 0, 1)
+    )
+}
+
 pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> PlayerAck {
     let ack = |ok: bool, reason: &str| PlayerAck {
         action_seq: action.action_seq,
@@ -38,6 +45,8 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             server
                 .circuit
                 .notify_block_changed(action.target, &server.world, registry);
+            server.circuit.tick(&mut server.world, registry);
+            server.broadcast_circuit_replication();
             server.queue_priority(stagcrest_net::GameMessage::Server(
                 stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
                     pos: action.target,
@@ -84,9 +93,17 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 .unwrap_or((0.0, 1.0));
 
             let selected_name = registry.block(block_id).map(|d| d.namespaced_id.as_str());
+            let (nx, ny, nz) = (
+                action.face_normal[0],
+                action.face_normal[1],
+                action.face_normal[2],
+            );
+            if !is_axis_face_normal(nx, ny, nz) {
+                return ack(false, "invalid face normal");
+            }
             let block_state = match selected_name {
                 Some("stagcrest:redstone_torch") => {
-                    let Some(state) = validate_torch_placement(is_solid_at, place_pos, 0, -1, 0)
+                    let Some(state) = validate_torch_placement(is_solid_at, place_pos, nx, ny, nz)
                     else {
                         return ack(false, "invalid torch placement");
                     };
@@ -94,7 +111,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 }
                 Some("stagcrest:lever") | Some("stagcrest:stone_button") => {
                     let Some(state) =
-                        validate_mount_placement(is_solid_at, place_pos, 0, -1, 0, dir_x, dir_z)
+                        validate_mount_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
                     else {
                         return ack(false, "invalid mount placement");
                     };
@@ -102,7 +119,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 }
                 Some("stagcrest:repeater") => {
                     let Some(state) =
-                        validate_repeater_placement(is_solid_at, place_pos, 0, -1, 0, dir_x, dir_z)
+                        validate_repeater_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
                     else {
                         return ack(false, "invalid repeater placement");
                     };
@@ -115,6 +132,10 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             server
                 .circuit
                 .notify_block_changed(place_pos, &server.world, registry);
+            server.circuit.tick(&mut server.world, registry);
+            server.broadcast_circuit_replication();
+            let (_, block_state) = server.world.get_block(place_pos);
+
             server.queue_priority(stagcrest_net::GameMessage::Server(
                 stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
                     pos: place_pos,
@@ -143,6 +164,8 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             } else {
                 return ack(false, "not toggleable");
             }
+            server.circuit.tick(&mut server.world, registry);
+            server.broadcast_circuit_replication();
             let (id, state) = server.world.get_block(action.target);
             server.queue_priority(stagcrest_net::GameMessage::Server(
                 stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
