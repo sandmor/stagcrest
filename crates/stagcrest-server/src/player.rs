@@ -1,7 +1,8 @@
 use glam::Vec3;
 use stagcrest_circuit::{is_player_toggleable, is_repeater};
 use stagcrest_mod_server::{
-    validate_mount_placement, validate_repeater_placement, validate_torch_placement,
+    validate_mount_placement, validate_observer_placement, validate_repeater_placement,
+    validate_torch_placement,
 };
 use stagcrest_net::{BlockUpdate, PlayerAck, PlayerAction, PlayerActionKind};
 use stagcrest_protocol::{BlockPos, BlockState};
@@ -44,7 +45,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             server.world.set_block(action.target, air, BlockState(0));
             server
                 .circuit
-                .notify_block_changed(action.target, &server.world, registry);
+                .notify_block_changed(action.target, &mut server.world, registry);
             server.circuit.tick(&mut server.world, registry);
             server.broadcast_circuit_replication();
             server.mark_chunk_dirty(action.target.chunk_pos());
@@ -126,13 +127,21 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                     };
                     state
                 }
+                Some("stagcrest:observer") => {
+                    let Some(state) =
+                        validate_observer_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
+                    else {
+                        return ack(false, "invalid observer placement");
+                    };
+                    state
+                }
                 _ => BlockState(0),
             };
 
             server.world.set_block(place_pos, block_id, block_state);
             server
                 .circuit
-                .notify_block_changed(place_pos, &server.world, registry);
+                .notify_block_changed(place_pos, &mut server.world, registry);
             server.circuit.tick(&mut server.world, registry);
             server.broadcast_circuit_replication();
             server.mark_chunk_dirty(place_pos.chunk_pos());

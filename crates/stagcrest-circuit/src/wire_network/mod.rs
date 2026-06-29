@@ -9,8 +9,8 @@ pub use eval::{max_wire_input, max_wire_input_at};
 
 use crate::registry::BlockRegistry;
 use stagcrest_protocol::{
-    repeater_connects_toward, repeater_facing, BlockGeometry, BlockId, BlockState, CircuitKind,
-    ModelId,
+    observer_facing, repeater_connects_toward, repeater_facing, BlockGeometry, BlockId, BlockState,
+    CircuitKind, ModelId,
 };
 use stagcrest_world::World;
 
@@ -32,6 +32,7 @@ pub fn is_wire_network_node(registry: &BlockRegistry, id: BlockId) -> bool {
             | CircuitKind::Source { .. }
             | CircuitKind::Inverter { .. }
             | CircuitKind::Repeater { .. }
+            | CircuitKind::Observer { .. }
     ) || matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch))
 }
 
@@ -48,6 +49,9 @@ pub fn is_wire_network_neighbor(
     };
     if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
         return repeater_connects_toward(repeater_facing(state), toward_wire_dx, toward_wire_dz);
+    }
+    if matches!(def.geometry, BlockGeometry::Model(ModelId::Observer)) {
+        return repeater_connects_toward(observer_facing(state), toward_wire_dx, toward_wire_dz);
     }
     is_wire_network_node(registry, id)
 }

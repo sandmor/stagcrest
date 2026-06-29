@@ -1,10 +1,11 @@
 mod mount;
+mod observer;
 mod repeater;
 mod torch;
 
 use stagcrest_protocol::{
-    mount_variant, repeater_variant, torch_attachment, BlockModel, BlockState, ModelId,
-    ModelVariant,
+    mount_variant, observer_variant, repeater_variant, torch_attachment, BlockModel, BlockState,
+    ModelId, ModelVariant,
 };
 
 pub fn model_variant_for_block(namespaced_id: &str, state: BlockState) -> ModelVariant {
@@ -12,6 +13,7 @@ pub fn model_variant_for_block(namespaced_id: &str, state: BlockState) -> ModelV
         "stagcrest:redstone_torch" => torch::torch_variant_from_attachment(torch_attachment(state)),
         "stagcrest:lever" | "stagcrest:stone_button" => mount_variant(state),
         "stagcrest:repeater" => repeater_variant(state),
+        "stagcrest:observer" => observer_variant(state),
         _ => 0,
     }
 }
@@ -32,6 +34,7 @@ pub struct ModelRegistry {
     lever: Vec<BlockModel>,
     button: Vec<BlockModel>,
     repeater: Vec<BlockModel>,
+    observer: Vec<BlockModel>,
 }
 
 impl Default for ModelRegistry {
@@ -47,6 +50,7 @@ impl ModelRegistry {
             lever: mount::build_lever_models(),
             button: mount::build_button_models(),
             repeater: repeater::build_repeater_models(),
+            observer: observer::build_observer_models(),
         }
     }
 
@@ -67,6 +71,10 @@ impl ModelRegistry {
             ModelId::Repeater => {
                 let idx = (variant as usize).min(self.repeater.len() - 1);
                 &self.repeater[idx]
+            }
+            ModelId::Observer => {
+                let idx = (variant as usize).min(self.observer.len() - 1);
+                &self.observer[idx]
             }
         }
     }

@@ -1,8 +1,8 @@
 use crate::eval::is_torch_geometry;
 use crate::registry::BlockRegistry;
 use stagcrest_protocol::{
-    facing_delta, mount_face, mount_facing, mount_on, mount_support_offset, repeater_facing,
-    BlockDef, BlockPos, CircuitKind,
+    facing_delta, mount_face, mount_facing, mount_on, mount_support_offset, observer_facing,
+    repeater_facing, BlockDef, BlockPos, CircuitKind,
 };
 use stagcrest_world::World;
 
@@ -91,6 +91,14 @@ pub fn block_power_at(
             }
             CircuitKind::Repeater { .. } => {
                 let facing = repeater_facing(state);
+                let (fx, _, fz) = facing_delta(facing);
+                let output_pos = BlockPos::new(npos.x + fx, npos.y, npos.z + fz);
+                if block_pos == output_pos {
+                    power.strong = power.strong.max(circuit.power_at(npos));
+                }
+            }
+            CircuitKind::Observer { .. } => {
+                let facing = observer_facing(state);
                 let (fx, _, fz) = facing_delta(facing);
                 let output_pos = BlockPos::new(npos.x + fx, npos.y, npos.z + fz);
                 if block_pos == output_pos {

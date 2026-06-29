@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    encode_power_tint, repeater_connects_toward, repeater_facing, BlockGeometry, BlockId,
-    BlockState, CircuitKind, ModelId, TextureId,
+    encode_power_tint, observer_facing, repeater_connects_toward, repeater_facing, BlockGeometry,
+    BlockId, BlockState, CircuitKind, ModelId, TextureId,
 };
 
 use crate::registry::BlockRegistry;
@@ -45,6 +45,9 @@ pub fn is_wire_line_neighbor(
     };
     if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
         return repeater_connects_toward(repeater_facing(state), toward_wire_dx, toward_wire_dz);
+    }
+    if matches!(def.geometry, BlockGeometry::Model(ModelId::Observer)) {
+        return repeater_connects_toward(observer_facing(state), toward_wire_dx, toward_wire_dz);
     }
     is_wire_line_block(registry, id)
 }

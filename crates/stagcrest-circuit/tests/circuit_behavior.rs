@@ -3,8 +3,8 @@ mod common;
 use common::{place_wall_torch_not_gate, populate_chunks, settle, setup_registry};
 use stagcrest_circuit::{block_power_at, CircuitWorld};
 use stagcrest_protocol::{
-    mount_on, mount_state, repeater_state, torch_state, AttachFace, BlockId, BlockPos, BlockState,
-    Facing, TorchAttachment, CHUNK_SIZE,
+    mount_on, mount_state, observer_state, repeater_state, torch_state, AttachFace, BlockId,
+    BlockPos, BlockState, Facing, TorchAttachment, CHUNK_SIZE,
 };
 use stagcrest_world::World;
 
@@ -51,7 +51,7 @@ fn snapshot_roundtrip() {
         ],
     );
 
-    circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
+    circuit.notify_block_changed(BlockPos::new(0, 0, 0), &mut world, &reg);
     circuit.tick(&mut world, &reg);
     let exported = circuit.export_chunk_snapshot(chunk);
 
@@ -79,7 +79,7 @@ fn wire_signal_falloff_over_line() {
     world.set_block(positions[3], blocks.wire, BlockState(0));
     populate_chunks(&mut world, &positions);
 
-    circuit.notify_block_changed(positions[0], &world, &reg);
+    circuit.notify_block_changed(positions[0], &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
 
     assert_eq!(circuit.power_at(positions[1]), 14);
@@ -105,7 +105,7 @@ fn wire_signal_climbs_block_step() {
     world.set_block(positions[3], blocks.wire, BlockState(0));
     populate_chunks(&mut world, &positions);
 
-    circuit.notify_block_changed(positions[0], &world, &reg);
+    circuit.notify_block_changed(positions[0], &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
 
     assert_eq!(circuit.power_at(positions[1]), 14);
@@ -119,12 +119,12 @@ fn inverter_off_when_support_block_powered() {
     let mut circuit = CircuitWorld::new();
 
     let (torch_pos, lever_pos) = place_wall_torch_not_gate(&mut world, &blocks, false);
-    circuit.notify_block_changed(torch_pos, &world, &reg);
+    circuit.notify_block_changed(torch_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 6);
     assert_eq!(circuit.power_at(torch_pos), 15);
 
     world.set_block(lever_pos, blocks.switch, BlockState(1));
-    circuit.notify_block_changed(lever_pos, &world, &reg);
+    circuit.notify_block_changed(lever_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 6);
     assert_eq!(circuit.power_at(torch_pos), 0);
 }
@@ -148,7 +148,7 @@ fn inverter_ignores_colinear_wire_not_support() {
     );
     populate_chunks(&mut world, &[lever_pos, wire_pos, torch_pos]);
 
-    circuit.notify_block_changed(lever_pos, &world, &reg);
+    circuit.notify_block_changed(lever_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 6);
     assert_eq!(circuit.power_at(torch_pos), 15);
 }
@@ -160,12 +160,12 @@ fn inverter_output_delay_two_ticks() {
     let mut circuit = CircuitWorld::new();
 
     let (torch_pos, lever_pos) = place_wall_torch_not_gate(&mut world, &blocks, false);
-    circuit.notify_block_changed(torch_pos, &world, &reg);
+    circuit.notify_block_changed(torch_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
     assert_eq!(circuit.power_at(torch_pos), 15);
 
     world.set_block(lever_pos, blocks.switch, BlockState(1));
-    circuit.notify_block_changed(lever_pos, &world, &reg);
+    circuit.notify_block_changed(lever_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 1);
     assert_eq!(circuit.power_at(torch_pos), 15);
 
@@ -246,15 +246,15 @@ fn repeater_locks_when_side_output_faces_in() {
         ],
     );
 
-    circuit.notify_block_changed(forward_input, &world, &reg);
-    circuit.notify_block_changed(side_input, &world, &reg);
+    circuit.notify_block_changed(forward_input, &mut world, &reg);
+    circuit.notify_block_changed(side_input, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
     assert_eq!(circuit.power_at(forward_pos), 15);
 
     world.set_block(forward_input, BlockId(0), BlockState(0));
     world.set_block(BlockPos::new(1, 0, 0), BlockId(0), BlockState(0));
-    circuit.notify_block_changed(forward_input, &world, &reg);
-    circuit.notify_block_changed(BlockPos::new(1, 0, 0), &world, &reg);
+    circuit.notify_block_changed(forward_input, &mut world, &reg);
+    circuit.notify_block_changed(BlockPos::new(1, 0, 0), &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
     assert_eq!(circuit.power_at(forward_pos), 15);
 }
@@ -272,10 +272,10 @@ fn source_strongly_powers_adjacent_opaque_block() {
     world.set_block(block_pos, blocks.stone, BlockState(0));
     populate_chunks(&mut world, &[source_pos, block_pos]);
 
-    circuit.notify_block_changed(source_pos, &world, &reg);
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 1);
 
-    let power = block_power_at(&circuit, block_pos, &world, &reg);
+    let power = block_power_at(&circuit, block_pos, &mut world, &reg);
     assert_eq!(power.strong, 15);
 }
 
@@ -294,7 +294,7 @@ fn repeater_ignores_back_feed() {
     world.set_block(BlockPos::new(3, 0, 0), blocks.source, BlockState(0));
     populate_chunks(&mut world, &[repeater_pos, BlockPos::new(3, 0, 0)]);
 
-    circuit.notify_block_changed(BlockPos::new(3, 0, 0), &world, &reg);
+    circuit.notify_block_changed(BlockPos::new(3, 0, 0), &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 6);
     assert_eq!(circuit.power_at(repeater_pos), 0);
 }
@@ -318,11 +318,87 @@ fn repeater_clears_after_input_drops() {
         &[BlockPos::new(0, 0, 0), BlockPos::new(1, 0, 0), repeater_pos],
     );
 
-    circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
+    circuit.notify_block_changed(BlockPos::new(0, 0, 0), &mut world, &reg);
     circuit.tick(&mut world, &reg);
 
     world.set_block(BlockPos::new(0, 0, 0), BlockId(0), BlockState(0));
-    circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
+    circuit.notify_block_changed(BlockPos::new(0, 0, 0), &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
     assert_eq!(circuit.power_at(repeater_pos), 0);
+}
+
+fn place_observer_gate(
+    world: &mut World,
+    blocks: &common::TestBlocks,
+    facing: Facing,
+) -> (BlockPos, BlockPos, BlockPos) {
+    let watch_pos = BlockPos::new(0, 0, 0);
+    let observer_pos = BlockPos::new(1, 0, 0);
+    let output_pos = BlockPos::new(2, 0, 0);
+
+    world.set_block(watch_pos, blocks.stone, BlockState(0));
+    world.set_block(
+        observer_pos,
+        blocks.observer,
+        observer_state(false, facing),
+    );
+    world.set_block(output_pos, blocks.wire, BlockState(0));
+    populate_chunks(world, &[watch_pos, observer_pos, output_pos]);
+
+    (watch_pos, observer_pos, output_pos)
+}
+
+#[test]
+fn observer_behavior() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let (watch_pos, observer_pos, output_pos) =
+        place_observer_gate(&mut world, &blocks, Facing::East);
+
+    world.set_block(watch_pos, blocks.stone, BlockState(1));
+    circuit.notify_block_changed(watch_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 1);
+    assert_eq!(circuit.power_at(observer_pos), 15);
+    assert_eq!(circuit.power_at(output_pos), 14);
+
+    settle(&mut circuit, &mut world, &reg, 1);
+    assert_eq!(circuit.power_at(observer_pos), 0);
+    assert_eq!(circuit.power_at(output_pos), 0);
+
+    circuit.notify_block_changed(watch_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 1);
+    assert_eq!(circuit.power_at(observer_pos), 15);
+
+    world.set_block(watch_pos, blocks.stone, BlockState(2));
+    circuit.notify_block_changed(watch_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 1);
+    assert_eq!(circuit.power_at(observer_pos), 15);
+
+    settle(&mut circuit, &mut world, &reg, 2);
+    assert_eq!(circuit.power_at(observer_pos), 0);
+    assert_eq!(circuit.power_at(output_pos), 0);
+
+    let west_wire = BlockPos::new(0, 0, 1);
+    world.set_block(west_wire, blocks.wire, BlockState(0));
+    populate_chunks(&mut world, &[west_wire]);
+    world.set_block(watch_pos, blocks.stone, BlockState(3));
+    circuit.notify_block_changed(watch_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 1);
+    assert_eq!(circuit.power_at(output_pos), 14);
+    assert_eq!(circuit.power_at(west_wire), 0);
+
+    let source_pos = BlockPos::new(-1, 0, 0);
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(watch_pos, blocks.wire, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, watch_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 1);
+    assert_eq!(circuit.power_at(observer_pos), 15);
+    assert_eq!(circuit.power_at(output_pos), 14);
+
+    settle(&mut circuit, &mut world, &reg, 2);
+    assert_eq!(circuit.power_at(observer_pos), 0);
+    assert_eq!(circuit.power_at(output_pos), 0);
 }

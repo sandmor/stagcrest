@@ -16,7 +16,8 @@ pub fn sync_block_state(
     match kind {
         CircuitKind::Wire { .. }
         | CircuitKind::Switch { .. }
-        | CircuitKind::Repeater { .. } => {
+        | CircuitKind::Repeater { .. }
+        | CircuitKind::Observer { .. } => {
             let powered = u16::from(new_power > 0);
             let new_bits = (state.0 & !1) | powered;
             if state.0 != new_bits {
@@ -64,6 +65,15 @@ pub fn is_repeater(def: &BlockDef) -> bool {
         def.circuit,
         Some(CircuitNodeDef {
             kind: CircuitKind::Repeater { .. },
+        })
+    )
+}
+
+pub fn is_observer(def: &BlockDef) -> bool {
+    matches!(
+        def.circuit,
+        Some(CircuitNodeDef {
+            kind: CircuitKind::Observer { .. },
         })
     )
 }

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use stagcrest_protocol::{
-    mount_face, mount_facing, mount_on, repeater_delay_ticks, repeater_facing, repeater_powered,
-    torch_attachment, torch_lit, AttachFace, BlockDef, BlockGeometry, BlockPos, BlockState,
-    ChunkPos, CircuitKind, Facing, ModelId, TorchAttachment,
+    mount_face, mount_facing, mount_on, observer_facing, observer_powered, repeater_delay_ticks,
+    repeater_facing, repeater_powered, torch_attachment, torch_lit, AttachFace, BlockDef,
+    BlockGeometry, BlockPos, BlockState, ChunkPos, CircuitKind, Facing, ModelId, TorchAttachment,
 };
 use stagcrest_world::RaycastHit;
 
@@ -418,6 +418,11 @@ pub fn format_block_state(def: &BlockDef, state: BlockState) -> Option<String> {
             fmt_facing(repeater_facing(state)),
             repeater_delay_ticks(state)
         )),
+        BlockGeometry::Model(ModelId::Observer) => Some(format!(
+            "{}, {}",
+            if observer_powered(state) { "on" } else { "off" },
+            fmt_facing(observer_facing(state))
+        )),
         _ if def.circuit.is_some() => Some(format!("powered {}", state.0 & 1 == 1)),
         _ => None,
     }
@@ -430,6 +435,7 @@ fn format_circuit_kind(kind: CircuitKind) -> String {
         CircuitKind::Wire { falloff } => format!("wire falloff {falloff}"),
         CircuitKind::Switch { output } => format!("switch out {output}"),
         CircuitKind::Repeater { output } => format!("repeater out {output}"),
+        CircuitKind::Observer { output } => format!("observer out {output}"),
     }
 }
 

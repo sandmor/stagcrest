@@ -378,6 +378,46 @@ pub fn cycle_repeater_delay(state: BlockState) -> BlockState {
     BlockState((state.0 & !REPEATER_DELAY_MASK) | (delay_bits << REPEATER_DELAY_SHIFT))
 }
 
+// Observer state:
+//   bit 0      -> powered
+//   bits 1-2   -> Facing (output direction)
+pub const OBSERVER_POWERED_BIT: u16 = 1;
+pub const OBSERVER_FACING_SHIFT: u16 = 1;
+pub const OBSERVER_FACING_MASK: u16 = 0b110;
+
+pub fn observer_state(powered: bool, facing: Facing) -> BlockState {
+    let mut bits = facing.to_bits() << OBSERVER_FACING_SHIFT;
+    if powered {
+        bits |= OBSERVER_POWERED_BIT;
+    }
+    BlockState(bits)
+}
+
+pub fn observer_powered(state: BlockState) -> bool {
+    state.0 & OBSERVER_POWERED_BIT != 0
+}
+
+pub fn observer_facing(state: BlockState) -> Facing {
+    Facing::from_bits((state.0 & OBSERVER_FACING_MASK) >> OBSERVER_FACING_SHIFT)
+}
+
+/// Model variant index: `(powered << 2) | facing`.
+pub fn observer_variant(state: BlockState) -> ModelVariant {
+    let powered = ((state.0 & OBSERVER_POWERED_BIT) != 0) as u8;
+    let facing = ((state.0 & OBSERVER_FACING_MASK) >> OBSERVER_FACING_SHIFT) as u8;
+    (powered << 2) | facing
+}
+
+/// Block cell the observer watches (opposite its output face).
+pub fn observer_watch_pos(observer_pos: BlockPos, facing: Facing) -> BlockPos {
+    let (fx, _, fz) = facing_delta(facing);
+    BlockPos::new(observer_pos.x - fx, observer_pos.y, observer_pos.z - fz)
+}
+
+pub fn observer_watches(observer_pos: BlockPos, facing: Facing, changed: BlockPos) -> bool {
+    observer_watch_pos(observer_pos, facing) == changed
+}
+
 /// Fluid block state bits (MC-style; flow simulation not yet implemented).
 pub const FLUID_FLOWING_BIT: u16 = 1 << 8;
 pub const FLUID_LEVEL_MASK: u16 = 0xF << 9;
@@ -524,6 +564,10 @@ pub enum CircuitKind {
     },
     /// Directional delay; tick count lives in block state (`repeater_delay_ticks`).
     Repeater {
+        output: u8,
+    },
+    /// Watches the block in front of its face; emits a short pulse on updates.
+    Observer {
         output: u8,
     },
 }

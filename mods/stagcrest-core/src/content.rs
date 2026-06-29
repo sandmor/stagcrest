@@ -191,6 +191,11 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     register_texture_from_pack(reg, "stagcrest:lever", "lever", (100, 100, 100));
     register_texture_from_pack(reg, "stagcrest:repeater", "repeater", (180, 160, 140));
     register_texture_from_pack(reg, "stagcrest:repeater_on", "repeater_on", (200, 180, 160));
+    register_texture_from_pack(reg, "stagcrest:observer_front", "observer_front", (100, 100, 100));
+    register_texture_from_pack(reg, "stagcrest:observer_back", "observer_back", (80, 80, 80));
+    register_texture_from_pack(reg, "stagcrest:observer_side", "observer_side", (90, 90, 90));
+    register_texture_from_pack(reg, "stagcrest:observer_top", "observer_top", (95, 95, 95));
+    register_optional_texture_from_pack(reg, "stagcrest:observer_back_on", "observer_back_on");
     register_texture_from_pack(
         reg,
         "stagcrest:smooth_stone",
@@ -502,6 +507,24 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: Some("model:repeater".into()),
         circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Repeater { output: 15 },
+        }),
+        render_layer: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:observer".into(),
+        display_name: "Observer".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 3.0,
+        top_texture: "stagcrest:observer_back".into(),
+        bottom_texture: "stagcrest:observer_side".into(),
+        sides_texture: "stagcrest:observer_front".into(),
+        placeable: true,
+        geometry: Some("model:observer".into()),
+        circuit: Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Observer { output: 15 },
         }),
         render_layer: None,
     });

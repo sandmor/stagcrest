@@ -7,6 +7,7 @@ pub enum ModelId {
     Lever,
     Button,
     Repeater,
+    Observer,
 }
 
 /// Variant index for model lookup (e.g. torch attachment as `TorchAttachment::to_bits()`).
@@ -30,6 +31,7 @@ impl BlockGeometry {
             "model:lever" => Self::Model(ModelId::Lever),
             "model:button" | "model:stone_button" => Self::Model(ModelId::Button),
             "model:repeater" => Self::Model(ModelId::Repeater),
+            "model:observer" => Self::Model(ModelId::Observer),
             _ => Self::Cube,
         }
     }

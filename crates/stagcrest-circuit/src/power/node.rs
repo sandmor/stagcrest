@@ -4,7 +4,8 @@ use crate::wire_network::{
 use crate::eval::is_torch_geometry;
 use crate::registry::BlockRegistry;
 use stagcrest_protocol::{
-    facing_delta, mount_on, repeater_facing, torch_attachment, BlockPos, BlockState, CircuitKind,
+    facing_delta, mount_on, observer_facing, repeater_facing, torch_attachment, BlockPos,
+    BlockState, CircuitKind,
 };
 use stagcrest_world::World;
 
@@ -78,6 +79,16 @@ pub fn signal_into(
                 0
             }
         }
+        CircuitKind::Observer { .. } => {
+            let facing = observer_facing(state);
+            let (fx, _, fz) = facing_delta(facing);
+            let output_pos = BlockPos::new(source.x + fx, source.y, source.z + fz);
+            if consumer == output_pos {
+                circuit.power_at(source)
+            } else {
+                0
+            }
+        }
     }
 }
 
@@ -123,6 +134,11 @@ fn switch_signal_into(
                     }
                 }
                 CircuitKind::Repeater { .. } => {
+                    if connects_toward(consumer_state, -dx, -dz) {
+                        return output;
+                    }
+                }
+                CircuitKind::Observer { .. } => {
                     if connects_toward(consumer_state, -dx, -dz) {
                         return output;
                     }

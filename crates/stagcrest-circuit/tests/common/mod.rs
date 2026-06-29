@@ -12,6 +12,7 @@ pub struct TestBlocks {
     pub torch: BlockId,
     pub switch: BlockId,
     pub repeater: BlockId,
+    pub observer: BlockId,
     pub stone: BlockId,
     pub button: BlockId,
 }
@@ -24,6 +25,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         torch: BlockId(3),
         switch: BlockId(4),
         repeater: BlockId(6),
+        observer: BlockId(9),
         stone: BlockId(7),
         button: BlockId(8),
     };
@@ -35,6 +37,11 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         blocks.repeater,
         CircuitKind::Repeater { output: 15 },
         BlockGeometry::Model(ModelId::Repeater),
+    ));
+    reg.register_block(test_block_with_geometry(
+        blocks.observer,
+        CircuitKind::Observer { output: 15 },
+        BlockGeometry::Model(ModelId::Observer),
     ));
     reg.register_block(test_block_with_geometry(
         blocks.torch,

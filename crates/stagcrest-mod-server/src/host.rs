@@ -132,6 +132,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
             CircuitKindRequest::Wire { falloff } => CircuitKind::Wire { falloff },
             CircuitKindRequest::Switch { output } => CircuitKind::Switch { output },
             CircuitKindRequest::Repeater { output } => CircuitKind::Repeater { output },
+            CircuitKindRequest::Observer { output } => CircuitKind::Observer { output },
         },
     });
 

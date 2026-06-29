@@ -44,6 +44,7 @@ pub enum CircuitKindRequest {
     Wire { falloff: u8 },
     Switch { output: u8 },
     Repeater { output: u8 },
+    Observer { output: u8 },
 }
 
 #[derive(Serialize, Deserialize)]

@@ -1,7 +1,8 @@
 use crate::power::inverter_support_block;
 use crate::registry::BlockRegistry;
 use stagcrest_protocol::{
-    mount_on, set_torch_lit, BlockPos, BlockState, ChunkPos, CircuitKind, LocalBlockPos,
+    mount_on, observer_facing, observer_watches, set_torch_lit, BlockPos, BlockState, ChunkPos,
+    CircuitKind, LocalBlockPos,
 };
 use stagcrest_storage::ChunkCircuitSnapshot;
 use stagcrest_world::World;
@@ -9,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::eval::{
     dispatch, is_button_geometry, is_torch_geometry, sync_block_state, BURNOUT_TOGGLE_LIMIT,
-    BURNOUT_WINDOW_TICKS, EvalContext, EvalResult,
+    BURNOUT_WINDOW_TICKS, EvalContext, EvalResult, OBSERVER_PULSE_TICKS,
 };
 use crate::event::{CircuitEvent, EventQueue};
 
@@ -202,7 +203,12 @@ impl CircuitWorld {
         self.queue.enqueue_evaluate(pos);
     }
 
-    pub fn notify_block_changed(&mut self, pos: BlockPos, world: &World, registry: &BlockRegistry) {
+    pub fn notify_block_changed(
+        &mut self,
+        pos: BlockPos,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
         self.queue.cancel_delay(pos);
         self.delay_input.remove(&pos);
 
@@ -216,6 +222,7 @@ impl CircuitWorld {
 
         self.queue_update(pos);
         self.enqueue_circuit_neighbors(pos, world, registry);
+        self.notify_observers_watching(pos, world, registry);
     }
 
     pub fn drain_visual_updates(
@@ -273,11 +280,70 @@ impl CircuitWorld {
             return;
         };
         match node.kind {
-            CircuitKind::Repeater { .. } | CircuitKind::Inverter { .. } => {
+            CircuitKind::Repeater { .. }
+            | CircuitKind::Inverter { .. }
+            | CircuitKind::Observer { .. } => {
                 self.set_published_power(pos, output, id, state, def, node.kind, world, registry);
             }
             _ => {}
         }
+    }
+
+    fn notify_observers_watching(
+        &mut self,
+        changed_pos: BlockPos,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        for npos in crate::neighbors(changed_pos) {
+            if !world.is_chunk_interactive(npos.chunk_pos()) {
+                continue;
+            }
+            let (id, state) = world.get_block(npos);
+            let Some(def) = registry.block(id) else {
+                continue;
+            };
+            let Some(node) = def.circuit else {
+                continue;
+            };
+            if !matches!(node.kind, CircuitKind::Observer { .. }) {
+                continue;
+            }
+            if !observer_watches(npos, observer_facing(state), changed_pos) {
+                continue;
+            }
+            self.trigger_observer(npos, world, registry);
+        }
+    }
+
+    fn trigger_observer(
+        &mut self,
+        pos: BlockPos,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        if !world.is_chunk_interactive(pos.chunk_pos()) {
+            return;
+        }
+        let (id, state) = world.get_block(pos);
+        let Some(def) = registry.block(id) else {
+            return;
+        };
+        let Some(node) = def.circuit else {
+            return;
+        };
+        let kind = node.kind;
+        if !matches!(kind, CircuitKind::Observer { .. }) {
+            return;
+        }
+
+        self.queue.cancel_delay(pos);
+
+        let current = self.power_at(pos);
+        if current != 15 {
+            self.set_published_power(pos, 15, id, state, def, kind, world, registry);
+        }
+        self.arm_delay(pos, 1, OBSERVER_PULSE_TICKS, 0);
     }
 
     fn drain_button_releases(&mut self, world: &mut World, registry: &BlockRegistry) {
@@ -361,7 +427,9 @@ impl CircuitWorld {
 
         if matches!(
             kind,
-            CircuitKind::Wire { .. } | CircuitKind::Repeater { .. }
+            CircuitKind::Wire { .. }
+                | CircuitKind::Repeater { .. }
+                | CircuitKind::Observer { .. }
         ) {
             world.mark_dirty_face_neighbors(pos.chunk_pos());
         }
@@ -379,6 +447,7 @@ impl CircuitWorld {
             if matches!(kind, CircuitKind::Inverter { .. }) && is_torch_geometry(def) {
                 self.record_torch_toggle(pos);
             }
+            self.notify_observers_watching(pos, world, registry);
         }
         self.enqueue_circuit_neighbors(pos, world, registry);
         if matches!(kind, CircuitKind::Wire { .. }) {
@@ -517,7 +586,8 @@ impl CircuitWorld {
             }
             CircuitKind::Inverter { .. }
             | CircuitKind::Wire { .. }
-            | CircuitKind::Repeater { .. } => return,
+            | CircuitKind::Repeater { .. }
+            | CircuitKind::Observer { .. } => return,
         };
 
         world.set_block(pos, id, new_state);
