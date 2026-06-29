@@ -84,13 +84,17 @@ mod tests {
 
     #[test]
     fn unload_drops_gpu_cache_and_triggers_event() {
+        use bevy::ecs::world::CommandQueue;
+
         let mut world = WorldReplica::new(stagcrest_world::World::new(stagcrest_protocol::BlockId(
             0,
         )));
         let mut scheduler = GpuChunkScheduler::default();
         let mut cache = GpuChunkCache::default();
         let mut power = CircuitPowerOverlay::default();
-        let mut commands = Commands::default();
+        let mut bevy_world = World::new();
+        let mut queue = CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, &bevy_world);
         let pos = ChunkPos { x: 0, y: 0, z: 0 };
         cache.commit(stagcrest_render::gpu_voxel::types::GpuChunkUpload {
             pos,
@@ -102,7 +106,8 @@ mod tests {
         });
         scheduler.request(pos, RemeshUrgency::Visible, 0);
         drop_chunk_assets(pos, &mut scheduler, &mut cache, &mut power, &mut commands);
-        assert!(cache.get(pos).is_none());
-        assert!(!scheduler.pending.contains_key(&pos));
+        queue.apply(&mut bevy_world);
+        assert!(!cache.contains(pos));
+        assert!(!scheduler.is_pending(pos));
     }
 }

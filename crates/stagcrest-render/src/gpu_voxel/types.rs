@@ -10,6 +10,23 @@ pub const HALO_VOLUME: usize = (HALO_SIZE * HALO_SIZE * HALO_SIZE) as usize;
 pub const CHUNK_BLOCKS: usize = 4096;
 pub const BIOME_GRID_CELLS: usize = 64;
 
+/// Max instances a single chunk may emit into its scratch region (all buckets).
+pub const CHUNK_SCRATCH_CAPACITY: u32 = 8192;
+
+/// wgpu `max_storage_buffer_binding_size` on common backends (2 GiB − 1).
+pub const MAX_STORAGE_BUFFER_BINDING: u64 = 2147483647;
+
+/// Largest chunk slot count such that the concatenated scratch SSBO stays bindable.
+pub fn max_chunk_store_slots() -> u32 {
+    let per_chunk = chunk_scratch_instance_bytes();
+    (MAX_STORAGE_BUFFER_BINDING / per_chunk) as u32
+}
+
+/// Bytes per chunk in the concatenated blocks SSBO (16 bytes per GpuBlockCell).
+pub const CHUNK_BLOCKS_BYTES: u64 = (HALO_VOLUME * 16) as u64;
+/// Bytes per chunk in the concatenated power SSBO.
+pub const CHUNK_POWER_BYTES: u64 = (CHUNK_BLOCKS * std::mem::size_of::<u32>()) as u64;
+
 /// Per-bucket instance region capacity (in instances) in the partitioned
 /// instances SSBO. Cube/cross/wire buckets are shared across every chunk and
 /// need huge regions, while per-model buckets are sparse and need very little.
@@ -157,6 +174,40 @@ pub struct GpuChunkUniform {
     pub _pad: [u32; 3],
 }
 
+/// Render-world chunk slot descriptor for batched compute / compaction.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
+pub struct GpuChunkTableEntry {
+    pub blocks_offset: u32,
+    pub power_offset: u32,
+    pub scratch_offset: u32,
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub origin_z: i32,
+    pub air_id: u32,
+    pub flags: u32,
+}
+
+pub const CHUNK_TABLE_VALID: u32 = 1;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
+pub struct EmitUniform {
+    pub dispatch_count: u32,
+    pub bucket_slot_count: u32,
+    pub chunk_scratch_capacity: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
+pub struct CompactUniform {
+    pub visible_count: u32,
+    pub bucket_slot_count: u32,
+    pub chunk_scratch_capacity: u32,
+    pub _pad: u32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
 pub struct GpuCameraUniform {
@@ -212,4 +263,8 @@ pub struct FinalizeUniform {
 
 pub fn instance_slot_byte_size() -> u64 {
     std::mem::size_of::<VoxelInstance>() as u64
+}
+
+pub fn chunk_scratch_instance_bytes() -> u64 {
+    CHUNK_SCRATCH_CAPACITY as u64 * instance_slot_byte_size()
 }

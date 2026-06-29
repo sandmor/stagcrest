@@ -10,6 +10,16 @@ use std::sync::Arc;
 
 use crate::gpu_voxel::types::{GpuBlockCell, GpuChunkUpload, GpuClimateData, HALO_VOLUME};
 
+fn halo_filled_with_air(air: BlockId) -> [GpuBlockCell; HALO_VOLUME] {
+    let cell = GpuBlockCell {
+        id: air.0,
+        state: 0,
+        variant: 0,
+        _pad: 0,
+    };
+    [cell; HALO_VOLUME]
+}
+
 pub fn capture_gpu_chunk_upload(
     pos: ChunkPos,
     world: &World,
@@ -29,7 +39,7 @@ pub fn capture_gpu_chunk_upload(
 }
 
 pub fn pack_gpu_chunk_upload(snapshot: &MeshSnapshot, registry: &BlockRegistry) -> GpuChunkUpload {
-    let mut blocks = [GpuBlockCell::default(); HALO_VOLUME];
+    let mut blocks = halo_filled_with_air(snapshot.air);
 
     for ly in -1..=CHUNK_SIZE {
         for lz in -1..=CHUNK_SIZE {
@@ -77,7 +87,7 @@ pub fn pack_halo_from_world(
     power_grid: [u8; CHUNK_VOLUME],
 ) -> GpuChunkUpload {
     let halo = capture_halo(world, pos, air);
-    let mut blocks = [GpuBlockCell::default(); HALO_VOLUME];
+    let mut blocks = halo_filled_with_air(air);
     let reader = InactiveChunkReader::new(center);
 
     for ly in -1..=CHUNK_SIZE {
@@ -164,4 +174,17 @@ fn capture_halo(
         }
     }
     halo
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stagcrest_protocol::BlockId;
+
+    #[test]
+    fn halo_buffer_prefills_air_not_zero() {
+        let air = BlockId(42);
+        let blocks = halo_filled_with_air(air);
+        assert!(blocks.iter().all(|c| c.id == 42));
+    }
 }

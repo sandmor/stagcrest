@@ -231,6 +231,21 @@ fn format_debug_text(
         .unwrap_or("-");
     let gpu_chunks = gpu_cache.map(|c| c.chunk_count()).unwrap_or(0);
     let total_instances = gpu_stats.map(|s| s.total_instances).unwrap_or(0);
+    let chunks_rebuilt = gpu_stats.map(|s| s.chunks_rebuilt).unwrap_or(0);
+    let chunks_compacted = gpu_stats.map(|s| s.chunks_compacted).unwrap_or(0);
+    let buffer_mb = gpu_stats
+        .map(|s| s.instance_buffer_bytes as f64 / (1024.0 * 1024.0))
+        .unwrap_or(0.0);
+    let overflow_warn = gpu_stats
+        .map(|s| {
+            if s.overflow_pending || s.global_overflow_buckets > 0 || s.scratch_overflow_chunks > 0
+            {
+                "  OVERFLOW"
+            } else {
+                ""
+            }
+        })
+        .unwrap_or("");
 
     lines.push(format!("{} {selected_name}", pad_label("Selected")));
     lines.push(format!(
@@ -240,6 +255,13 @@ fn format_debug_text(
         gpu_chunks,
         total_instances,
         fps
+    ));
+    lines.push(format!(
+        "{} rebuilt {}  compact {}  buf {:.1} MB{overflow_warn}",
+        pad_label("GPU"),
+        chunks_rebuilt,
+        chunks_compacted,
+        buffer_mb,
     ));
 
     lines.join("\n")

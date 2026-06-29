@@ -26,6 +26,7 @@ struct FinalizeUniform {
 @group(0) @binding(3) var<storage, read_write> indirect_blend: array<DrawIndexedIndirectArgs>;
 @group(0) @binding(4) var<storage, read> bucket_meta: array<BucketFinalizeMeta>;
 @group(0) @binding(5) var<uniform> params: FinalizeUniform;
+@group(0) @binding(6) var<storage, read_write> overflow_counters: array<atomic<u32>>;
 
 const LAYER_OPAQUE: u32 = 0u;
 const LAYER_CUTOUT: u32 = 1u;
@@ -41,12 +42,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if bucket.indirect_index == 0xFFFFFFFFu {
         return;
     }
-    let count = min(atomicLoad(&counters[bucket_id]), bucket.capacity);
+    let emitted = atomicLoad(&counters[bucket_id]);
+    let draw_count = min(emitted, bucket.capacity);
+    let overflow = emitted - draw_count;
+    if overflow > 0u {
+        atomicAdd(&overflow_counters[bucket_id], overflow);
+    }
     if bucket.layer == LAYER_OPAQUE {
-        indirect_opaque[bucket.indirect_index].instance_count = count;
+        indirect_opaque[bucket.indirect_index].instance_count = draw_count;
     } else if bucket.layer == LAYER_CUTOUT {
-        indirect_cutout[bucket.indirect_index].instance_count = count;
+        indirect_cutout[bucket.indirect_index].instance_count = draw_count;
     } else if bucket.layer == LAYER_BLEND {
-        indirect_blend[bucket.indirect_index].instance_count = count;
+        indirect_blend[bucket.indirect_index].instance_count = draw_count;
     }
 }

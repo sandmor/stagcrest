@@ -69,3 +69,56 @@ fn model_bucket_registry_has_prototype_meshes() {
     assert!(buckets.buckets.len() > 5);
     let _ = GpuBlockTables::build(&reg, &models, &buckets);
 }
+
+#[test]
+fn voxel_instance_size_matches_gpu_stride() {
+    use bevy::render::render_resource::ShaderType;
+    use stagcrest_render::gpu_voxel::types::VoxelInstance;
+    let rust = std::mem::size_of::<VoxelInstance>();
+    let shader = VoxelInstance::min_size().get() as usize;
+    eprintln!("VoxelInstance rust={rust} shader={shader}");
+    assert_eq!(rust, shader, "VoxelInstance CPU/GPU stride mismatch");
+}
+
+#[test]
+fn wgsl_voxel_instance_bucket_id_offset_matches_rust() {
+    use std::mem::offset_of;
+    use stagcrest_render::gpu_voxel::types::VoxelInstance;
+
+    let wgsl = include_str!("../../../assets/shaders/voxel_compact.wgsl");
+    let mut parser = naga::front::wgsl::Frontend::new();
+    let module = parser.parse(wgsl).expect("parse voxel_compact.wgsl");
+    let mut layouter = naga::proc::Layouter::default();
+    layouter
+        .update(module.to_ctx())
+        .expect("layout voxel_compact types");
+    let rust_bucket = offset_of!(VoxelInstance, bucket_id);
+    let rust_size = std::mem::size_of::<VoxelInstance>();
+
+    for (handle, ty) in module.types.iter() {
+        if ty.name.as_deref() != Some("VoxelInstance") {
+            continue;
+        }
+        let layout = layouter[handle];
+        let naga::TypeInner::Struct { members, span, .. } = &ty.inner else {
+            panic!("VoxelInstance is not a struct");
+        };
+        let bucket_member = members
+            .iter()
+            .find(|m| m.name.as_deref() == Some("bucket_id"))
+            .expect("bucket_id member in WGSL VoxelInstance");
+        eprintln!(
+            "VoxelInstance rust_size={rust_size} wgsl_size={span} rust_bucket_off={rust_bucket} wgsl_bucket_off={}",
+            bucket_member.offset
+        );
+        assert_eq!(*span as usize, rust_size, "struct size mismatch");
+        assert_eq!(
+            bucket_member.offset as usize,
+            rust_bucket,
+            "bucket_id offset mismatch — south faces (world_pos.w==3) may route to cross bucket"
+        );
+        assert_eq!(layout.size as usize, rust_size, "layouter size mismatch");
+        return;
+    }
+    panic!("VoxelInstance struct not found in voxel_compact.wgsl");
+}

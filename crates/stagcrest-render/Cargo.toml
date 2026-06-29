@@ -17,6 +17,9 @@ glam.workspace = true
 [features]
 default = []
 
+[dev-dependencies]
+naga = "24.0.0"
+
 [[test]]
 name = "gpu_block_meta"
 path = "tests/gpu_block_meta.rs"

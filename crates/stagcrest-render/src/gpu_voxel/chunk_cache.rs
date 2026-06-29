@@ -1,53 +1,71 @@
 use bevy::prelude::*;
-use bevy::render::extract_resource::ExtractResource;
 use std::collections::{HashMap, HashSet};
 use stagcrest_protocol::ChunkPos;
 
-use crate::gpu_voxel::types::{GpuChunkUpload};
+use crate::gpu_voxel::types::GpuChunkUpload;
 
-#[derive(Resource, Clone, Default, ExtractResource)]
+/// Delta batch extracted to the render world each frame (uploads + removals + rebuild flags).
+#[derive(Clone, Default)]
+pub struct GpuChunkExtractBatch {
+    pub uploads: Vec<GpuChunkUpload>,
+    pub removals: Vec<ChunkPos>,
+    pub rebuild_dirty: HashSet<ChunkPos>,
+}
+
+/// Main-world chunk index. Bulk block data is queued for extract, not cloned every frame.
+#[derive(Resource, Default)]
 pub struct GpuChunkCache {
-    pub chunks: HashMap<ChunkPos, GpuChunkUpload>,
-    pub dirty: HashSet<ChunkPos>,
-    pub slots: Vec<crate::gpu_voxel::types::GpuChunkSlot>,
+    loaded: HashSet<ChunkPos>,
+    versions: HashMap<ChunkPos, u64>,
+    extract: GpuChunkExtractBatch,
 }
 
 impl GpuChunkCache {
     pub fn commit(&mut self, upload: GpuChunkUpload) {
         let pos = upload.pos;
-        self.chunks.insert(pos, upload);
-        self.dirty.insert(pos);
+        self.loaded.insert(pos);
+        let version = self.versions.entry(pos).or_insert(0);
+        *version += 1;
+        self.extract.rebuild_dirty.insert(pos);
+        self.extract.uploads.push(upload);
     }
 
     pub fn remove(&mut self, pos: ChunkPos) {
-        self.chunks.remove(&pos);
-        self.dirty.insert(pos);
-        self.slots.retain(|s| s.pos != pos);
+        self.loaded.remove(&pos);
+        self.versions.remove(&pos);
+        self.extract.removals.push(pos);
+        self.extract.rebuild_dirty.remove(&pos);
     }
 
-    pub fn get(&self, pos: ChunkPos) -> Option<&GpuChunkUpload> {
-        self.chunks.get(&pos)
+    pub fn contains(&self, pos: ChunkPos) -> bool {
+        self.loaded.contains(&pos)
+    }
+
+    pub fn get_version(&self, pos: ChunkPos) -> Option<u64> {
+        self.versions.get(&pos).copied()
     }
 
     pub fn mark_dirty(&mut self, pos: ChunkPos) {
-        if self.chunks.contains_key(&pos) {
-            self.dirty.insert(pos);
+        if self.loaded.contains(&pos) {
+            self.extract.rebuild_dirty.insert(pos);
         }
     }
 
     pub fn mark_all_dirty(&mut self) {
-        self.dirty.extend(self.chunks.keys().copied());
-    }
-
-    pub fn take_dirty(&mut self) -> HashSet<ChunkPos> {
-        std::mem::take(&mut self.dirty)
+        self.extract
+            .rebuild_dirty
+            .extend(self.loaded.iter().copied());
     }
 
     pub fn chunk_count(&self) -> usize {
-        self.chunks.len()
+        self.loaded.len()
     }
 
-    pub fn dispatch_list(&self) -> Vec<&GpuChunkUpload> {
-        self.chunks.values().collect()
+    pub fn take_extract_batch(&mut self) -> GpuChunkExtractBatch {
+        GpuChunkExtractBatch {
+            uploads: std::mem::take(&mut self.extract.uploads),
+            removals: std::mem::take(&mut self.extract.removals),
+            rebuild_dirty: std::mem::take(&mut self.extract.rebuild_dirty),
+        }
     }
 }

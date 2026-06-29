@@ -4,7 +4,7 @@ use stagcrest_storage::{decompress_stored, InactiveChunk};
 use stagcrest_world::World;
 
 use crate::chunk_streaming::{drop_chunk_assets, unload_chunk, BiomeGridCache};
-use crate::gpu_chunk_scheduler::{GpuChunkScheduler, RemeshUrgency};
+use crate::gpu_chunk_scheduler::{request_face_neighbors, GpuChunkScheduler, RemeshUrgency};
 use stagcrest_render::GpuChunkCache;
 
 #[derive(Resource)]
@@ -41,7 +41,7 @@ impl WorldReplica {
                 unload_chunk(pos, self, gpu_scheduler, gpu_cache, power, commands);
             }
             ServerMessage::BlockUpdate(update) => {
-                self.apply_block_update(update, gpu_scheduler);
+                self.apply_block_update(update, gpu_scheduler, gpu_cache);
             }
             _ => {}
         }
@@ -76,9 +76,24 @@ impl WorldReplica {
         }
     }
 
-    fn apply_block_update(&mut self, update: BlockUpdate, gpu_scheduler: &mut GpuChunkScheduler) {
+    fn apply_block_update(
+        &mut self,
+        update: BlockUpdate,
+        gpu_scheduler: &mut GpuChunkScheduler,
+        gpu_cache: &mut GpuChunkCache,
+    ) {
         self.world.set_block(update.pos, update.id, update.state);
-        gpu_scheduler.request(update.pos.chunk_pos(), RemeshUrgency::Interactive, 0);
+        let chunk = update.pos.chunk_pos();
+        gpu_scheduler.request(chunk, RemeshUrgency::Interactive, 0);
+        gpu_cache.mark_dirty(chunk);
+        request_face_neighbors(
+            gpu_scheduler,
+            &mut self.world,
+            chunk,
+            RemeshUrgency::Interactive,
+            |_| 0,
+            false,
+        );
     }
 }
 

@@ -1,13 +1,12 @@
 use bevy::prelude::*;
-use stagcrest_mesh::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
+use stagcrest_mesh::capture_power_grid;
 use stagcrest_protocol::{BlockPos, ChunkPos, CHUNK_SIZE};
 
 use crate::chunk_streaming::BiomeGridCache;
 use crate::game::ModContext;
 use crate::world_replica::{CircuitPowerOverlay, WorldReplica};
-use stagcrest_render::{pack_gpu_chunk_upload, GpuChunkCache, GpuVoxelStats, GpuVoxelTables};
+use stagcrest_render::{pack_halo_from_world, GpuChunkCache, GpuVoxelStats, GpuVoxelTables};
 use std::collections::{BinaryHeap, HashMap};
-use std::sync::Arc;
 
 const MAX_UPLOAD_PER_FRAME: usize = 32;
 const MAX_DIRTY_DRAIN_PER_FRAME: usize = 32;
@@ -97,6 +96,11 @@ impl GpuChunkScheduler {
             self.heap.push(*req);
         }
     }
+
+    #[cfg(test)]
+    pub fn is_pending(&self, pos: ChunkPos) -> bool {
+        self.pending.contains_key(&pos)
+    }
 }
 
 pub fn chunk_distance_sq_from_camera(cam: &Transform, chunk: ChunkPos) -> i32 {
@@ -123,30 +127,19 @@ fn capture_upload(
     world: &stagcrest_world::World,
     ctx: &ModContext,
     power: Option<&CircuitPowerOverlay>,
-    biome_cache: Option<&BiomeGridCache>,
 ) -> Option<stagcrest_render::gpu_voxel::types::GpuChunkUpload> {
+    let center = world.pack_chunk_for_storage(pos)?;
+    let air = world.air();
     let power_lookup = power.map(|p| p as &dyn stagcrest_mod_client::PowerLookup);
     let power_grid = capture_power_grid(pos, power_lookup);
-    let climate = biome_cache.and_then(|cache| {
-        let wx = pos.x * CHUNK_SIZE + CHUNK_SIZE / 2;
-        let wz = pos.z * CHUNK_SIZE + CHUNK_SIZE / 2;
-        let biome_idx = cache.biome_at(BlockPos::new(wx, pos.y * CHUNK_SIZE, wz))?;
-        let biome = ctx.biomes.biome_by_index(biome_idx)?;
-        Some(MeshClimateSnapshot {
-            colormaps: Arc::new(ctx.colormaps.clone()),
-            temperature: biome.temperature,
-            downfall: biome.downfall,
-        })
-    });
-    let snapshot = MeshSnapshot::capture(
+    Some(pack_halo_from_world(
         pos,
         world,
-        Arc::new(ctx.registry.clone()),
-        Arc::new(ctx.models.clone()),
+        air,
+        &ctx.registry,
+        &center,
         power_grid,
-        climate,
-    )?;
-    Some(pack_gpu_chunk_upload(&snapshot, &ctx.registry))
+    ))
 }
 
 pub fn gpu_chunk_drain_dirty(
@@ -180,7 +173,7 @@ pub fn gpu_chunk_upload(
     mod_ctx: Option<Res<ModContext>>,
     world: Res<WorldReplica>,
     power: Option<Res<CircuitPowerOverlay>>,
-    biome_cache: Option<Res<BiomeGridCache>>,
+    _biome_cache: Option<Res<BiomeGridCache>>,
     mut cache: ResMut<GpuChunkCache>,
     mut stats: ResMut<GpuVoxelStats>,
 ) {
@@ -195,7 +188,7 @@ pub fn gpu_chunk_upload(
         if !world.is_generated(req.pos) || !world.has_chunk(req.pos) {
             continue;
         }
-        let Some(upload) = capture_upload(req.pos, &*world, &ctx, power.as_deref(), biome_cache.as_deref())
+        let Some(upload) = capture_upload(req.pos, &*world, &ctx, power.as_deref())
         else {
             continue;
         };
@@ -239,7 +232,7 @@ pub fn gpu_chunk_recover(
         if !world.is_generated(pos) || !world.has_chunk(pos) {
             continue;
         }
-        if cache.get(pos).is_some() || scheduler.pending.contains_key(&pos) {
+        if cache.contains(pos) || scheduler.pending.contains_key(&pos) {
             continue;
         }
         scheduler.request(
@@ -259,7 +252,8 @@ pub fn init_gpu_voxel_tables(
         return;
     }
     let Some(ctx) = mod_ctx else { return };
-    commands.insert_resource(GpuVoxelTables::build(&ctx.registry, &ctx.models));
+    let tables = GpuVoxelTables::build(&ctx.registry, &ctx.models);
+    commands.insert_resource(tables);
 }
 
 pub fn request_face_neighbors(

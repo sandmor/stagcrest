@@ -16,8 +16,8 @@ use bevy::render::renderer::RenderDevice;
 use stagcrest_mesh::GpuMeshVertex;
 
 use crate::gpu_voxel::types::{
-    BucketFinalizeMeta, FinalizeUniform, GpuAtlasRect, GpuBlockCell, GpuBlockMeta,
-    GpuBucketRegion, GpuCameraUniform, GpuChunkUniform, VoxelInstance,
+    BucketFinalizeMeta, CompactUniform, EmitUniform, FinalizeUniform, GpuAtlasRect, GpuBlockCell,
+    GpuBlockMeta, GpuBucketRegion, GpuCameraUniform, GpuChunkTableEntry, VoxelInstance,
 };
 
 pub const VOXEL_COMPUTE_SHADER: Handle<Shader> =
@@ -27,6 +27,9 @@ pub const VOXEL_INSTANCE_SHADER: Handle<Shader> =
 pub const VOXEL_FINALIZE_SHADER: Handle<Shader> =
     weak_handle!("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a");
 
+pub const VOXEL_COMPACT_SHADER: Handle<Shader> =
+    weak_handle!("e4f5a6b7-c8d9-4e0f-1a2b-3c4d5e6f7a8b");
+
 #[derive(Resource)]
 pub struct VoxelComputePipeline {
     pub layout: BindGroupLayout,
@@ -35,6 +38,12 @@ pub struct VoxelComputePipeline {
 
 #[derive(Resource)]
 pub struct VoxelFinalizePipeline {
+    pub layout: BindGroupLayout,
+    pub pipeline_id: CachedComputePipelineId,
+}
+
+#[derive(Resource)]
+pub struct VoxelCompactPipeline {
     pub layout: BindGroupLayout,
     pub pipeline_id: CachedComputePipelineId,
 }
@@ -122,6 +131,12 @@ pub fn load_voxel_shaders(app: &mut App) {
         "../../../../assets/shaders/voxel_finalize.wgsl",
         Shader::from_wgsl
     );
+    load_internal_asset!(
+        app,
+        VOXEL_COMPACT_SHADER,
+        "../../../../assets/shaders/voxel_compact.wgsl",
+        Shader::from_wgsl
+    );
 }
 
 pub fn voxel_mesh_vertex_layout() -> VertexBufferLayout {
@@ -163,6 +178,7 @@ pub fn prepare_render_pipelines(
     render_device: Res<RenderDevice>,
     pipeline_cache: Res<PipelineCache>,
     existing_compute: Option<Res<VoxelComputePipeline>>,
+    existing_compact: Option<Res<VoxelCompactPipeline>>,
     existing_finalize: Option<Res<VoxelFinalizePipeline>>,
     existing_draw: Option<Res<VoxelDrawPipeline>>,
 ) {
@@ -172,14 +188,15 @@ pub fn prepare_render_pipelines(
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::COMPUTE,
                 (
-                    uniform_buffer::<GpuCameraUniform>(false),
                     storage_buffer_read_only::<GpuBlockMeta>(false),
                     storage_buffer_read_only::<GpuBlockCell>(false),
                     storage_buffer_read_only::<u32>(false),
-                    uniform_buffer::<GpuChunkUniform>(false),
+                    storage_buffer_read_only::<GpuChunkTableEntry>(false),
+                    storage_buffer_read_only::<u32>(false),
                     storage_buffer::<VoxelInstance>(false),
                     storage_buffer::<u32>(false),
-                    storage_buffer_read_only::<GpuBucketRegion>(false),
+                    storage_buffer::<u32>(false),
+                    uniform_buffer::<EmitUniform>(false),
                 ),
             ),
         );
@@ -195,6 +212,36 @@ pub fn prepare_render_pipelines(
         commands.insert_resource(VoxelComputePipeline { layout, pipeline_id });
     }
 
+    if existing_compact.is_none() {
+        let layout = render_device.create_bind_group_layout(
+            "voxel_compact_layout",
+            &BindGroupLayoutEntries::sequential(
+                ShaderStages::COMPUTE,
+                (
+                    storage_buffer_read_only::<GpuChunkTableEntry>(false),
+                    storage_buffer_read_only::<u32>(false),
+                    storage_buffer_read_only::<VoxelInstance>(false),
+                    storage_buffer_read_only::<u32>(false),
+                    storage_buffer::<VoxelInstance>(false),
+                    storage_buffer::<u32>(false),
+                    storage_buffer_read_only::<GpuBucketRegion>(false),
+                    uniform_buffer::<CompactUniform>(false),
+                    storage_buffer::<u32>(false),
+                ),
+            ),
+        );
+        let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some("voxel_compact".into()),
+            layout: vec![layout.clone()],
+            shader: VOXEL_COMPACT_SHADER,
+            shader_defs: vec![],
+            entry_point: "main".into(),
+            push_constant_ranges: vec![],
+            zero_initialize_workgroup_memory: false,
+        });
+        commands.insert_resource(VoxelCompactPipeline { layout, pipeline_id });
+    }
+
     if existing_finalize.is_none() {
         let layout = render_device.create_bind_group_layout(
             "voxel_finalize_layout",
@@ -207,6 +254,7 @@ pub fn prepare_render_pipelines(
                     storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
                     storage_buffer_read_only::<BucketFinalizeMeta>(false),
                     uniform_buffer::<FinalizeUniform>(false),
+                    storage_buffer::<u32>(false),
                 ),
             ),
         );
@@ -232,7 +280,7 @@ pub fn prepare_render_pipelines(
             ShaderStages::VERTEX | ShaderStages::FRAGMENT,
             (
                 uniform_buffer::<GpuCameraUniform>(false),
-                storage_buffer_read_only::<VoxelInstance>(true),
+                storage_buffer_read_only::<VoxelInstance>(false),
                 storage_buffer_read_only::<GpuAtlasRect>(false),
                 texture_2d(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
