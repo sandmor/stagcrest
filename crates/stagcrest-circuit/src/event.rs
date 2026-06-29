@@ -61,4 +61,12 @@ impl EventQueue {
             .filter_map(|pos| self.pending_delays.remove(&pos))
             .collect()
     }
+
+    pub fn pending_delays_in_chunk(&self, chunk: stagcrest_protocol::ChunkPos) -> Vec<ScheduledEval> {
+        self.pending_delays
+            .values()
+            .filter(|eval| eval.pos.chunk_pos() == chunk)
+            .copied()
+            .collect()
+    }
 }

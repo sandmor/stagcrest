@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use stagcrest_net::{BlockUpdate, ChunkSnapshot, ServerMessage};
-use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_storage::{decompress_stored, InactiveChunk};
 use stagcrest_world::World;
 
@@ -73,6 +72,7 @@ impl WorldReplica {
             tracing::warn!("failed to decode chunk {:?}", snapshot.pos);
             return;
         };
+        let biome_from_chunk = inactive.biome_grid;
         let insert_result = self.world.insert_inactive_chunk(snapshot.pos, inactive);
         if let Some(evicted) = insert_result.lru_evicted {
             drop_chunk_assets(
@@ -84,13 +84,7 @@ impl WorldReplica {
             );
         }
         self.world.finalize_generated_chunk(snapshot.pos);
-        if let Some(grid) = snapshot.biome_grid {
-            if grid.len() == BIOME_GRID_VOLUME {
-                let mut arr = [0u8; BIOME_GRID_VOLUME];
-                arr.copy_from_slice(&grid);
-                biome_cache.insert(snapshot.pos, arr);
-            }
-        }
+        biome_cache.insert(snapshot.pos, biome_from_chunk);
         if self.world.has_chunk(snapshot.pos) {
             mesh_scheduler.request(snapshot.pos, RemeshUrgency::Visible, 0);
         }

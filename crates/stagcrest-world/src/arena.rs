@@ -106,6 +106,24 @@ impl ChunkArena {
         entry.modified = true;
     }
 
+    pub fn is_modified(&self, pos: ChunkPos) -> bool {
+        self.meta.get(&pos).is_some_and(|m| m.modified)
+    }
+
+    pub fn clear_modified(&mut self, pos: ChunkPos) {
+        if let Some(entry) = self.meta.get_mut(&pos) {
+            entry.modified = false;
+        }
+    }
+
+    pub fn modified_populated_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.slots.keys().copied().filter(|&pos| {
+            self.meta
+                .get(&pos)
+                .is_some_and(|m| m.is_populated() && m.modified)
+        })
+    }
+
     pub fn insert_inactive(&mut self, pos: ChunkPos, chunk: InactiveChunk) -> InsertInactiveResult {
         if let Some(ChunkSlot::Active(token)) = self.slots.remove(&pos) {
             self.active.remove(token);

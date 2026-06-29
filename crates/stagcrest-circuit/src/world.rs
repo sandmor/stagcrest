@@ -1,7 +1,8 @@
 use crate::registry::BlockRegistry;
-use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, ChunkPos, CircuitKind};
+use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, ChunkPos, CircuitKind, LocalBlockPos};
+use stagcrest_storage::ChunkCircuitSnapshot;
 use stagcrest_world::World;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::eval::{dispatch, is_torch_geometry, sync_block_state, EvalContext, EvalResult};
 use crate::event::{CircuitEvent, EventQueue};
@@ -16,11 +17,119 @@ pub struct CircuitWorld {
     tick: u64,
     visual_updates: Vec<(stagcrest_protocol::BlockId, BlockPos, BlockState)>,
     power_updates: Vec<(BlockPos, u8)>,
+    dirty_chunks: HashSet<ChunkPos>,
 }
 
 impl CircuitWorld {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn current_tick(&self) -> u64 {
+        self.tick
+    }
+
+    pub fn set_tick(&mut self, tick: u64) {
+        self.tick = tick;
+    }
+
+    pub fn drain_dirty_chunks(&mut self) -> HashSet<ChunkPos> {
+        std::mem::take(&mut self.dirty_chunks)
+    }
+
+    fn mark_chunk_dirty(&mut self, pos: BlockPos) {
+        self.dirty_chunks.insert(pos.chunk_pos());
+    }
+
+    pub fn export_chunk_snapshot(&self, chunk: ChunkPos) -> ChunkCircuitSnapshot {
+        let base_x = chunk.x * stagcrest_protocol::CHUNK_SIZE;
+        let base_y = chunk.y * stagcrest_protocol::CHUNK_SIZE;
+        let base_z = chunk.z * stagcrest_protocol::CHUNK_SIZE;
+
+        let to_local = |pos: BlockPos| LocalBlockPos {
+            x: (pos.x - base_x) as u8,
+            y: (pos.y - base_y) as u8,
+            z: (pos.z - base_z) as u8,
+        };
+
+        let power = self
+            .power
+            .iter()
+            .filter(|(pos, _)| pos.chunk_pos() == chunk)
+            .map(|(pos, &level)| (to_local(*pos), level))
+            .collect();
+
+        let delay_input = self
+            .delay_input
+            .iter()
+            .filter(|(pos, _)| pos.chunk_pos() == chunk)
+            .map(|(pos, &input)| (to_local(*pos), input))
+            .collect();
+
+        let pending_delays = self
+            .queue
+            .pending_delays_in_chunk(chunk)
+            .into_iter()
+            .map(|eval| {
+                let remaining = eval
+                    .fire_tick
+                    .saturating_sub(self.tick)
+                    .min(u64::from(u8::MAX)) as u8;
+                stagcrest_storage::PendingDelaySnapshot {
+                    local: to_local(eval.pos),
+                    remaining_ticks: remaining,
+                    output: eval.output,
+                }
+            })
+            .collect();
+
+        ChunkCircuitSnapshot {
+            power,
+            delay_input,
+            pending_delays,
+        }
+    }
+
+    pub fn import_chunk_snapshot(
+        &mut self,
+        chunk: ChunkPos,
+        snapshot: ChunkCircuitSnapshot,
+        global_tick: u64,
+    ) {
+        let base_x = chunk.x * stagcrest_protocol::CHUNK_SIZE;
+        let base_y = chunk.y * stagcrest_protocol::CHUNK_SIZE;
+        let base_z = chunk.z * stagcrest_protocol::CHUNK_SIZE;
+
+        let to_world = |local: LocalBlockPos| BlockPos {
+            x: base_x + local.x as i32,
+            y: base_y + local.y as i32,
+            z: base_z + local.z as i32,
+        };
+
+        self.power.retain(|pos, _| pos.chunk_pos() != chunk);
+        self.delay_input.retain(|pos, _| pos.chunk_pos() != chunk);
+        for eval in self.queue.pending_delays_in_chunk(chunk) {
+            self.queue.cancel_delay(eval.pos);
+        }
+
+        for (local, level) in snapshot.power {
+            let pos = to_world(local);
+            if level == 0 {
+                self.power.remove(&pos);
+            } else {
+                self.power.insert(pos, level);
+            }
+        }
+
+        for (local, input) in snapshot.delay_input {
+            self.delay_input.insert(to_world(local), input);
+        }
+
+        for delay in snapshot.pending_delays {
+            let pos = to_world(delay.local);
+            let fire_tick = global_tick.saturating_add(u64::from(delay.remaining_ticks));
+            self.queue.schedule_delay(fire_tick, pos, delay.output);
+        }
     }
 
     pub fn power_at(&self, pos: BlockPos) -> u8 {
@@ -35,6 +144,7 @@ impl CircuitWorld {
         self.delay_input.insert(pos, input);
         self.queue
             .schedule_delay(self.tick + delay_ticks, pos, target);
+        self.mark_chunk_dirty(pos);
     }
 
     pub fn queue_update(&mut self, pos: BlockPos) {
@@ -49,6 +159,7 @@ impl CircuitWorld {
         if registry.block(id).and_then(|d| d.circuit).is_none() {
             if self.power.remove(&pos).is_some() {
                 self.power_updates.push((pos, 0));
+                self.mark_chunk_dirty(pos);
             }
         }
 
@@ -181,6 +292,7 @@ impl CircuitWorld {
             self.power.insert(pos, new_power);
         }
         self.power_updates.push((pos, new_power));
+        self.mark_chunk_dirty(pos);
 
         if let Some(new_state) = sync_block_state(world, pos, id, def, kind, state, new_power) {
             self.visual_updates.push((id, pos, new_state));
@@ -590,5 +702,39 @@ mod tests {
         assert_eq!(circuit.power_at(repeater_pos), 15);
         settle(&mut circuit, &mut world, &reg, 2);
         assert_eq!(circuit.power_at(repeater_pos), 15);
+    }
+
+    #[test]
+    fn circuit_snapshot_export_import_roundtrip() {
+        let (reg, source, wire, _, _, _, repeater) = setup_registry();
+        let mut world = World::new(BlockId(0));
+        let mut circuit = CircuitWorld::new();
+        let repeater_pos = BlockPos::new(2, 0, 0);
+        let chunk = repeater_pos.chunk_pos();
+
+        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
+        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
+        world.set_block(
+            repeater_pos,
+            repeater,
+            repeater_state(false, Facing::East, 2),
+        );
+        populate_chunks(
+            &mut world,
+            &[
+                BlockPos::new(0, 0, 0),
+                BlockPos::new(1, 0, 0),
+                repeater_pos,
+            ],
+        );
+
+        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
+        circuit.tick(&mut world, &reg);
+        let exported = circuit.export_chunk_snapshot(chunk);
+
+        let mut restored = CircuitWorld::new();
+        restored.set_tick(circuit.current_tick());
+        restored.import_chunk_snapshot(chunk, exported, circuit.current_tick());
+        assert_eq!(restored.power_at(repeater_pos), circuit.power_at(repeater_pos));
     }
 }

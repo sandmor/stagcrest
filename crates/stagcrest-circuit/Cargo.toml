@@ -7,3 +7,4 @@ edition.workspace = true
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
 stagcrest-mod-server.workspace = true
+stagcrest-storage.workspace = true

@@ -75,6 +75,18 @@ impl World {
         self.is_generated(pos)
     }
 
+    pub fn is_modified(&self, pos: ChunkPos) -> bool {
+        self.arena.is_modified(pos)
+    }
+
+    pub fn clear_modified(&mut self, pos: ChunkPos) {
+        self.arena.clear_modified(pos);
+    }
+
+    pub fn modified_populated_positions(&self) -> impl Iterator<Item = ChunkPos> + '_ {
+        self.arena.modified_populated_positions()
+    }
+
     /// Chunks visible to player interaction, circuits, and similar gameplay systems.
     /// Requires the chunk to be loaded and fully populated (pass-2 complete).
     pub fn is_chunk_interactive(&self, pos: ChunkPos) -> bool {

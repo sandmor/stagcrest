@@ -47,6 +47,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 .notify_block_changed(action.target, &server.world, registry);
             server.circuit.tick(&mut server.world, registry);
             server.broadcast_circuit_replication();
+            server.mark_chunk_dirty(action.target.chunk_pos());
             server.queue_priority(stagcrest_net::GameMessage::Server(
                 stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
                     pos: action.target,
@@ -134,6 +135,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 .notify_block_changed(place_pos, &server.world, registry);
             server.circuit.tick(&mut server.world, registry);
             server.broadcast_circuit_replication();
+            server.mark_chunk_dirty(place_pos.chunk_pos());
             let (_, block_state) = server.world.get_block(place_pos);
 
             server.queue_priority(stagcrest_net::GameMessage::Server(

@@ -29,3 +29,4 @@ futures-lite.workspace = true
 
 [dev-dependencies]
 stagcrest-mod-client.workspace = true
+stagcrest-net.workspace = true

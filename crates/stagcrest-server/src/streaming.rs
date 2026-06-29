@@ -1,14 +1,17 @@
 use std::collections::{HashSet, VecDeque};
 
+use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_server::{
     world_chunk_y_bounds, BiomeRegistry, BlockRegistry, ChunkGenData, ColumnBlocks,
     DecorateSnapshot, TerrainGenerator, WorldGenState,
 };
 use stagcrest_net::ChunkSnapshot;
 use stagcrest_protocol::{BlockId, BlockPos, ChunkPos, CHUNK_SIZE};
-use stagcrest_storage::{compress_stored, load_inactive_chunk};
+use stagcrest_storage::load_inactive_chunk;
 use stagcrest_world::World;
 
+use crate::persistence::{compressed_chunk_wire, pack_network_chunk};
+use crate::persistence::pack_evicted_chunk;
 use crate::session::WorldSession;
 
 const MAX_GEN_PER_TICK: usize = 2;
@@ -26,7 +29,6 @@ pub struct TerrainStreamState {
 pub struct StreamingPipeline {
     pending_generate: VecDeque<ChunkPos>,
     pending_load: VecDeque<ChunkPos>,
-    pending_persist: VecDeque<(ChunkPos, Vec<u8>)>,
     deferred_decorate: VecDeque<ChunkGenData>,
     pass2_pending: std::collections::HashMap<ChunkPos, ChunkGenData>,
     pub(crate) sent_to_client: HashSet<ChunkPos>,
@@ -42,6 +44,7 @@ impl StreamingPipeline {
         &mut self,
         world: &mut World,
         terrain: &mut WorldGenState,
+        circuit: &mut CircuitWorld,
         session: &mut WorldSession,
         column_blocks: ColumnBlocks,
         biomes: &BiomeRegistry,
@@ -57,6 +60,10 @@ impl StreamingPipeline {
         if !stream.valid {
             return result;
         }
+
+        session
+            .persistence
+            .absorb_dirty_chunks(circuit.drain_dirty_chunks());
 
         let center = ChunkPos {
             x: stream.center_x,
@@ -77,9 +84,18 @@ impl StreamingPipeline {
             let pos = evicted_chunk.pos;
             if evicted_chunk.meta.is_populated() {
                 if let Some(inactive) = evicted_chunk.inactive {
-                    let wire = inactive.encode_wire();
-                    let compressed = compress_stored(&wire);
-                    self.pending_persist.push_back((pos, compressed));
+                    if let Some(chunk) =
+                        pack_evicted_chunk(inactive, terrain, circuit, pos)
+                    {
+                        if let Err(err) = session.persistence.persist_inactive(
+                            pos,
+                            &chunk,
+                            &mut session.stored_chunks,
+                        ) {
+                            tracing::error!("failed to persist evicted chunk {pos:?}: {err}");
+                            session.persistence.mark_dirty(pos);
+                        }
+                    }
                 }
             }
             self.clear_work(pos);
@@ -90,6 +106,7 @@ impl StreamingPipeline {
 
         let center_changed = *last_center != Some(center);
         if center_changed {
+            // Generation/load queues only — persistence is never pruned by stream radius.
             self.prune_out_of_stream(stream, h_radius, v_radius);
             *last_center = Some(center);
         }
@@ -115,32 +132,34 @@ impl StreamingPipeline {
             if !world.is_generated(pos) || self.sent_to_client.contains(&pos) {
                 continue;
             }
-            if let Some(snapshot) = chunk_snapshot(world, pos, terrain) {
+            if let Some(snapshot) = chunk_snapshot(world, pos, terrain, circuit) {
                 self.sent_to_client.insert(pos);
                 result.snapshots.push(snapshot);
             }
         }
 
-        for _ in 0..MAX_IO_PER_TICK {
-            if let Some((pos, compressed)) = self.pending_persist.pop_front() {
-                if let Err(err) = session.storage.put(pos, &compressed) {
-                    tracing::error!("failed to persist chunk {pos:?}: {err}");
-                } else {
-                    session.stored_chunks.insert(pos);
-                }
-            }
-        }
+        session.persistence.drain(
+            MAX_IO_PER_TICK,
+            world,
+            terrain,
+            circuit,
+            &mut session.stored_chunks,
+        );
 
         for _ in 0..MAX_IO_PER_TICK {
             if let Some(pos) = self.pending_load.pop_front() {
                 match load_inactive_chunk(session.storage.as_ref(), pos) {
                     Ok(Some(chunk)) => {
+                        let biome = chunk.biome_grid;
+                        let circuit_snap = chunk.circuit.clone();
                         world.insert_inactive_chunk(pos, chunk);
+                        terrain.store_biome_grid(pos, biome);
+                        circuit.import_chunk_snapshot(pos, circuit_snap, session.meta.circuit_tick);
                         terrain.mark_chunk_generated(pos);
                         session.stored_chunks.insert(pos);
                         self.clear_work(pos);
                         if self.sent_to_client.insert(pos) {
-                            if let Some(snapshot) = chunk_snapshot(world, pos, terrain) {
+                            if let Some(snapshot) = chunk_snapshot(world, pos, terrain, circuit) {
                                 result.snapshots.push(snapshot);
                             }
                         }
@@ -176,7 +195,7 @@ impl StreamingPipeline {
                 }
                 self.pass2_pending.remove(&pos);
                 if self.sent_to_client.insert(pos) {
-                    if let Some(snapshot) = chunk_snapshot(world, pos, terrain) {
+                    if let Some(snapshot) = chunk_snapshot(world, pos, terrain, circuit) {
                         result.snapshots.push(snapshot);
                     }
                 }
@@ -369,8 +388,6 @@ impl StreamingPipeline {
             .retain(|&pos| chunk_in_stream(pos, stream, horizontal_radius, vertical_radius));
         self.pending_load
             .retain(|&pos| chunk_in_stream(pos, stream, horizontal_radius, vertical_radius));
-        self.pending_persist
-            .retain(|&(p, _)| chunk_in_stream(p, stream, horizontal_radius, vertical_radius));
         self.deferred_decorate
             .retain(|data| chunk_in_stream(data.pos, stream, horizontal_radius, vertical_radius));
         self.pass2_pending
@@ -395,13 +412,16 @@ fn chunk_in_stream(
         && (pos.y - stream.center_y).abs() <= vertical_radius
 }
 
-fn chunk_snapshot(world: &World, pos: ChunkPos, terrain: &WorldGenState) -> Option<ChunkSnapshot> {
-    let inactive = world.pack_chunk_for_storage(pos)?;
-    let wire = inactive.encode_wire();
-    let biome_grid = terrain.biome_grid(pos).map(|g| g.to_vec());
+fn chunk_snapshot(
+    world: &World,
+    pos: ChunkPos,
+    terrain: &WorldGenState,
+    circuit: &CircuitWorld,
+) -> Option<ChunkSnapshot> {
+    let chunk = pack_network_chunk(world, terrain, circuit, pos)?;
     Some(ChunkSnapshot {
         pos,
-        compressed: compress_stored(&wire),
-        biome_grid,
+        compressed: compressed_chunk_wire(&chunk),
+        biome_grid: Some(chunk.biome_grid.to_vec()),
     })
 }

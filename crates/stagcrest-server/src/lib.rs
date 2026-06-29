@@ -1,4 +1,5 @@
 mod net;
+mod persistence;
 mod player;
 mod session;
 mod streaming;
@@ -21,6 +22,7 @@ use tokio::net::TcpListener;
 
 pub use session::{streaming_lru_capacity, WorldSession};
 pub use streaming::{StreamingPipeline, TerrainStreamState};
+pub use player::apply_player_action;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -91,7 +93,7 @@ impl GameServer {
             .unwrap_or(BlockId(0));
         let column_blocks = ColumnBlocks::resolve(&registry, air);
 
-        let mut session = WorldSession::open(&config.world_name)?;
+        let mut session = WorldSession::open(&config.world_name, config.world_seed)?;
         let lru_cap =
             streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
         let world = World::with_lru_capacity(lru_cap, air);
@@ -124,6 +126,7 @@ impl GameServer {
         );
 
         let mut circuit = CircuitWorld::new();
+        circuit.set_tick(session.meta.circuit_tick);
         init_circuit_blocks(&mut circuit, &world, &registry);
 
         let cached = {
@@ -205,6 +208,9 @@ impl GameServer {
         while self.circuit_accumulator >= CIRCUIT_TICK_INTERVAL {
             self.circuit_accumulator -= CIRCUIT_TICK_INTERVAL;
             self.circuit.tick(&mut self.world, &self.registry);
+            self.session
+                .persistence
+                .absorb_dirty_chunks(self.circuit.drain_dirty_chunks());
             self.broadcast_circuit_replication();
         }
 
@@ -212,6 +218,7 @@ impl GameServer {
             let stream_result = self.pipeline.tick(
                 &mut self.world,
                 &mut self.terrain,
+                &mut self.circuit,
                 &mut self.session,
                 self.column_blocks,
                 &self.biomes,
@@ -261,6 +268,26 @@ impl GameServer {
         std::mem::take(&mut self.pending_bulk).into_iter()
     }
 
+    pub fn enable_world_streaming(&mut self) {
+        self.handshake_complete = true;
+    }
+
+    pub fn flush_persistence(&mut self) {
+        self.session.persistence.flush_all(
+            &mut self.world,
+            &self.terrain,
+            &self.circuit,
+            &mut self.session.stored_chunks,
+        );
+        if let Err(err) = self.session.save_meta(self.circuit.current_tick()) {
+            tracing::error!("failed to save world meta: {err}");
+        }
+    }
+
+    pub(crate) fn mark_chunk_dirty(&mut self, pos: ChunkPos) {
+        self.session.persistence.mark_dirty(pos);
+    }
+
     pub(crate) fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) {
         if self.handshake_pending && wire_ready {
             self.handshake_pending = false;
@@ -295,8 +322,10 @@ impl GameServer {
                 net::handle_pose(self, pose);
             }
             self.tick(dt);
-            for msg in self.drain_outgoing() {
+            let outgoing: Vec<_> = self.drain_outgoing().collect();
+            for msg in outgoing {
                 if transport.send(msg).is_err() {
+                    self.flush_persistence();
                     return;
                 }
             }
@@ -337,8 +366,16 @@ pub async fn run_standalone(
     let mut interval = tokio::time::interval(Duration::from_millis(16));
     let mut session: Option<stagcrest_net::AsyncTcpSession> = None;
 
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
     loop {
         tokio::select! {
+            _ = &mut ctrl_c => {
+                tracing::info!("shutdown requested, flushing world");
+                server.flush_persistence();
+                return Ok(());
+            }
             accept = listener.accept(), if session.is_none() => {
                 let (stream, addr) = accept?;
                 tracing::info!("client connected from {addr}");
@@ -395,6 +432,7 @@ pub async fn run_standalone(
                     server.tick(0.016);
                 }
                 if disconnected {
+                    server.flush_persistence();
                     server.pipeline.reset_client_delivery();
                     session = None;
                     server.handshake_complete = false;

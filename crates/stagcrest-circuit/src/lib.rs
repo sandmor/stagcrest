@@ -21,6 +21,8 @@ pub use eval::{is_player_toggleable, is_repeater};
 pub use init::init_circuit_blocks;
 pub use world::{CircuitWorld, MAX_EVALS_PER_TICK};
 
+pub use stagcrest_storage::ChunkCircuitSnapshot;
+
 use stagcrest_protocol::BlockPos;
 
 pub(crate) fn neighbors(pos: BlockPos) -> [BlockPos; 6] {

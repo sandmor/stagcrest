@@ -1,5 +1,8 @@
+use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_protocol::{BlockId, BlockState, LocalBlockPos, CHUNK_VOLUME};
 use thiserror::Error;
+
+use crate::circuit_snapshot::ChunkCircuitSnapshot;
 
 pub const INACTIVE_CHUNK_VERSION: u8 = 1;
 
@@ -10,6 +13,8 @@ pub struct InactiveChunk {
     pub palette_states: Vec<BlockState>,
     pub bits_per_index: u8,
     pub packed_indices: Vec<u8>,
+    pub biome_grid: [u8; BIOME_GRID_VOLUME],
+    pub circuit: ChunkCircuitSnapshot,
 }
 
 #[derive(Debug, Error)]
@@ -22,6 +27,10 @@ pub enum StorageFormatError {
     InvalidPaletteIndex { index: usize, palette_len: usize },
     #[error("palette ids/states length mismatch")]
     PaletteMismatch,
+    #[error("unsupported circuit snapshot version: {0}")]
+    UnsupportedCircuitSnapshot(u8),
+    #[error("invalid circuit cell index {0}")]
+    InvalidCircuitIndex(usize),
 }
 
 pub struct InactiveChunkReader<'a> {
@@ -82,6 +91,8 @@ impl InactiveChunk {
             palette_states,
             bits_per_index,
             packed_indices,
+            biome_grid: [0u8; BIOME_GRID_VOLUME],
+            circuit: ChunkCircuitSnapshot::default(),
         })
     }
 
@@ -107,8 +118,17 @@ impl InactiveChunk {
     pub fn encode_wire(&self) -> Vec<u8> {
         let palette_count = self.palette_ids.len() as u16;
         let packed_len = self.packed_indices.len() as u32;
+        let circuit_wire = self.circuit.encode_wire();
+        let circuit_len = circuit_wire.len() as u32;
         let mut out = Vec::with_capacity(
-            1 + 2 + self.palette_ids.len() * (4 + 2) + 1 + 4 + self.packed_indices.len(),
+            1 + 2
+                + self.palette_ids.len() * (4 + 2)
+                + 1
+                + 4
+                + self.packed_indices.len()
+                + BIOME_GRID_VOLUME
+                + 4
+                + circuit_wire.len(),
         );
         out.push(self.version);
         out.extend_from_slice(&palette_count.to_le_bytes());
@@ -119,6 +139,9 @@ impl InactiveChunk {
         out.push(self.bits_per_index);
         out.extend_from_slice(&packed_len.to_le_bytes());
         out.extend_from_slice(&self.packed_indices);
+        out.extend_from_slice(&self.biome_grid);
+        out.extend_from_slice(&circuit_len.to_le_bytes());
+        out.extend_from_slice(&circuit_wire);
         out
     }
 
@@ -141,12 +164,26 @@ impl InactiveChunk {
             return Err(StorageFormatError::Truncated);
         }
         let packed_indices = bytes[cursor..cursor + packed_len].to_vec();
+        cursor += packed_len;
+        if cursor + BIOME_GRID_VOLUME > bytes.len() {
+            return Err(StorageFormatError::Truncated);
+        }
+        let mut biome_grid = [0u8; BIOME_GRID_VOLUME];
+        biome_grid.copy_from_slice(&bytes[cursor..cursor + BIOME_GRID_VOLUME]);
+        cursor += BIOME_GRID_VOLUME;
+        let circuit_len = read_u32(bytes, &mut cursor)? as usize;
+        if cursor + circuit_len > bytes.len() {
+            return Err(StorageFormatError::Truncated);
+        }
+        let circuit = ChunkCircuitSnapshot::decode_wire(&bytes[cursor..cursor + circuit_len])?;
         Ok(Self {
             version,
             palette_ids,
             palette_states,
             bits_per_index,
             packed_indices,
+            biome_grid,
+            circuit,
         })
     }
 }
@@ -251,7 +288,12 @@ mod tests {
                 indices[idx] = (x % 2) as u16;
             }
         }
-        let chunk = InactiveChunk::from_indices(palette_ids, palette_states, &indices).unwrap();
+        let mut chunk = InactiveChunk::from_indices(palette_ids, palette_states, &indices).unwrap();
+        chunk.biome_grid[0] = 7;
+        chunk
+            .circuit
+            .power
+            .push((LocalBlockPos { x: 1, y: 0, z: 0 }, 14));
         let wire = chunk.encode_wire();
         let decoded = InactiveChunk::decode_wire(&wire).unwrap();
         assert_eq!(decoded, chunk);

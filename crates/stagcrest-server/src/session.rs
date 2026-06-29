@@ -3,24 +3,42 @@ use std::path::Path;
 use std::sync::Arc;
 
 use stagcrest_protocol::ChunkPos;
-use stagcrest_storage::{ChunkStorage, RedbChunkStorage};
+use stagcrest_storage::{RedbChunkStorage, StorageError, WorldMeta};
+
+use crate::persistence::ChunkPersistence;
 
 pub struct WorldSession {
     pub world_name: String,
-    pub storage: Arc<dyn ChunkStorage>,
+    pub storage: Arc<RedbChunkStorage>,
     pub stored_chunks: HashSet<ChunkPos>,
+    pub meta: WorldMeta,
+    pub persistence: ChunkPersistence,
 }
 
 impl WorldSession {
-    pub fn open(world_name: impl Into<String>) -> Result<Self, stagcrest_storage::StorageError> {
+    pub fn open(world_name: impl Into<String>, world_seed: u64) -> Result<Self, StorageError> {
         let world_name = world_name.into();
         let path = Path::new("worlds").join(&world_name).join("world.redb");
-        let storage = RedbChunkStorage::open(path)?;
+        let storage = Arc::new(RedbChunkStorage::open(path)?);
+        let mut meta = WorldMeta::load(storage.as_ref())?;
+        meta.world_seed = world_seed;
+        let persistence = ChunkPersistence::new(storage.clone());
         Ok(Self {
             world_name,
-            storage: Arc::new(storage),
+            storage,
             stored_chunks: HashSet::new(),
+            meta,
+            persistence,
         })
+    }
+
+    pub fn save_meta(&self, circuit_tick: u64) -> Result<(), StorageError> {
+        let meta = WorldMeta {
+            format_version: stagcrest_storage::WORLD_FORMAT_VERSION,
+            world_seed: self.meta.world_seed,
+            circuit_tick,
+        };
+        meta.save(self.storage.as_ref())
     }
 }
 
