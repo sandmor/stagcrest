@@ -4,9 +4,9 @@ mod mesh_snapshot;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_client::{
-    compute_dust_connections, dust_shows_dot, dust_vertex_tint, face_texture_for,
-    is_dust_connectable_neighbor, resolve_block_model, resolve_dust_textures, sample_colormap_rgb,
-    BlockRegistry, ColormapSet, DustConnections, DustSide, DustTextures, ModelRegistry,
+    compute_wire_connections, wire_shows_center_junction, wire_power_vertex_tint, face_texture_for,
+    is_wire_line_neighbor, resolve_block_model, resolve_wire_line_textures, sample_colormap_rgb,
+    BlockRegistry, ColormapSet, WireConnections, WireLink, WireLineTextures, ModelRegistry,
     PowerLookup,
 };
 use stagcrest_protocol::{
@@ -134,11 +134,11 @@ fn build_single_block_mesh_internal(
     let mut mesh = ChunkMesh::default();
 
     if def.namespaced_id == "stagcrest:redstone_dust" {
-        let textures = resolve_dust_textures(registry);
-        emit_dust(
+        let textures = resolve_wire_line_textures(registry);
+        emit_wire_line(
             &mut mesh,
             [0.0, 0.0, 0.0],
-            DustConnections::icon_cross(),
+            WireConnections::icon_cross(),
             textures,
             power,
             registry,
@@ -292,14 +292,14 @@ pub(crate) fn build_chunk_mesh_neighbors(
                     }
                 }
 
-                let dust_connections = if def.namespaced_id == "stagcrest:redstone_dust" {
-                    Some(compute_dust_connections(
+                let wire_connections = if def.namespaced_id == "stagcrest:redstone_dust" {
+                    Some(compute_wire_connections(
                         |dx, dy, dz| {
                             let Some(neighbor) = neighbor_at(x + dx, y + dy, z + dz) else {
                                 return false;
                             };
                             neighbor.id != air
-                                && is_dust_connectable_neighbor(
+                                && is_wire_line_neighbor(
                                     registry,
                                     neighbor.id,
                                     neighbor.state,
@@ -351,7 +351,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
                             normal,
                         )
                     },
-                    dust_connections,
+                    wire_connections,
                 );
             }
         }
@@ -376,7 +376,7 @@ fn emit_block_geometry(
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
     mut should_cull: impl FnMut(Vec3) -> bool,
-    dust_connections: Option<DustConnections>,
+    wire_connections: Option<WireConnections>,
 ) {
     match geometry {
         BlockGeometry::Cube => emit_cube_faces(
@@ -392,9 +392,9 @@ fn emit_block_geometry(
             &mut should_cull,
         ),
         BlockGeometry::Flat => {
-            if let Some(connections) = dust_connections {
-                let textures = resolve_dust_textures(registry);
-                emit_dust(
+            if let Some(connections) = wire_connections {
+                let textures = resolve_wire_line_textures(registry);
+                emit_wire_line(
                     mesh,
                     origin,
                     connections,
@@ -435,7 +435,7 @@ fn emit_block_geometry(
         }
         BlockGeometry::Model(model_id) => {
             let model = resolve_block_model(models, model_id, namespaced_id, state);
-            // Circuit power is for dust tinting only; models use state-driven textures.
+            // Circuit power tints wire line geometry; models use state-driven textures.
             emit_block_model(mesh, origin, model, face_textures, 0, registry);
         }
     }
@@ -537,7 +537,7 @@ fn texture_uv_corners(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_dust_quad_raw(
+fn emit_wire_quad_raw(
     mesh: &mut ChunkMesh,
     corners: [[f32; 3]; 4],
     tex_id: TextureId,
@@ -562,7 +562,7 @@ fn emit_dust_quad_raw(
     };
     let uvs = texture_uv_corners(registry, tex_id, uv_sub);
     let tint = if power_tinted {
-        dust_vertex_tint(power)
+        wire_power_vertex_tint(power)
     } else {
         0.0
     };
@@ -583,7 +583,7 @@ fn emit_dust_quad_raw(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_dust_layer_pair(
+fn emit_wire_layer_pair(
     mesh: &mut ChunkMesh,
     corners: [[f32; 3]; 4],
     line_tex: TextureId,
@@ -600,7 +600,7 @@ fn emit_dust_layer_pair(
     if let Some(overlay_tex) = overlay_tex {
         let overlay_rect = registry.atlas_uv(overlay_tex);
         if overlay_rect.w > 0 && overlay_rect.h > 0 {
-            emit_dust_quad_raw(
+            emit_wire_quad_raw(
                 mesh,
                 offset_corners(corners, normal_axis, -DUST_LAYER_EPS),
                 overlay_tex,
@@ -615,7 +615,7 @@ fn emit_dust_layer_pair(
             );
         }
     }
-    emit_dust_quad_raw(
+    emit_wire_quad_raw(
         mesh,
         offset_corners(corners, normal_axis, DUST_LAYER_EPS),
         line_tex,
@@ -631,11 +631,11 @@ fn emit_dust_layer_pair(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn emit_dust(
+fn emit_wire_line(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
-    connections: DustConnections,
-    textures: DustTextures,
+    connections: WireConnections,
+    textures: WireLineTextures,
     power: u8,
     registry: &BlockRegistry,
     lx: i32,
@@ -647,14 +647,14 @@ fn emit_dust(
     let line_y = o[1] + block_model::FLAT_Y + DUST_LAYER_EPS;
     let y_bot = o[1] + 1.0 / 16.0;
 
-    if dust_shows_dot(connections) {
+    if wire_shows_center_junction(connections) {
         let dot = [
             [o[0], line_y, o[2] + 1.0],
             [o[0] + 1.0, line_y, o[2] + 1.0],
             [o[0] + 1.0, line_y, o[2]],
             [o[0], line_y, o[2]],
         ];
-        emit_dust_layer_pair(
+        emit_wire_layer_pair(
             mesh,
             dot,
             textures.dot,
@@ -672,7 +672,7 @@ fn emit_dust(
 
     for (i, side) in connections.sides.iter().enumerate() {
         match side {
-            DustSide::Side => {
+            WireLink::Side => {
                 let (line_tex, corners) = match i {
                     0 => (
                         textures.line_ns,
@@ -711,7 +711,7 @@ fn emit_dust(
                         ],
                     ),
                 };
-                emit_dust_layer_pair(
+                emit_wire_layer_pair(
                     mesh,
                     corners,
                     line_tex,
@@ -726,7 +726,7 @@ fn emit_dust(
                     column_tints,
                 );
             }
-            DustSide::Up => {
+            WireLink::Up => {
                 let (line_tex, corners, axis) = match i {
                     0 => (
                         textures.line_ns,
@@ -769,7 +769,7 @@ fn emit_dust(
                         0,
                     ),
                 };
-                emit_dust_layer_pair(
+                emit_wire_layer_pair(
                     mesh,
                     corners,
                     line_tex,
@@ -784,7 +784,7 @@ fn emit_dust(
                     column_tints,
                 );
             }
-            DustSide::None => {}
+            WireLink::None => {}
         }
     }
 }
@@ -980,7 +980,7 @@ fn tint_mul_for_kind(
 
 pub(crate) fn vertex_tint(face_tex: FaceTexture, power: u8) -> f32 {
     if face_tex.tint == TintKind::PowerLevel {
-        dust_vertex_tint(power)
+        wire_power_vertex_tint(power)
     } else {
         face_tex.tint.as_f32()
     }

@@ -1,6 +1,6 @@
 # Stagcrest
 
-Mod-first voxel engine in Rust: **server-authoritative** simulation, **Bevy** native client for rendering and UI, **wasmi** for WASM mods. Every block, texture, and redstone rule comes from mods — the `stagcrest-core` mod provides vanilla content.
+Mod-first voxel engine in Rust: **server-authoritative** simulation, **Bevy** native client for rendering and UI, **wasmi** for WASM mods. Every block, texture, and circuit rule comes from mods — the `stagcrest-core` mod provides default content.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ Single-player embeds the server in-process (no second terminal). Remote play: ru
 - Greedy mesh chunk rendering with texture atlas from mod PNGs
 - Server-side chunk streaming with client mesh remeshing (`MeshScheduler`)
 - Native world persistence (redb) on the server
-- Basic redstone (dust, torch, block, lever, button, repeater) via an event-driven circuit graph (default 10 Hz)
+- Basic circuits (wire, inverter, source, switch, repeater) via an event-driven circuit graph (default 10 Hz)
 - Main menu → connect / load → in-game flow (Bevy UI)
 - Native desktop only (no web/WASM host)
 

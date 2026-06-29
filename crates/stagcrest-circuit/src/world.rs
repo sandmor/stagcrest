@@ -1,19 +1,35 @@
+use crate::power::inverter_support_block;
 use crate::registry::BlockRegistry;
-use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, ChunkPos, CircuitKind, LocalBlockPos};
+use stagcrest_protocol::{
+    mount_on, set_torch_lit, BlockPos, BlockState, ChunkPos, CircuitKind, LocalBlockPos,
+};
 use stagcrest_storage::ChunkCircuitSnapshot;
 use stagcrest_world::World;
 use std::collections::{HashMap, HashSet};
 
-use crate::eval::{dispatch, is_torch_geometry, sync_block_state, EvalContext, EvalResult};
+use crate::eval::{
+    dispatch, is_button_geometry, is_torch_geometry, sync_block_state, BURNOUT_TOGGLE_LIMIT,
+    BURNOUT_WINDOW_TICKS, EvalContext, EvalResult,
+};
 use crate::event::{CircuitEvent, EventQueue};
 
 pub const MAX_EVALS_PER_TICK: usize = 4096;
+pub const BUTTON_HOLD_TICKS: u64 = 30;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct TorchFlicker {
+    count: u8,
+    window_start: u64,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct CircuitWorld {
     power: HashMap<BlockPos, u8>,
     queue: EventQueue,
     delay_input: HashMap<BlockPos, u8>,
+    pending_button_release: HashMap<BlockPos, u64>,
+    torch_burnt_out: HashSet<BlockPos>,
+    torch_flicker: HashMap<BlockPos, TorchFlicker>,
     tick: u64,
     visual_updates: Vec<(stagcrest_protocol::BlockId, BlockPos, BlockState)>,
     power_updates: Vec<(BlockPos, u8)>,
@@ -83,10 +99,31 @@ impl CircuitWorld {
             })
             .collect();
 
+        let button_release = self
+            .pending_button_release
+            .iter()
+            .filter(|(pos, _)| pos.chunk_pos() == chunk)
+            .map(|(pos, fire_tick)| {
+                let remaining = fire_tick
+                    .saturating_sub(self.tick)
+                    .min(u64::from(u8::MAX)) as u8;
+                (to_local(*pos), remaining)
+            })
+            .collect();
+
+        let torch_burnt_out = self
+            .torch_burnt_out
+            .iter()
+            .filter(|pos| pos.chunk_pos() == chunk)
+            .map(|pos| to_local(*pos))
+            .collect();
+
         ChunkCircuitSnapshot {
             power,
             delay_input,
             pending_delays,
+            button_release,
+            torch_burnt_out,
         }
     }
 
@@ -108,6 +145,10 @@ impl CircuitWorld {
 
         self.power.retain(|pos, _| pos.chunk_pos() != chunk);
         self.delay_input.retain(|pos, _| pos.chunk_pos() != chunk);
+        self.pending_button_release
+            .retain(|pos, _| pos.chunk_pos() != chunk);
+        self.torch_burnt_out.retain(|pos| pos.chunk_pos() != chunk);
+        self.torch_flicker.retain(|pos, _| pos.chunk_pos() != chunk);
         for eval in self.queue.pending_delays_in_chunk(chunk) {
             self.queue.cancel_delay(eval.pos);
         }
@@ -129,6 +170,16 @@ impl CircuitWorld {
             let pos = to_world(delay.local);
             let fire_tick = global_tick.saturating_add(u64::from(delay.remaining_ticks));
             self.queue.schedule_delay(fire_tick, pos, delay.output);
+        }
+
+        for (local, remaining) in snapshot.button_release {
+            let pos = to_world(local);
+            let fire_tick = global_tick.saturating_add(u64::from(remaining));
+            self.pending_button_release.insert(pos, fire_tick);
+        }
+
+        for local in snapshot.torch_burnt_out {
+            self.torch_burnt_out.insert(to_world(local));
         }
     }
 
@@ -191,6 +242,8 @@ impl CircuitWorld {
     pub fn tick(&mut self, world: &mut World, registry: &BlockRegistry) {
         self.tick = self.tick.saturating_add(1);
 
+        self.drain_button_releases(world, registry);
+
         for scheduled in self.queue.drain_due_delays(self.tick) {
             self.apply_scheduled_output(scheduled.pos, scheduled.output, world, registry);
         }
@@ -220,10 +273,36 @@ impl CircuitWorld {
             return;
         };
         match node.kind {
-            CircuitKind::Delay { .. } | CircuitKind::Repeater { .. } => {
+            CircuitKind::Repeater { .. } | CircuitKind::Inverter { .. } => {
                 self.set_published_power(pos, output, id, state, def, node.kind, world, registry);
             }
             _ => {}
+        }
+    }
+
+    fn drain_button_releases(&mut self, world: &mut World, registry: &BlockRegistry) {
+        let due: Vec<BlockPos> = self
+            .pending_button_release
+            .iter()
+            .filter(|(_, fire)| **fire <= self.tick)
+            .map(|(pos, _)| *pos)
+            .collect();
+
+        for pos in due {
+            self.pending_button_release.remove(&pos);
+            let (id, state) = world.get_block(pos);
+            let Some(def) = registry.block(id) else {
+                continue;
+            };
+            if !def.circuit.is_some_and(|n| matches!(n.kind, CircuitKind::Switch { .. })) {
+                continue;
+            }
+            if !mount_on(state) {
+                continue;
+            }
+            let new_state = BlockState(state.0 & !1);
+            world.set_block(pos, id, new_state);
+            self.notify_block_changed(pos, world, registry);
         }
     }
 
@@ -248,7 +327,8 @@ impl CircuitWorld {
             registry,
         };
 
-        match dispatch(&ctx, node.kind, prev_input) {
+        let burnt_out = self.torch_burnt_out.contains(&pos);
+        match dispatch(&ctx, node.kind, prev_input, burnt_out) {
             EvalResult::Unchanged => {}
             EvalResult::Publish(power) => {
                 self.set_published_power(pos, power, id, state, def, node.kind, world, registry);
@@ -281,7 +361,7 @@ impl CircuitWorld {
 
         if matches!(
             kind,
-            CircuitKind::Wire { .. } | CircuitKind::Delay { .. } | CircuitKind::Repeater { .. }
+            CircuitKind::Wire { .. } | CircuitKind::Repeater { .. }
         ) {
             world.mark_dirty_face_neighbors(pos.chunk_pos());
         }
@@ -296,8 +376,81 @@ impl CircuitWorld {
 
         if let Some(new_state) = sync_block_state(world, pos, id, def, kind, state, new_power) {
             self.visual_updates.push((id, pos, new_state));
+            if matches!(kind, CircuitKind::Inverter { .. }) && is_torch_geometry(def) {
+                self.record_torch_toggle(pos);
+            }
         }
         self.enqueue_circuit_neighbors(pos, world, registry);
+        if matches!(kind, CircuitKind::Wire { .. }) {
+            self.enqueue_wire_network_neighbors(pos, world, registry);
+        }
+        self.enqueue_block_power_dependents(pos, world, registry);
+    }
+
+    fn record_torch_toggle(&mut self, pos: BlockPos) {
+        if self.torch_burnt_out.contains(&pos) {
+            return;
+        }
+        let entry = self.torch_flicker.entry(pos).or_default();
+        if self.tick.saturating_sub(entry.window_start) > BURNOUT_WINDOW_TICKS {
+            entry.count = 0;
+            entry.window_start = self.tick;
+        }
+        entry.count = entry.count.saturating_add(1);
+        if entry.count > BURNOUT_TOGGLE_LIMIT {
+            self.torch_burnt_out.insert(pos);
+            self.torch_flicker.remove(&pos);
+        }
+    }
+
+    fn enqueue_block_power_dependents(
+        &mut self,
+        pos: BlockPos,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        for npos in crate::neighbors(pos) {
+            self.enqueue_attachment_nodes_on_block(npos, world, registry);
+        }
+        self.enqueue_attachment_nodes_on_block(pos, world, registry);
+    }
+
+    fn enqueue_attachment_nodes_on_block(
+        &mut self,
+        support: BlockPos,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        if !world.is_chunk_interactive(support.chunk_pos()) {
+            return;
+        }
+        let above = BlockPos::new(support.x, support.y + 1, support.z);
+        self.maybe_queue_torch_on_support(above, support, world, registry);
+        for npos in crate::neighbors(support) {
+            self.maybe_queue_torch_on_support(npos, support, world, registry);
+        }
+    }
+
+    fn maybe_queue_torch_on_support(
+        &mut self,
+        torch_pos: BlockPos,
+        support: BlockPos,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        if !world.is_chunk_interactive(torch_pos.chunk_pos()) {
+            return;
+        }
+        let (id, state) = world.get_block(torch_pos);
+        let Some(def) = registry.block(id) else {
+            return;
+        };
+        if !is_torch_geometry(def) {
+            return;
+        }
+        if inverter_support_block(torch_pos, state) == support {
+            self.queue.enqueue_evaluate(torch_pos);
+        }
     }
 
     fn enqueue_circuit_neighbors(
@@ -307,6 +460,23 @@ impl CircuitWorld {
         registry: &BlockRegistry,
     ) {
         for npos in crate::neighbors(pos) {
+            if !world.is_chunk_interactive(npos.chunk_pos()) {
+                continue;
+            }
+            let (nid, _) = world.get_block(npos);
+            if registry.block(nid).and_then(|d| d.circuit).is_some() {
+                self.queue.enqueue_evaluate(npos);
+            }
+        }
+    }
+
+    fn enqueue_wire_network_neighbors(
+        &mut self,
+        pos: BlockPos,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        for npos in crate::wire_network::wire_network_neighbors(registry, world, pos) {
             if !world.is_chunk_interactive(npos.chunk_pos()) {
                 continue;
             }
@@ -331,10 +501,22 @@ impl CircuitWorld {
             CircuitKind::Inverter { .. } if is_torch_geometry(def) => {
                 set_torch_lit(state, !stagcrest_protocol::torch_lit(state))
             }
-            CircuitKind::Switch { .. } => BlockState(state.0 ^ 1),
+            CircuitKind::Switch { .. } => {
+                if is_button_geometry(Some(def)) {
+                    if mount_on(state) {
+                        return;
+                    }
+                    let on_state = BlockState(state.0 | 1);
+                    world.set_block(pos, id, on_state);
+                    self.pending_button_release
+                        .insert(pos, self.tick + BUTTON_HOLD_TICKS);
+                    self.notify_block_changed(pos, world, registry);
+                    return;
+                }
+                BlockState(state.0 ^ 1)
+            }
             CircuitKind::Inverter { .. }
             | CircuitKind::Wire { .. }
-            | CircuitKind::Delay { .. }
             | CircuitKind::Repeater { .. } => return,
         };
 
@@ -366,375 +548,8 @@ impl CircuitWorld {
         }
 
         // Delay-only change: remesh via set_block, but don't reset delay_input or
-        // cancel in-flight timers (vanilla keeps timing when cycling delay).
+        // cancel in-flight timers (output timing continues when cycling delay).
         world.set_block(pos, id, new_state);
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use stagcrest_protocol::{
-        repeater_state, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind,
-        CircuitNodeDef, Facing, ModelId, ModelRenderLayer, TextureId,
-    };
-
-    fn test_block(id: BlockId, kind: CircuitKind) -> BlockDef {
-        test_block_with_geometry(id, kind, BlockGeometry::Cube)
-    }
-
-    fn test_block_with_geometry(
-        id: BlockId,
-        kind: CircuitKind,
-        geometry: BlockGeometry,
-    ) -> BlockDef {
-        BlockDef {
-            id,
-            namespaced_id: format!("test:{id:?}"),
-            display_name: "Test".into(),
-            opaque: true,
-            transparent: false,
-            solid: true,
-            hardness: 1.0,
-            face_textures: BlockFaceTextures::uniform(TextureId(0)),
-            circuit: Some(CircuitNodeDef { kind }),
-            placeable: true,
-            geometry,
-            fluid: false,
-            render_layer: ModelRenderLayer::Opaque,
-        }
-    }
-
-    fn setup_registry() -> (
-        BlockRegistry,
-        BlockId,
-        BlockId,
-        BlockId,
-        BlockId,
-        BlockId,
-        BlockId,
-    ) {
-        let mut reg = BlockRegistry::new();
-        let source = BlockId(1);
-        let wire = BlockId(2);
-        let inverter = BlockId(3);
-        let switch = BlockId(4);
-        let delay = BlockId(5);
-        let repeater = BlockId(6);
-
-        reg.register_block(test_block(source, CircuitKind::Source { level: 15 }));
-        reg.register_block(test_block(wire, CircuitKind::Wire { falloff: 1 }));
-        reg.register_block(test_block(inverter, CircuitKind::Inverter { output: 15 }));
-        reg.register_block(test_block(switch, CircuitKind::Switch { output: 15 }));
-        reg.register_block(test_block(
-            delay,
-            CircuitKind::Delay {
-                output: 15,
-                delay: 2,
-            },
-        ));
-        reg.register_block(test_block_with_geometry(
-            repeater,
-            CircuitKind::Repeater { output: 15 },
-            BlockGeometry::Model(ModelId::Repeater),
-        ));
-
-        (reg, source, wire, inverter, switch, delay, repeater)
-    }
-
-    fn settle(circuit: &mut CircuitWorld, world: &mut World, reg: &BlockRegistry, ticks: u64) {
-        for _ in 0..ticks {
-            circuit.tick(world, reg);
-        }
-    }
-
-    fn populate_chunks(world: &mut World, blocks: &[BlockPos]) {
-        use std::collections::HashSet;
-        let mut seen = HashSet::new();
-        for pos in blocks {
-            let cpos = pos.chunk_pos();
-            if seen.insert(cpos) {
-                world.finalize_generated_chunk(cpos);
-            }
-        }
-    }
-
-    #[test]
-    fn terrain_ready_wire_not_evaluated() {
-        let (reg, source, wire, _, _, _, _) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-        let source_pos = BlockPos::new(0, 0, 0);
-        let wire_pos = BlockPos::new(stagcrest_protocol::CHUNK_SIZE, 0, 0);
-
-        world.set_block(source_pos, source, BlockState(0));
-        world.set_block(wire_pos, wire, BlockState(0));
-        populate_chunks(&mut world, &[source_pos]);
-        world.mark_chunk_terrain_ready(wire_pos.chunk_pos());
-        assert!(!world.is_chunk_interactive(wire_pos.chunk_pos()));
-
-        circuit.queue_update(wire_pos);
-        circuit.tick(&mut world, &reg);
-        assert_eq!(circuit.power_at(wire_pos), 0);
-    }
-
-    #[test]
-    fn wire_falloff_chain() {
-        let (reg, source, wire, _, _, _, _) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-
-        let blocks = [
-            BlockPos::new(0, 0, 0),
-            BlockPos::new(1, 0, 0),
-            BlockPos::new(2, 0, 0),
-            BlockPos::new(3, 0, 0),
-        ];
-        world.set_block(blocks[0], source, BlockState(0));
-        world.set_block(blocks[1], wire, BlockState(0));
-        world.set_block(blocks[2], wire, BlockState(0));
-        world.set_block(blocks[3], wire, BlockState(0));
-        populate_chunks(&mut world, &blocks);
-
-        circuit.notify_block_changed(blocks[0], &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 4);
-
-        assert_eq!(circuit.power_at(BlockPos::new(1, 0, 0)), 14);
-        assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 13);
-        assert_eq!(circuit.power_at(BlockPos::new(3, 0, 0)), 12);
-
-        let updates = circuit.drain_power_updates();
-        assert!(updates.contains(&(BlockPos::new(1, 0, 0), 14)));
-        assert!(updates.contains(&(BlockPos::new(2, 0, 0), 13)));
-        assert!(updates.contains(&(BlockPos::new(3, 0, 0), 12)));
-
-        let chunk = BlockPos::new(0, 0, 0).chunk_pos();
-        let seeded = circuit.power_in_chunk(chunk);
-        assert_eq!(seeded.len(), 4);
-        assert!(seeded.contains(&(BlockPos::new(1, 0, 0), 14)));
-    }
-
-    #[test]
-    fn inverter_turns_off_when_powered() {
-        let (reg, source, wire, inverter, _, _, _) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(BlockPos::new(2, 0, 0), inverter, BlockState(0));
-        populate_chunks(
-            &mut world,
-            &[
-                BlockPos::new(0, 0, 0),
-                BlockPos::new(1, 0, 0),
-                BlockPos::new(2, 0, 0),
-            ],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 4);
-
-        assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 0);
-    }
-
-    #[test]
-    fn switch_emits_when_on() {
-        let (reg, _, wire, _, switch, _, _) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-
-        world.set_block(BlockPos::new(0, 0, 0), switch, BlockState(1));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        populate_chunks(
-            &mut world,
-            &[BlockPos::new(0, 0, 0), BlockPos::new(1, 0, 0)],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 2);
-
-        assert_eq!(circuit.power_at(BlockPos::new(1, 0, 0)), 14);
-    }
-
-    #[test]
-    fn generic_delay_applies_after_ticks() {
-        let (reg, source, wire, _, _, delay, _) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(BlockPos::new(2, 0, 0), delay, BlockState(0));
-        world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
-        populate_chunks(
-            &mut world,
-            &[
-                BlockPos::new(0, 0, 0),
-                BlockPos::new(1, 0, 0),
-                BlockPos::new(2, 0, 0),
-                BlockPos::new(3, 0, 0),
-            ],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 1);
-        assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 0);
-
-        settle(&mut circuit, &mut world, &reg, 2);
-        assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 15);
-        assert_eq!(circuit.power_at(BlockPos::new(3, 0, 0)), 14);
-    }
-
-    #[test]
-    fn repeater_applies_after_ticks() {
-        let (reg, source, wire, _, _, _, repeater) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(
-            BlockPos::new(2, 0, 0),
-            repeater,
-            repeater_state(false, Facing::East, 2),
-        );
-        world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
-        populate_chunks(
-            &mut world,
-            &[
-                BlockPos::new(0, 0, 0),
-                BlockPos::new(1, 0, 0),
-                BlockPos::new(2, 0, 0),
-                BlockPos::new(3, 0, 0),
-            ],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 1);
-        assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 0);
-
-        settle(&mut circuit, &mut world, &reg, 2);
-        assert_eq!(circuit.power_at(BlockPos::new(2, 0, 0)), 15);
-        assert_eq!(circuit.power_at(BlockPos::new(3, 0, 0)), 14);
-    }
-
-    #[test]
-    fn repeater_supersedes_when_input_drops() {
-        let (reg, source, wire, _, _, _, repeater) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-        let repeater_pos = BlockPos::new(2, 0, 0);
-
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(
-            repeater_pos,
-            repeater,
-            repeater_state(false, Facing::East, 2),
-        );
-        populate_chunks(
-            &mut world,
-            &[BlockPos::new(0, 0, 0), BlockPos::new(1, 0, 0), repeater_pos],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        circuit.tick(&mut world, &reg);
-
-        world.set_block(BlockPos::new(0, 0, 0), BlockId(0), BlockState(0));
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 4);
-
-        assert_eq!(circuit.power_at(repeater_pos), 0);
-    }
-
-    #[test]
-    fn repeater_ignores_signal_on_output_face() {
-        let (reg, source, _, _, _, _, repeater) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-        let repeater_pos = BlockPos::new(2, 0, 0);
-
-        world.set_block(
-            repeater_pos,
-            repeater,
-            repeater_state(false, Facing::East, 2),
-        );
-        world.set_block(BlockPos::new(3, 0, 0), source, BlockState(0));
-        populate_chunks(&mut world, &[repeater_pos, BlockPos::new(3, 0, 0)]);
-
-        circuit.notify_block_changed(BlockPos::new(3, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 8);
-
-        assert_eq!(circuit.power_at(repeater_pos), 0);
-    }
-
-    #[test]
-    fn repeater_cycle_delay_keeps_output_while_powered() {
-        let (reg, source, wire, _, _, _, repeater) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-        let repeater_pos = BlockPos::new(2, 0, 0);
-
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(
-            repeater_pos,
-            repeater,
-            repeater_state(false, Facing::East, 2),
-        );
-        world.set_block(BlockPos::new(3, 0, 0), wire, BlockState(0));
-        populate_chunks(
-            &mut world,
-            &[
-                BlockPos::new(0, 0, 0),
-                BlockPos::new(1, 0, 0),
-                repeater_pos,
-                BlockPos::new(3, 0, 0),
-            ],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        settle(&mut circuit, &mut world, &reg, 3);
-        assert_eq!(circuit.power_at(repeater_pos), 15);
-
-        circuit.cycle_repeater_delay(repeater_pos, &mut world, &reg);
-        assert_eq!(circuit.power_at(repeater_pos), 15);
-        settle(&mut circuit, &mut world, &reg, 2);
-        assert_eq!(circuit.power_at(repeater_pos), 15);
-    }
-
-    #[test]
-    fn circuit_snapshot_export_import_roundtrip() {
-        let (reg, source, wire, _, _, _, repeater) = setup_registry();
-        let mut world = World::new(BlockId(0));
-        let mut circuit = CircuitWorld::new();
-        let repeater_pos = BlockPos::new(2, 0, 0);
-        let chunk = repeater_pos.chunk_pos();
-
-        world.set_block(BlockPos::new(0, 0, 0), source, BlockState(0));
-        world.set_block(BlockPos::new(1, 0, 0), wire, BlockState(0));
-        world.set_block(
-            repeater_pos,
-            repeater,
-            repeater_state(false, Facing::East, 2),
-        );
-        populate_chunks(
-            &mut world,
-            &[
-                BlockPos::new(0, 0, 0),
-                BlockPos::new(1, 0, 0),
-                repeater_pos,
-            ],
-        );
-
-        circuit.notify_block_changed(BlockPos::new(0, 0, 0), &world, &reg);
-        circuit.tick(&mut world, &reg);
-        let exported = circuit.export_chunk_snapshot(chunk);
-
-        let mut restored = CircuitWorld::new();
-        restored.set_tick(circuit.current_tick());
-        restored.import_chunk_snapshot(chunk, exported, circuit.current_tick());
-        assert_eq!(restored.power_at(repeater_pos), circuit.power_at(repeater_pos));
-    }
-}

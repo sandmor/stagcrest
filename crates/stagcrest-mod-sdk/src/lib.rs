@@ -43,7 +43,6 @@ pub enum CircuitKindRequest {
     Inverter { output: u8 },
     Wire { falloff: u8 },
     Switch { output: u8 },
-    Delay { output: u8, delay: u8 },
     Repeater { output: u8 },
 }
 

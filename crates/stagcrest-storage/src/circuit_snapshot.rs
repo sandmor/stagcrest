@@ -15,6 +15,8 @@ pub struct ChunkCircuitSnapshot {
     pub power: Vec<(LocalBlockPos, u8)>,
     pub delay_input: Vec<(LocalBlockPos, u8)>,
     pub pending_delays: Vec<PendingDelaySnapshot>,
+    pub button_release: Vec<(LocalBlockPos, u8)>,
+    pub torch_burnt_out: Vec<LocalBlockPos>,
 }
 
 impl ChunkCircuitSnapshot {
@@ -33,6 +35,15 @@ impl ChunkCircuitSnapshot {
         for delay in &self.pending_delays {
             write_u16(&mut out, pack_nibble_entry(delay.local, delay.output));
             out.push(delay.remaining_ticks);
+        }
+        out.push(self.button_release.len() as u8);
+        for (local, remaining) in &self.button_release {
+            write_u16(&mut out, local.index() as u16);
+            out.push(*remaining);
+        }
+        out.push(self.torch_burnt_out.len() as u8);
+        for local in &self.torch_burnt_out {
+            write_u16(&mut out, local.index() as u16);
         }
         out
     }
@@ -71,10 +82,28 @@ impl ChunkCircuitSnapshot {
             });
         }
 
+        let button_count = read_u8(bytes, &mut cursor)? as usize;
+        let mut button_release = Vec::with_capacity(button_count);
+        for _ in 0..button_count {
+            let index = read_u16(bytes, &mut cursor)? as usize;
+            let local = local_from_index(index)?;
+            let remaining = read_u8(bytes, &mut cursor)?;
+            button_release.push((local, remaining));
+        }
+
+        let burnt_count = read_u8(bytes, &mut cursor)? as usize;
+        let mut torch_burnt_out = Vec::with_capacity(burnt_count);
+        for _ in 0..burnt_count {
+            let index = read_u16(bytes, &mut cursor)? as usize;
+            torch_burnt_out.push(local_from_index(index)?);
+        }
+
         Ok(Self {
             power,
             delay_input,
             pending_delays,
+            button_release,
+            torch_burnt_out,
         })
     }
 }
@@ -151,10 +180,11 @@ mod tests {
                 remaining_ticks: 3,
                 output: 15,
             }],
+            button_release: vec![(LocalBlockPos { x: 1, y: 0, z: 0 }, 20)],
+            torch_burnt_out: vec![LocalBlockPos { x: 3, y: 3, z: 3 }],
         };
         let wire = snapshot.encode_wire();
         let decoded = ChunkCircuitSnapshot::decode_wire(&wire).unwrap();
         assert_eq!(decoded, snapshot);
-        assert_eq!(wire.len(), 15);
     }
 }

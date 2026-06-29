@@ -1,24 +1,24 @@
-//! Event-driven spatial graph interpreter for redstone circuits.
+//! Event-driven circuit simulator on the world grid.
 //!
-//! The world grid is the graph: each block with a [`stagcrest_protocol::CircuitNodeDef`] is a
-//! node, and edges are the six face-adjacent neighbors. [`CircuitWorld`] runs at a fixed tick
-//! rate and propagates power through the graph in two ways:
+//! Each block with a [`stagcrest_protocol::CircuitNodeDef`] is a node. Power propagates via:
+//! - **Node signals** — directed links between circuit cells (wire lines, repeater faces).
+//! - **Block power** — strong/weak levels on opaque block cells (feeds attachment-based inverters).
 //!
-//! - **Combinatorial nodes** (source, wire, switch, inverter) publish power immediately when
-//!   evaluated.
-//! - **Sequential nodes** (delay, repeater) arm a timer on input edges and publish later.
-//!
-//! Runtime power lives in [`CircuitWorld`] separately from block state; block state carries
-//! orientation, delay setting, and visual powered bits.
+//! Combinatorial nodes (source, wire, switch) publish immediately; sequential nodes
+//! (inverter, repeater) arm tick delays on input changes.
 
+pub mod wire_network;
 mod eval;
 mod event;
 mod init;
+mod power;
 mod registry;
 mod world;
 
-pub use eval::{is_player_toggleable, is_repeater};
+pub use wire_network::{compute_wire_connections, WireConnections, WireLink};
+pub use eval::{is_button_geometry, is_player_toggleable, is_repeater};
 pub use init::init_circuit_blocks;
+pub use power::{block_power_at, signal_into, BlockPower};
 pub use world::{CircuitWorld, MAX_EVALS_PER_TICK};
 
 pub use stagcrest_storage::ChunkCircuitSnapshot;

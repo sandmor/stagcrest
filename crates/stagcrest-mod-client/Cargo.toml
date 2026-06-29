@@ -7,3 +7,4 @@ edition.workspace = true
 stagcrest-protocol.workspace = true
 image.workspace = true
 tracing.workspace = true
+stagcrest-circuit.workspace = true

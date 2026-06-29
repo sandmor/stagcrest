@@ -100,7 +100,7 @@ fn emit_element(
             h: 0,
         });
     let (aw, ah) = registry.atlas_dimensions();
-    // Model faces never use dust power tint; `TintKind::PowerLevel` at power 0
+    // Model faces never use wire power tint; `TintKind::PowerLevel` at power 0
     // still encodes as 3.0 and triggers a red multiply in the shader.
     let tint = if face_tex.tint == TintKind::PowerLevel {
         vertex_tint(face_tex, power)
@@ -284,7 +284,7 @@ fn emit_model_face(
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-/// Y offset for flat (redstone dust) geometry, matching `emit_flat`.
+/// Y offset for flat wire line geometry, matching `emit_flat`.
 pub const FLAT_Y: f32 = 0.07;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

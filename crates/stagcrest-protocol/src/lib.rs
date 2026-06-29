@@ -365,7 +365,7 @@ pub fn facing_delta(facing: Facing) -> (i32, i32, i32) {
     }
 }
 
-/// Whether dust at `(toward_dx, toward_dz)` relative to a repeater may connect.
+/// Whether a wire network neighbor at `(toward_dx, toward_dz)` may link to a repeater.
 pub fn repeater_connects_toward(facing: Facing, toward_dx: i32, toward_dz: i32) -> bool {
     let (fx, _, fz) = facing_delta(facing);
     (toward_dx == fx && toward_dz == fz) || (toward_dx == -fx && toward_dz == -fz)
@@ -521,10 +521,6 @@ pub enum CircuitKind {
     },
     Switch {
         output: u8,
-    },
-    Delay {
-        output: u8,
-        delay: u8,
     },
     /// Directional delay; tick count lives in block state (`repeater_delay_ticks`).
     Repeater {

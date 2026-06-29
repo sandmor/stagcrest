@@ -4030,6 +4030,7 @@ name = "stagcrest-mod-client"
 version = "0.1.0"
 dependencies = [
  "image",
+ "stagcrest-circuit",
  "stagcrest-protocol",
  "tracing",
 ]

@@ -112,7 +112,7 @@ impl std::ops::DerefMut for WorldReplica {
 use stagcrest_mod_client::PowerLookup;
 use stagcrest_protocol::BlockPos;
 
-/// Power levels from server for redstone dust tinting.
+/// Power levels from server for wire line tinting.
 #[derive(Resource, Default)]
 pub struct CircuitPowerOverlay(pub std::collections::HashMap<BlockPos, u8>);
 

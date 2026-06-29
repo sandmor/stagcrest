@@ -16,7 +16,6 @@ pub fn sync_block_state(
     match kind {
         CircuitKind::Wire { .. }
         | CircuitKind::Switch { .. }
-        | CircuitKind::Delay { .. }
         | CircuitKind::Repeater { .. } => {
             let powered = u16::from(new_power > 0);
             let new_bits = (state.0 & !1) | powered;
@@ -43,6 +42,10 @@ pub fn sync_block_state(
 
 pub fn is_torch_geometry(def: &BlockDef) -> bool {
     matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch))
+}
+
+pub fn is_button_geometry(def: Option<&BlockDef>) -> bool {
+    def.is_some_and(|d| matches!(d.geometry, BlockGeometry::Model(ModelId::Button)))
 }
 
 pub fn is_player_toggleable(def: &BlockDef) -> bool {

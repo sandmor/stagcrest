@@ -429,7 +429,6 @@ fn format_circuit_kind(kind: CircuitKind) -> String {
         CircuitKind::Inverter { output } => format!("inverter out {output}"),
         CircuitKind::Wire { falloff } => format!("wire falloff {falloff}"),
         CircuitKind::Switch { output } => format!("switch out {output}"),
-        CircuitKind::Delay { output, delay } => format!("delay out {output} delay {delay}"),
         CircuitKind::Repeater { output } => format!("repeater out {output}"),
     }
 }
