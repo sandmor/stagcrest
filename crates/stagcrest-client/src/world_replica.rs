@@ -3,10 +3,9 @@ use stagcrest_net::{BlockUpdate, ChunkSnapshot, ServerMessage};
 use stagcrest_storage::{decompress_stored, InactiveChunk};
 use stagcrest_world::World;
 
-use crate::chunk_streaming::{
-    drop_chunk_assets, unload_chunk, BiomeGridCache,
-};
-use crate::mesh_scheduler::{MeshScheduler, RemeshUrgency};
+use crate::chunk_streaming::{drop_chunk_assets, unload_chunk, BiomeGridCache};
+use crate::gpu_chunk_scheduler::{GpuChunkScheduler, RemeshUrgency};
+use stagcrest_render::GpuChunkCache;
 
 #[derive(Resource)]
 pub struct WorldReplica {
@@ -21,8 +20,8 @@ impl WorldReplica {
     pub fn apply_server_message(
         &mut self,
         msg: ServerMessage,
-        mesh_scheduler: &mut MeshScheduler,
-        mesh_cache: &mut stagcrest_mesh::MeshCache,
+        gpu_scheduler: &mut GpuChunkScheduler,
+        gpu_cache: &mut GpuChunkCache,
         biome_cache: &mut BiomeGridCache,
         power: &mut CircuitPowerOverlay,
         commands: &mut Commands,
@@ -31,25 +30,18 @@ impl WorldReplica {
             ServerMessage::ChunkSnapshot(snapshot) => {
                 self.apply_chunk_snapshot(
                     snapshot,
-                    mesh_scheduler,
-                    mesh_cache,
+                    gpu_scheduler,
+                    gpu_cache,
                     biome_cache,
                     power,
                     commands,
                 );
             }
             ServerMessage::ChunkUnload(pos) => {
-                unload_chunk(
-                    pos,
-                    self,
-                    mesh_scheduler,
-                    mesh_cache,
-                    power,
-                    commands,
-                );
+                unload_chunk(pos, self, gpu_scheduler, gpu_cache, power, commands);
             }
             ServerMessage::BlockUpdate(update) => {
-                self.apply_block_update(update, mesh_scheduler);
+                self.apply_block_update(update, gpu_scheduler);
             }
             _ => {}
         }
@@ -58,8 +50,8 @@ impl WorldReplica {
     fn apply_chunk_snapshot(
         &mut self,
         snapshot: ChunkSnapshot,
-        mesh_scheduler: &mut MeshScheduler,
-        mesh_cache: &mut stagcrest_mesh::MeshCache,
+        gpu_scheduler: &mut GpuChunkScheduler,
+        gpu_cache: &mut GpuChunkCache,
         biome_cache: &mut BiomeGridCache,
         power: &mut CircuitPowerOverlay,
         commands: &mut Commands,
@@ -75,24 +67,18 @@ impl WorldReplica {
         let biome_from_chunk = inactive.biome_grid;
         let insert_result = self.world.insert_inactive_chunk(snapshot.pos, inactive);
         if let Some(evicted) = insert_result.lru_evicted {
-            drop_chunk_assets(
-                evicted,
-                mesh_scheduler,
-                mesh_cache,
-                power,
-                commands,
-            );
+            drop_chunk_assets(evicted, gpu_scheduler, gpu_cache, power, commands);
         }
         self.world.finalize_generated_chunk(snapshot.pos);
         biome_cache.insert(snapshot.pos, biome_from_chunk);
         if self.world.has_chunk(snapshot.pos) {
-            mesh_scheduler.request(snapshot.pos, RemeshUrgency::Visible, 0);
+            gpu_scheduler.request(snapshot.pos, RemeshUrgency::Visible, 0);
         }
     }
 
-    fn apply_block_update(&mut self, update: BlockUpdate, mesh_scheduler: &mut MeshScheduler) {
+    fn apply_block_update(&mut self, update: BlockUpdate, gpu_scheduler: &mut GpuChunkScheduler) {
         self.world.set_block(update.pos, update.id, update.state);
-        mesh_scheduler.request(update.pos.chunk_pos(), RemeshUrgency::Interactive, 0);
+        gpu_scheduler.request(update.pos.chunk_pos(), RemeshUrgency::Interactive, 0);
     }
 }
 
@@ -125,7 +111,7 @@ impl PowerLookup for CircuitPowerOverlay {
 pub fn apply_power_batch(
     overlay: &mut CircuitPowerOverlay,
     updates: Vec<(BlockPos, u8)>,
-    mesh_scheduler: &mut MeshScheduler,
+    gpu_scheduler: &mut GpuChunkScheduler,
 ) {
     for (pos, power) in updates {
         if power == 0 {
@@ -133,6 +119,6 @@ pub fn apply_power_batch(
         } else {
             overlay.0.insert(pos, power);
         }
-        mesh_scheduler.request(pos.chunk_pos(), RemeshUrgency::Circuit, 0);
+        gpu_scheduler.request(pos.chunk_pos(), RemeshUrgency::Circuit, 0);
     }
 }

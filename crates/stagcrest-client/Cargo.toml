@@ -11,7 +11,7 @@ path = "src/main.rs"
 bevy = { workspace = true, features = ["dynamic_linking"] }
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
-stagcrest-mesh = { workspace = true, features = ["parallel"] }
+stagcrest-mesh.workspace = true
 stagcrest-circuit.workspace = true
 stagcrest-mod-client.workspace = true
 stagcrest-render.workspace = true

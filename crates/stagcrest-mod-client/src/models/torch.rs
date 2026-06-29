@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
     BlockModel, ModelAxis, ModelElement, ModelFace, ModelRenderLayer, ModelRotation, ModelTexture,
-    ModelVariant, TorchAttachment,
+    ModelVariant,
 };
 
 const S: f32 = 1.0 / 16.0;
@@ -111,8 +111,10 @@ fn wall_torch_model(y_rotation: f32) -> BlockModel {
     }
 }
 
-pub fn torch_variant_from_attachment(attachment: TorchAttachment) -> ModelVariant {
-    attachment as u8
+pub fn torch_variant(state: stagcrest_protocol::BlockState) -> ModelVariant {
+    let attachment = stagcrest_protocol::torch_attachment(state) as u8;
+    let lit = stagcrest_protocol::torch_lit(state) as u8;
+    lit * 5 + attachment
 }
 
 /// Build the five torch attachment variants. Variant index follows

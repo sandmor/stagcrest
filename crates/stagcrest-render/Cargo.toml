@@ -9,8 +9,14 @@ stagcrest-protocol.workspace = true
 stagcrest-mesh.workspace = true
 stagcrest-mod-client.workspace = true
 stagcrest-world.workspace = true
+stagcrest-storage.workspace = true
+stagcrest-circuit.workspace = true
 bytemuck.workspace = true
 glam.workspace = true
 
 [features]
 default = []
+
+[[test]]
+name = "gpu_block_meta"
+path = "tests/gpu_block_meta.rs"

@@ -4090,9 +4090,11 @@ dependencies = [
  "bevy",
  "bytemuck",
  "glam",
+ "stagcrest-circuit",
  "stagcrest-mesh",
  "stagcrest-mod-client",
  "stagcrest-protocol",
+ "stagcrest-storage",
  "stagcrest-world",
 ]
 

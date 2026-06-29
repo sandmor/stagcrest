@@ -13,6 +13,7 @@ use crate::net_client::GameNetClient;
 use crate::player::{FlyCamera, SelectedBlock};
 use crate::targeting::BlockTarget;
 use crate::world_replica::WorldReplica;
+use stagcrest_render::{GpuChunkCache, GpuVoxelStats};
 
 const LABEL_WIDTH: usize = 7;
 
@@ -105,6 +106,8 @@ fn update_debug_overlay(
     target: Res<BlockTarget>,
     selected: Res<SelectedBlock>,
     camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
+    gpu_cache: Option<Res<GpuChunkCache>>,
+    gpu_stats: Option<Res<GpuVoxelStats>>,
     mut text: Query<&mut Text, With<DebugOverlayText>>,
     mut fps_smooth: Local<f32>,
 ) {
@@ -141,6 +144,8 @@ fn update_debug_overlay(
         &target,
         selected.0,
         *fps_smooth,
+        gpu_cache.as_deref(),
+        gpu_stats.as_deref(),
     );
 }
 
@@ -156,6 +161,8 @@ fn format_debug_text(
     target: &BlockTarget,
     selected_id: stagcrest_protocol::BlockId,
     fps: f32,
+    gpu_cache: Option<&GpuChunkCache>,
+    gpu_stats: Option<&GpuVoxelStats>,
 ) -> String {
     let pos = transform.translation;
     let block_pos = BlockPos::new(
@@ -222,16 +229,16 @@ fn format_debug_text(
         .and_then(|ctx| ctx.registry.block(selected_id))
         .map(|def| def.namespaced_id.as_str())
         .unwrap_or("-");
-    let chunk_count = world
-        .map(|w| w.loaded_chunk_positions().count())
-        .unwrap_or(0);
+    let gpu_chunks = gpu_cache.map(|c| c.chunk_count()).unwrap_or(0);
+    let total_instances = gpu_stats.map(|s| s.total_instances).unwrap_or(0);
 
     lines.push(format!("{} {selected_name}", pad_label("Selected")));
     lines.push(format!(
-        "{} render {}  chunks {}  fps {:.0}",
+        "{} render {}  gpu {}  inst {}  fps {:.0}",
         pad_label("World"),
         config.render_distance,
-        chunk_count,
+        gpu_chunks,
+        total_instances,
         fps
     ));
 

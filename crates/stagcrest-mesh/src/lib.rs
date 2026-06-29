@@ -1,25 +1,26 @@
 mod block_model;
 mod mesh_snapshot;
+mod model_bake;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_client::{
-    compute_wire_connections, wire_shows_center_junction, wire_power_vertex_tint, face_texture_for,
-    is_wire_line_neighbor, resolve_block_model, resolve_wire_line_textures, sample_colormap_rgb,
+    wire_shows_center_junction, wire_power_vertex_tint, face_texture_for,
+    resolve_block_model, resolve_wire_line_textures, sample_colormap_rgb,
     BlockRegistry, ColormapSet, WireConnections, WireLink, WireLineTextures, ModelRegistry,
-    PowerLookup,
 };
 use stagcrest_protocol::{
-    fluid_flowing, BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, FaceTexture, TextureId,
+    BlockGeometry, BlockId, BlockState, FaceTexture, TextureId,
     TintKind, CHUNK_SIZE,
 };
-use stagcrest_world::ChunkBlock;
-use std::collections::{HashMap, HashSet};
 
 pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
 pub use mesh_snapshot::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
+pub use model_bake::{
+    bake_block_model, bake_cross_plant, bake_unit_quad, bake_wire_quad, BakedMesh, GpuMeshVertex,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -42,47 +43,11 @@ pub struct ChunkMesh {
     pub cutout_indices: Vec<u32>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct MeshCache {
-    meshes: HashMap<ChunkPos, ChunkMesh>,
-    /// Chunks whose CPU meshes changed and need a Bevy mesh upload.
-    dirty: HashSet<ChunkPos>,
-}
-
 #[derive(Clone)]
 pub struct MeshClimateTint<'a> {
     pub colormaps: &'a ColormapSet,
     pub temperature: f32,
     pub downfall: f32,
-}
-
-impl MeshCache {
-    pub fn get(&self, pos: ChunkPos) -> Option<&ChunkMesh> {
-        self.meshes.get(&pos)
-    }
-
-    pub fn commit_mesh(&mut self, pos: ChunkPos, mesh: ChunkMesh) {
-        self.meshes.insert(pos, mesh);
-        self.dirty.insert(pos);
-    }
-
-    pub fn meshes(&self) -> &HashMap<ChunkPos, ChunkMesh> {
-        &self.meshes
-    }
-
-    pub fn mark_all_dirty(&mut self) {
-        self.dirty.extend(self.meshes.keys().copied());
-    }
-
-    pub fn take_dirty(&mut self) -> HashSet<ChunkPos> {
-        std::mem::take(&mut self.dirty)
-    }
-
-    pub fn remove(&mut self, pos: ChunkPos) {
-        self.meshes.remove(&pos);
-        // Mark dirty so the render sync despawns GPU entities for this chunk.
-        self.dirty.insert(pos);
-    }
 }
 
 /// Build an isolated preview mesh for inventory icons.
@@ -181,23 +146,7 @@ fn build_single_block_mesh_internal(
     mesh
 }
 
-fn should_cull_face(
-    block_def: &stagcrest_protocol::BlockDef,
-    neighbor: Option<ChunkBlock>,
-    air: BlockId,
-    registry: &BlockRegistry,
-    normal: Vec3,
-) -> bool {
-    let Some(neighbor) = neighbor else {
-        return false;
-    };
-    if neighbor.id == air {
-        return false;
-    }
-    let neighbor_def = registry.block(neighbor.id);
-    neighbor_culls_face(block_def, neighbor_def, normal)
-}
-
+#[cfg(test)]
 fn neighbor_culls_face(
     block_def: &stagcrest_protocol::BlockDef,
     neighbor_def: Option<&stagcrest_protocol::BlockDef>,
@@ -214,151 +163,6 @@ fn neighbor_culls_face(
 
 /// Per-column grass and foliage tint multipliers for a chunk (indexed by local x, z).
 type ColumnTintCache = [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
-
-fn build_column_tint_cache(climate: &MeshClimateTint<'_>) -> ColumnTintCache {
-    let grass = tint_mul_for_kind(TintKind::Grass, Some(climate));
-    let foliage = tint_mul_for_kind(TintKind::Foliage, Some(climate));
-    let cell = (grass, foliage);
-    [[cell; CHUNK_SIZE as usize]; CHUNK_SIZE as usize]
-}
-
-pub(crate) fn fluid_flow_textures(
-    mut faces: stagcrest_protocol::BlockFaceTextures,
-    flow_tex: TextureId,
-) -> stagcrest_protocol::BlockFaceTextures {
-    let flow = FaceTexture {
-        texture: flow_tex,
-        overlay: None,
-        tint: faces.top.tint,
-        overlay_tint: TintKind::None,
-    };
-    faces.top = flow;
-    faces.bottom = flow;
-    faces.sides = flow;
-    faces
-}
-
-pub fn build_chunk_mesh_snapshot(snapshot: &MeshSnapshot) -> ChunkMesh {
-    mesh_snapshot::mesh_from_snapshot(snapshot)
-}
-
-pub(crate) fn build_chunk_mesh_neighbors(
-    chunk_pos: ChunkPos,
-    air: BlockId,
-    registry: &BlockRegistry,
-    models: &ModelRegistry,
-    power: Option<&dyn PowerLookup>,
-    climate: Option<&MeshClimateTint<'_>>,
-    neighbor_at: impl Fn(i32, i32, i32) -> Option<ChunkBlock>,
-) -> ChunkMesh {
-    let mut mesh = ChunkMesh::default();
-    let base_x = chunk_pos.x * CHUNK_SIZE;
-    let base_y = chunk_pos.y * CHUNK_SIZE;
-    let base_z = chunk_pos.z * CHUNK_SIZE;
-
-    let column_tints = climate.map(build_column_tint_cache);
-
-    for y in 0..CHUNK_SIZE {
-        for z in 0..CHUNK_SIZE {
-            for x in 0..CHUNK_SIZE {
-                let Some(block) = neighbor_at(x, y, z) else {
-                    continue;
-                };
-                if block.id == air {
-                    continue;
-                }
-                let Some(def) = registry.block(block.id) else {
-                    continue;
-                };
-                if !def.solid && !def.opaque && !def.transparent {
-                    continue;
-                }
-
-                let wx = base_x + x;
-                let wy = base_y + y;
-                let wz = base_z + z;
-                let origin = [wx as f32, wy as f32, wz as f32];
-                let block_power = power
-                    .map(|p| p.power_at(BlockPos::new(wx, wy, wz)))
-                    .unwrap_or(0);
-
-                let mut face_textures = registry
-                    .block_face_textures_for_state(block.id, block.state)
-                    .unwrap_or(def.face_textures);
-
-                if def.fluid && fluid_flowing(block.state) {
-                    if let Some(flow_tex) = registry.texture_by_name("stagcrest:water_flow") {
-                        face_textures = fluid_flow_textures(face_textures, flow_tex);
-                    }
-                }
-
-                let wire_connections = if def.namespaced_id == "stagcrest:redstone_dust" {
-                    Some(compute_wire_connections(
-                        |dx, dy, dz| {
-                            let Some(neighbor) = neighbor_at(x + dx, y + dy, z + dz) else {
-                                return false;
-                            };
-                            neighbor.id != air
-                                && is_wire_line_neighbor(
-                                    registry,
-                                    neighbor.id,
-                                    neighbor.state,
-                                    -dx,
-                                    -dz,
-                                )
-                        },
-                        |dx, dy, dz| {
-                            let Some(neighbor) = neighbor_at(x + dx, y + dy, z + dz) else {
-                                return false;
-                            };
-                            if neighbor.id == air {
-                                return false;
-                            }
-                            registry
-                                .block(neighbor.id)
-                                .is_some_and(|n| n.opaque && n.solid)
-                        },
-                    ))
-                } else {
-                    None
-                };
-
-                emit_block_geometry(
-                    &mut mesh,
-                    origin,
-                    def.geometry,
-                    &def.namespaced_id,
-                    &face_textures,
-                    mesh_bucket_for_layer(def.render_layer),
-                    registry,
-                    models,
-                    block_power,
-                    block.state,
-                    x as i32,
-                    z as i32,
-                    climate,
-                    column_tints.as_ref(),
-                    |normal| {
-                        should_cull_face(
-                            def,
-                            neighbor_at(
-                                x + normal.x as i32,
-                                y + normal.y as i32,
-                                z + normal.z as i32,
-                            ),
-                            air,
-                            registry,
-                            normal,
-                        )
-                    },
-                    wire_connections,
-                );
-            }
-        }
-    }
-
-    mesh
-}
 
 fn emit_block_geometry(
     mesh: &mut ChunkMesh,

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use stagcrest_render::{VoxelMaterial, VoxelMaterialPlugin};
+use stagcrest_render::UnderwaterPlugin;
 
 pub mod block_icons;
 pub mod block_outline;
@@ -7,11 +7,11 @@ pub mod chunk_streaming;
 pub mod debug_overlay;
 pub mod environment;
 pub mod game;
+pub mod gpu_chunk_scheduler;
 pub mod inventory;
 pub mod loading;
 pub mod logging;
 pub mod menu;
-pub mod mesh_scheduler;
 pub mod net_client;
 pub mod pause;
 pub mod player;
@@ -42,10 +42,8 @@ pub fn run_app(launch: LaunchConfig) {
         .insert_resource(launch.clone())
         .insert_resource(GameNetClient::from_launch(&launch))
         .init_state::<AppState>()
-        .add_plugins(VoxelMaterialPlugin)
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
-        .add_plugins(stagcrest_render::UnderwaterPlugin)
-        .add_plugins(MaterialPlugin::<VoxelMaterial>::default())
+        .add_plugins(UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
         .add_plugins((
             menu::MenuPlugin,

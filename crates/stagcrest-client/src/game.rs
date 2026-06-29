@@ -2,9 +2,9 @@ use crate::chunk_streaming::{
     on_chunk_unloaded_remove_biome, BiomeGridCache, ChunkUnloaded,
 };
 use crate::environment::{self, PlayerEnvironment};
-use crate::mesh_scheduler::{
-    mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll, mesh_recover_unmeshed,
-    MeshScheduler,
+use crate::gpu_chunk_scheduler::{
+    gpu_chunk_drain_dirty, gpu_chunk_recover, gpu_chunk_upload, init_gpu_voxel_tables,
+    GpuChunkScheduler,
 };
 use crate::net_client::GameNetClient;
 use crate::world_replica::{apply_power_batch, CircuitPowerOverlay, WorldReplica};
@@ -16,8 +16,9 @@ use stagcrest_mod_client::{
 };
 use stagcrest_net::ServerMessage;
 use stagcrest_render::{
-    spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, UnderwaterEffect,
-    VoxelCamera, VoxelRenderPlugin,
+    spawn_block_outline, BlockAtlasResource, GpuChunkCache, GpuVoxelPlugin, GpuVoxelStats,
+    GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage, VoxelCamera,
+    VoxelMaterialSource, VoxelRenderPlugin,
 };
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -61,15 +62,16 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameConfig>()
             .init_resource::<PlayerEnvironment>()
-            .init_resource::<MeshScheduler>()
-            .init_resource::<MeshCacheResource>()
+            .init_resource::<GpuChunkScheduler>()
+            .init_resource::<GpuChunkCache>()
+            .init_resource::<GpuVoxelStats>()
             .init_resource::<VoxelCamera>()
             .init_resource::<targeting::BlockTarget>()
             .init_resource::<CircuitPowerOverlay>()
             .init_resource::<BiomeGridCache>()
             .add_event::<ChunkUnloaded>()
             .add_observer(on_chunk_unloaded_remove_biome)
-            .add_plugins(VoxelRenderPlugin)
+            .add_plugins((VoxelRenderPlugin, GpuVoxelPlugin))
             .add_systems(
                 Update,
                 (
@@ -84,16 +86,14 @@ impl Plugin for GamePlugin {
                     targeting::update_block_target.run_if(in_state(AppState::InGame)),
                     player::block_interaction.run_if(in_state(AppState::InGame)),
                     block_outline::sync_block_outline.run_if(in_state(AppState::InGame)),
-                    mesh_drain_dirty.run_if(in_state(AppState::InGame)),
-                    mesh_dispatch.run_if(in_state(AppState::InGame)),
-                    mesh_poll.run_if(in_state(AppState::InGame)),
-                    mesh_commit_meshes
-                        .before(stagcrest_render::sync_chunk_meshes)
-                        .run_if(in_state(AppState::InGame)),
-                    mesh_recover_unmeshed
-                        .before(mesh_dispatch)
+                    init_gpu_voxel_tables.run_if(in_state(AppState::InGame)),
+                    gpu_chunk_drain_dirty.run_if(in_state(AppState::InGame)),
+                    gpu_chunk_upload.run_if(in_state(AppState::InGame)),
+                    gpu_chunk_recover
+                        .before(gpu_chunk_upload)
                         .run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
+                    update_fluid_anim.run_if(in_state(AppState::InGame)),
                     environment::update_player_environment
                         .after(update_voxel_camera)
                         .run_if(in_state(AppState::InGame)),
@@ -113,8 +113,8 @@ impl Plugin for GamePlugin {
 fn net_poll_system(
     mut net: ResMut<GameNetClient>,
     mut world: ResMut<WorldReplica>,
-    mut mesh_scheduler: ResMut<MeshScheduler>,
-    mut mesh_cache: ResMut<MeshCacheResource>,
+    mut gpu_scheduler: ResMut<GpuChunkScheduler>,
+    mut gpu_cache: ResMut<GpuChunkCache>,
     mut biome_cache: ResMut<BiomeGridCache>,
     mut power_overlay: ResMut<CircuitPowerOverlay>,
     mut commands: Commands,
@@ -122,13 +122,13 @@ fn net_poll_system(
     for msg in net.poll() {
         match msg {
             ServerMessage::CircuitPowerBatch(batch) => {
-                apply_power_batch(&mut power_overlay, batch.updates, &mut mesh_scheduler);
+                apply_power_batch(&mut power_overlay, batch.updates, &mut gpu_scheduler);
             }
             other => {
                 world.apply_server_message(
                     other,
-                    &mut mesh_scheduler,
-                    &mut mesh_cache.0,
+                    &mut gpu_scheduler,
+                    &mut gpu_cache,
                     &mut biome_cache,
                     &mut power_overlay,
                     &mut commands,
@@ -162,7 +162,6 @@ fn send_pose_system(
 fn cleanup_game_session(
     mut commands: Commands,
     mod_ctx: Option<Res<ModContext>>,
-    chunk_entities: Query<Entity, With<stagcrest_render::ChunkEntityMarker>>,
     outline_entities: Query<Entity, With<stagcrest_render::BlockOutlineMarker>>,
     debug_roots: Query<Entity, With<debug_overlay::DebugOverlayRoot>>,
     cameras: Query<Entity, With<player::FlyCamera>>,
@@ -171,7 +170,6 @@ fn cleanup_game_session(
         return;
     }
 
-    stagcrest_render::despawn_chunk_entities(&mut commands, &chunk_entities);
     block_outline::despawn_block_outline(&mut commands, &outline_entities);
     debug_overlay::cleanup_debug_overlay(&mut commands, &debug_roots);
     for cam in &cameras {
@@ -180,13 +178,17 @@ fn cleanup_game_session(
     commands.remove_resource::<ModContext>();
     commands.remove_resource::<WorldReplica>();
     commands.remove_resource::<BlockAtlasResource>();
+    commands.remove_resource::<VoxelAtlasImage>();
+    commands.remove_resource::<VoxelMaterialSource>();
     commands.remove_resource::<crate::block_icons::BlockIconCache>();
-    commands.remove_resource::<MeshScheduler>();
+    commands.remove_resource::<GpuChunkScheduler>();
+    commands.remove_resource::<GpuChunkCache>();
+    commands.remove_resource::<GpuVoxelTables>();
+    commands.remove_resource::<GpuVoxelStats>();
     commands.remove_resource::<BiomeGridCache>();
     commands.remove_resource::<targeting::BlockTarget>();
     commands.remove_resource::<PlayerEnvironment>();
     commands.remove_resource::<CircuitPowerOverlay>();
-    commands.insert_resource(MeshCacheResource::default());
 }
 
 fn setup_block_outline(
@@ -240,7 +242,15 @@ fn update_voxel_camera(
     };
     let proj = match projection {
         Projection::Perspective(p) => {
-            glam::Mat4::perspective_rh(p.fov, p.aspect_ratio, p.near, p.far)
+            // Bevy clears the shared depth buffer to 0.0 (far) and uses reverse-Z,
+            // so map standard [0,1] depth to reverse-Z [1,0] (near->1, far->0).
+            let reverse_z = glam::Mat4::from_cols(
+                glam::Vec4::new(1.0, 0.0, 0.0, 0.0),
+                glam::Vec4::new(0.0, 1.0, 0.0, 0.0),
+                glam::Vec4::new(0.0, 0.0, -1.0, 0.0),
+                glam::Vec4::new(0.0, 0.0, 1.0, 1.0),
+            );
+            reverse_z * glam::Mat4::perspective_rh(p.fov, p.aspect_ratio, p.near, p.far)
         }
         _ => glam::Mat4::IDENTITY,
     };
@@ -263,6 +273,12 @@ fn update_voxel_camera(
         transform.translation.y,
         transform.translation.z,
     );
+}
+
+fn update_fluid_anim(time: Res<Time>, atlas: Option<ResMut<BlockAtlasResource>>) {
+    if let Some(mut atlas) = atlas {
+        atlas.fluid_anim.w = time.elapsed_secs();
+    }
 }
 
 fn sync_underwater_vision(

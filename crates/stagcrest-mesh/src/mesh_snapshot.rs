@@ -60,7 +60,7 @@ impl MeshSnapshot {
         })
     }
 
-    pub(crate) fn block_at(&self, lx: i32, ly: i32, lz: i32) -> Option<ChunkBlock> {
+    pub fn block_at(&self, lx: i32, ly: i32, lz: i32) -> Option<ChunkBlock> {
         if (0..CHUNK_SIZE).contains(&lx)
             && (0..CHUNK_SIZE).contains(&ly)
             && (0..CHUNK_SIZE).contains(&lz)
@@ -140,34 +140,3 @@ pub fn capture_power_grid(pos: ChunkPos, power: Option<&dyn PowerLookup>) -> [u8
     grid
 }
 
-pub(crate) fn mesh_from_snapshot(snapshot: &MeshSnapshot) -> crate::ChunkMesh {
-    struct SnapshotPower<'a> {
-        grid: &'a [u8; CHUNK_VOLUME],
-        pos: ChunkPos,
-    }
-
-    impl PowerLookup for SnapshotPower<'_> {
-        fn power_at(&self, pos: BlockPos) -> u8 {
-            if pos.chunk_pos() != self.pos {
-                return 0;
-            }
-            self.grid[pos.local().index()]
-        }
-    }
-
-    let power = SnapshotPower {
-        grid: &snapshot.power_grid,
-        pos: snapshot.pos,
-    };
-    let climate = snapshot.climate.as_ref().map(|c| c.as_tint());
-    let neighbor_at = |lx: i32, ly: i32, lz: i32| snapshot.block_at(lx, ly, lz);
-    crate::build_chunk_mesh_neighbors(
-        snapshot.pos,
-        snapshot.air,
-        snapshot.registry.as_ref(),
-        snapshot.models.as_ref(),
-        Some(&power),
-        climate.as_ref(),
-        neighbor_at,
-    )
-}

@@ -15,7 +15,7 @@ pub use wire_visual::{
     resolve_wire_line_textures, wire_power_vertex_tint, wire_shows_center_junction,
     WireConnections, WireLineTextures, WireLink, PowerLookup,
 };
-pub use models::{model_variant_for_block, resolve_block_model, ModelRegistry};
+pub use models::{model_variant_for_block, representative_state, resolve_block_model, ModelRegistry};
 pub use registry::BlockRegistry;
 
 pub mod content;
