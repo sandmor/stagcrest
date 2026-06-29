@@ -10,6 +10,7 @@ pub mod block_meta;
 pub mod bucket;
 pub mod chunk_cache;
 pub mod chunk_data;
+pub mod chunk_feedback;
 pub mod draw_node;
 pub mod extract;
 pub mod extract_chunk;
@@ -23,15 +24,22 @@ pub mod types;
 
 pub use chunk_cache::GpuChunkCache;
 pub use chunk_data::{capture_gpu_chunk_upload, pack_gpu_chunk_upload, pack_halo_from_world};
+pub use chunk_feedback::{GpuChunkRenderFeedback, GpuChunkSyncState};
 pub use gpu_resources::{GpuVoxelStats, GpuVoxelTables};
 pub use pipelines::load_voxel_shaders;
 
 use crate::gpu_voxel::draw_node::{prepare_voxel_draw_binds, VoxelDrawBindCache, VoxelDrawLabel, VoxelDrawNode};
 use crate::gpu_voxel::extract_chunk::{apply_extracted_chunks, stage_gpu_chunk_extract, GpuChunkExtractStaging, PendingChunkExtract};
 use crate::gpu_voxel::pipelines::prepare_render_pipelines;
-use crate::gpu_voxel::prepare::{poll_gpu_voxel_overflow, prepare_gpu_voxel_buffers, sync_gpu_voxel_stats};
-use crate::gpu_voxel::rebuild_node::{prepare_voxel_rebuild, VoxelRebuildFrame, VoxelRebuildLabel, VoxelRebuildNode};
-use crate::plugin::{VoxelAtlasImage, VoxelCamera, VoxelMaterialSource};
+use crate::gpu_voxel::prepare::{
+    poll_gpu_voxel_overflow, prepare_gpu_voxel_buffers, publish_gpu_chunk_feedback,
+    sync_gpu_voxel_stats,
+};
+use crate::gpu_voxel::rebuild_node::{
+    prepare_voxel_rebuild, VoxelRebuildFrame, VoxelRebuildLabel, VoxelRebuildNode,
+    VoxelRebuildPersistent,
+};
+use crate::plugin::{VoxelAtlasImage, VoxelCamera, VoxelMaterialSource, VoxelRenderConfig as VoxelRenderConfigResource};
 
 pub struct GpuVoxelPlugin;
 
@@ -40,6 +48,7 @@ impl Plugin for GpuVoxelPlugin {
         load_voxel_shaders(app);
 
         app.init_resource::<GpuChunkCache>()
+            .init_resource::<GpuChunkSyncState>()
             .init_resource::<GpuChunkExtractStaging>()
             .init_resource::<GpuVoxelStats>()
             .add_systems(PostUpdate, stage_gpu_chunk_extract)
@@ -48,6 +57,7 @@ impl Plugin for GpuVoxelPlugin {
                 ExtractResourcePlugin::<GpuVoxelTables>::default(),
                 ExtractResourcePlugin::<GpuVoxelStats>::default(),
                 ExtractResourcePlugin::<VoxelCamera>::default(),
+                ExtractResourcePlugin::<VoxelRenderConfigResource>::default(),
                 ExtractResourcePlugin::<VoxelAtlasImage>::default(),
                 ExtractResourcePlugin::<VoxelMaterialSource>::default(),
             ));
@@ -59,8 +69,17 @@ impl Plugin for GpuVoxelPlugin {
         render_app
             .init_resource::<VoxelDrawBindCache>()
             .init_resource::<VoxelRebuildFrame>()
+            .init_resource::<VoxelRebuildPersistent>()
             .init_resource::<PendingChunkExtract>()
-            .add_systems(ExtractSchedule, apply_extracted_chunks)
+            .init_resource::<GpuChunkRenderFeedback>()
+            .add_systems(
+                ExtractSchedule,
+                (
+                    apply_extracted_chunks,
+                    publish_gpu_chunk_feedback.after(apply_extracted_chunks),
+                )
+                    .chain(),
+            )
             .add_systems(
                 Render,
                 (

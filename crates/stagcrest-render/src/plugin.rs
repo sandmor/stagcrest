@@ -78,11 +78,28 @@ pub struct VoxelCamera {
     pub position: glam::Vec3,
 }
 
+/// Horizontal / vertical chunk visibility radius for GPU rebuild passes.
+#[derive(Resource, Clone, ExtractResource)]
+pub struct VoxelRenderConfig {
+    pub horizontal: i32,
+    pub vertical: i32,
+}
+
+impl Default for VoxelRenderConfig {
+    fn default() -> Self {
+        Self {
+            horizontal: 8,
+            vertical: 4,
+        }
+    }
+}
+
 pub struct VoxelRenderPlugin;
 
 impl Plugin for VoxelRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<VoxelCamera>()
+            .init_resource::<VoxelRenderConfig>()
             .init_resource::<VoxelMaterialSource>()
             .add_systems(PostUpdate, sync_voxel_material_source);
     }

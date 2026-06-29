@@ -270,6 +270,13 @@ impl BlockRegistry {
             );
         }
         for def in snap.blocks {
+            let mut def = def;
+            crate::block_tints::apply_block_face_tints(
+                &def.namespaced_id,
+                def.fluid,
+                &mut def.face_textures,
+                &registry,
+            );
             registry
                 .by_namespaced
                 .insert(def.namespaced_id.clone(), def.id);

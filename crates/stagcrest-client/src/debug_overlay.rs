@@ -238,7 +238,11 @@ fn format_debug_text(
         .unwrap_or(0.0);
     let overflow_warn = gpu_stats
         .map(|s| {
-            if s.overflow_pending || s.global_overflow_buckets > 0 || s.scratch_overflow_chunks > 0
+            if s.overflow_pending
+                || s.global_overflow_buckets > 0
+                || s.scratch_overflow_chunks > 0
+                || s.upload_failures > 0
+                || s.evictions > 0
             {
                 "  OVERFLOW"
             } else {
@@ -246,6 +250,9 @@ fn format_debug_text(
             }
         })
         .unwrap_or("");
+    let upload_failures = gpu_stats.map(|s| s.upload_failures).unwrap_or(0);
+    let evictions = gpu_stats.map(|s| s.evictions).unwrap_or(0);
+    let scratch_overflow = gpu_stats.map(|s| s.scratch_overflow_instances).unwrap_or(0);
 
     lines.push(format!("{} {selected_name}", pad_label("Selected")));
     lines.push(format!(
@@ -263,6 +270,15 @@ fn format_debug_text(
         chunks_compacted,
         buffer_mb,
     ));
+    if upload_failures > 0 || evictions > 0 || scratch_overflow > 0 {
+        lines.push(format!(
+            "{} fail {}  evict {}  scratch_ov {}",
+            pad_label("GPU err"),
+            upload_failures,
+            evictions,
+            scratch_overflow,
+        ));
+    }
 
     lines.join("\n")
 }

@@ -57,9 +57,12 @@ pub struct GpuVoxelStats {
     pub chunks_rebuilt: usize,
     pub chunks_compacted: usize,
     pub scratch_overflow_chunks: u32,
+    pub scratch_overflow_instances: u32,
     pub global_overflow_buckets: u32,
     pub instance_buffer_bytes: u64,
     pub overflow_pending: bool,
+    pub upload_failures: usize,
+    pub evictions: usize,
 }
 
 /// Render-world GPU buffers for voxel pipeline.

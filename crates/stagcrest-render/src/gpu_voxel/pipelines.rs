@@ -3,7 +3,7 @@
 use bevy::asset::{load_internal_asset, weak_handle, Handle};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    binding_types::{sampler, storage_buffer, storage_buffer_read_only, texture_2d, uniform_buffer},
+    binding_types::{sampler, storage_buffer, storage_buffer_read_only, storage_buffer_read_only_sized, texture_2d, uniform_buffer},
     BindGroupLayout, BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation,
     BlendState, CachedComputePipelineId, CachedRenderPipelineId, ColorTargetState, ColorWrites,
     ComputePipelineDescriptor, Face, FragmentState, FrontFace, MultisampleState, PipelineCache,
@@ -184,23 +184,21 @@ pub fn prepare_render_pipelines(
     existing_draw: Option<Res<VoxelDrawPipeline>>,
 ) {
     if existing_compute.is_none() {
+        let visibility = ShaderStages::COMPUTE;
         let layout = render_device.create_bind_group_layout(
             "voxel_compute_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    storage_buffer_read_only::<GpuBlockMeta>(false),
-                    storage_buffer_read_only::<GpuBlockCell>(false),
-                    storage_buffer_read_only::<u32>(false),
-                    storage_buffer_read_only::<GpuChunkTableEntry>(false),
-                    storage_buffer_read_only::<u32>(false),
-                    storage_buffer::<VoxelInstance>(false),
-                    storage_buffer::<u32>(false),
-                    storage_buffer::<u32>(false),
-                    storage_buffer_read_only::<GpuChunkTintCell>(false),
-                    uniform_buffer::<EmitUniform>(false),
-                ),
-            ),
+            &[
+                storage_buffer_read_only::<GpuBlockMeta>(false).build(0, visibility),
+                storage_buffer_read_only::<GpuBlockCell>(false).build(1, visibility),
+                storage_buffer_read_only_sized(false, None).build(2, visibility),
+                storage_buffer_read_only::<GpuChunkTableEntry>(false).build(3, visibility),
+                storage_buffer_read_only::<u32>(false).build(4, visibility),
+                storage_buffer::<VoxelInstance>(false).build(5, visibility),
+                storage_buffer::<u32>(false).build(6, visibility),
+                storage_buffer::<u32>(false).build(7, visibility),
+                storage_buffer_read_only::<GpuChunkTintCell>(false).build(8, visibility),
+                uniform_buffer::<EmitUniform>(false).build(9, visibility),
+            ],
         );
         let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some("voxel_compute".into()),

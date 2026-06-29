@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
 use stagcrest_protocol::ChunkPos;
+use std::collections::{HashMap, HashSet};
 
 use crate::gpu_voxel::types::GpuChunkUpload;
 
@@ -16,6 +16,8 @@ pub struct GpuChunkExtractBatch {
 #[derive(Resource, Default)]
 pub struct GpuChunkCache {
     loaded: HashSet<ChunkPos>,
+    /// Chunks confirmed present in the render-world chunk store.
+    render_synced: HashSet<ChunkPos>,
     versions: HashMap<ChunkPos, u64>,
     extract: GpuChunkExtractBatch,
 }
@@ -24,6 +26,7 @@ impl GpuChunkCache {
     pub fn commit(&mut self, upload: GpuChunkUpload) {
         let pos = upload.pos;
         self.loaded.insert(pos);
+        self.render_synced.remove(&pos);
         let version = self.versions.entry(pos).or_insert(0);
         *version += 1;
         self.extract.rebuild_dirty.insert(pos);
@@ -32,6 +35,7 @@ impl GpuChunkCache {
 
     pub fn remove(&mut self, pos: ChunkPos) {
         self.loaded.remove(&pos);
+        self.render_synced.remove(&pos);
         self.versions.remove(&pos);
         self.extract.removals.push(pos);
         self.extract.rebuild_dirty.remove(&pos);
@@ -45,10 +49,28 @@ impl GpuChunkCache {
         self.versions.get(&pos).copied()
     }
 
-    pub fn mark_dirty(&mut self, pos: ChunkPos) {
-        if self.loaded.contains(&pos) {
-            self.extract.rebuild_dirty.insert(pos);
+    pub fn is_render_synced(&self, pos: ChunkPos) -> bool {
+        self.render_synced.contains(&pos)
+    }
+
+    pub fn invalidate_render(&mut self, pos: ChunkPos) {
+        self.render_synced.remove(&pos);
+    }
+
+    pub fn apply_render_feedback(
+        &mut self,
+        rendered: &HashSet<ChunkPos>,
+        failed: &[ChunkPos],
+        evicted: &[ChunkPos],
+    ) {
+        for pos in failed.iter().chain(evicted.iter()) {
+            self.render_synced.remove(pos);
         }
+        self.render_synced = rendered
+            .iter()
+            .copied()
+            .filter(|pos| self.loaded.contains(pos))
+            .collect();
     }
 
     pub fn mark_all_dirty(&mut self) {

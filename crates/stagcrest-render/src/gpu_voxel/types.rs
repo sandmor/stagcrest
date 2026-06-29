@@ -25,8 +25,8 @@ pub fn max_chunk_store_slots() -> u32 {
 
 /// Bytes per chunk in the concatenated blocks SSBO (16 bytes per GpuBlockCell).
 pub const CHUNK_BLOCKS_BYTES: u64 = (HALO_VOLUME * 16) as u64;
-/// Bytes per chunk in the concatenated power SSBO.
-pub const CHUNK_POWER_BYTES: u64 = (CHUNK_BLOCKS * std::mem::size_of::<u32>()) as u64;
+/// Bytes per chunk in the concatenated power SSBO (one byte per block).
+pub const CHUNK_POWER_BYTES: u64 = CHUNK_BLOCKS as u64;
 /// Bytes per chunk in the concatenated biome tint SSBO.
 pub const CHUNK_TINT_CELLS_BYTES: u64 =
     (BIOME_GRID_CELLS * std::mem::size_of::<GpuChunkTintCell>()) as u64;

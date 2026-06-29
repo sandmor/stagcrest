@@ -5,6 +5,7 @@ use stagcrest_protocol::{ChunkPos, CHUNK_SIZE};
 use std::collections::{HashMap, HashSet};
 
 use crate::gpu_voxel::chunk_cache::GpuChunkExtractBatch;
+use crate::gpu_voxel::chunk_feedback::GpuChunkRenderFeedback;
 use crate::gpu_voxel::types::{
     GpuChunkTableEntry, GpuChunkUpload, CHUNK_BLOCKS, CHUNK_POWER_BYTES,
     CHUNK_SCRATCH_CAPACITY, CHUNK_TABLE_VALID, CHUNK_TINT_CELLS_BYTES, HALO_VOLUME,
@@ -33,13 +34,18 @@ pub struct RenderChunkStore {
     pub free_slots: Vec<u32>,
     pub chunk_capacity: u32,
     pub bucket_slot_count: u32,
-    pub rebuild_dirty: HashSet<ChunkPos>,
+    /// Chunks with new block data that need emit after SSBO patch.
+    pub data_dirty: HashSet<ChunkPos>,
     pub visible_slots: Vec<u32>,
     pub needs_full_rebuild: bool,
     /// Uploads waiting for GPU patch this frame.
     pub pending_gpu_uploads: Vec<GpuChunkUpload>,
     /// Scratch counters to zero before emit (evicted/removed slots).
     pub slots_needing_scratch_clear: Vec<u32>,
+    /// Chunk table entries that changed and need partial GPU upload.
+    pub dirty_table_slots: HashSet<u32>,
+    /// Evictions performed during the current extract batch.
+    frame_evicted: Vec<ChunkPos>,
 }
 
 impl RenderChunkStore {
@@ -112,28 +118,43 @@ impl RenderChunkStore {
             free_slots,
             chunk_capacity,
             bucket_slot_count,
-            rebuild_dirty: HashSet::new(),
+            data_dirty: HashSet::new(),
             visible_slots: Vec::new(),
             needs_full_rebuild: false,
             pending_gpu_uploads: Vec::new(),
             slots_needing_scratch_clear: Vec::new(),
+            dirty_table_slots: HashSet::new(),
+            frame_evicted: Vec::new(),
         }
     }
 
-    pub fn apply_extract_batch(&mut self, batch: &GpuChunkExtractBatch) {
+    pub fn apply_extract_batch(
+        &mut self,
+        batch: &GpuChunkExtractBatch,
+        feedback: &mut GpuChunkRenderFeedback,
+    ) {
+        self.frame_evicted.clear();
         for pos in &batch.removals {
             self.remove_chunk(*pos);
         }
         for upload in &batch.uploads {
             if self.upsert_chunk(upload) {
                 self.pending_gpu_uploads.push(upload.clone());
+            } else {
+                tracing::warn!(
+                    chunk = ?upload.pos,
+                    "render chunk store full; upload dropped"
+                );
+                feedback.failed_uploads.push(upload.pos);
             }
         }
-        self.rebuild_dirty.extend(batch.rebuild_dirty.iter().copied());
+        feedback.evicted.extend(self.frame_evicted.drain(..));
+        feedback.rendered = self.pos_to_slot.keys().copied().collect();
     }
 
     pub fn mark_all_dirty(&mut self) {
-        self.rebuild_dirty.extend(self.pos_to_slot.keys().copied());
+        self.data_dirty.extend(self.pos_to_slot.keys().copied());
+        self.dirty_table_slots.extend(self.pos_to_slot.values().copied());
         self.needs_full_rebuild = true;
     }
 
@@ -146,7 +167,8 @@ impl RenderChunkStore {
         if let Some(slot_meta) = self.slots[slot as usize].as_mut() {
             slot_meta.pos = upload.pos;
         }
-        self.rebuild_dirty.insert(upload.pos);
+        self.data_dirty.insert(upload.pos);
+        self.dirty_table_slots.insert(slot);
         true
     }
 
@@ -157,9 +179,10 @@ impl RenderChunkStore {
         self.chunk_table[slot as usize] = GpuChunkTableEntry::default();
         self.slots[slot as usize] = None;
         self.free_slots.push(slot);
-        self.rebuild_dirty.remove(&pos);
+        self.data_dirty.remove(&pos);
         self.visible_slots.retain(|&s| s != slot);
         self.slots_needing_scratch_clear.push(slot);
+        self.dirty_table_slots.insert(slot);
     }
 
     fn alloc_or_get_slot(&mut self, pos: ChunkPos) -> Option<u32> {
@@ -188,8 +211,10 @@ impl RenderChunkStore {
         let slot = self.pos_to_slot.remove(&evict_pos)?;
         self.slots[slot as usize] = None;
         self.chunk_table[slot as usize] = GpuChunkTableEntry::default();
-        self.rebuild_dirty.remove(&evict_pos);
+        self.data_dirty.remove(&evict_pos);
         self.slots_needing_scratch_clear.push(slot);
+        self.dirty_table_slots.insert(slot);
+        self.frame_evicted.push(evict_pos);
         self.pos_to_slot.insert(pos, slot);
         self.slots[slot as usize] = Some(ChunkSlot {
             pos,
@@ -198,15 +223,16 @@ impl RenderChunkStore {
         Some(slot)
     }
 
-    #[allow(dead_code)]
-    fn alloc_slot(&mut self, pos: ChunkPos) -> Option<u32> {
-        self.alloc_or_get_slot(pos)
-    }
-
     pub fn table_entry(&self, pos: ChunkPos) -> Option<&GpuChunkTableEntry> {
         self.pos_to_slot
             .get(&pos)
             .map(|&slot| &self.chunk_table[slot as usize])
+    }
+
+    pub fn pos_for_slot(&self, slot: u32) -> Option<ChunkPos> {
+        self.slots
+            .get(slot as usize)
+            .and_then(|entry| entry.as_ref().map(|meta| meta.pos))
     }
 
     pub fn update_visibility(&mut self, camera_chunk: ChunkPos, h: i32, v: i32) {
@@ -221,16 +247,46 @@ impl RenderChunkStore {
         }
     }
 
-    pub fn take_rebuild_slots(&mut self) -> Vec<u32> {
+    pub fn take_data_dirty_slots(&mut self) -> Vec<u32> {
         let mut slots: Vec<u32> = self
-            .rebuild_dirty
+            .data_dirty
             .iter()
             .filter_map(|pos| self.pos_to_slot.get(pos).copied())
             .collect();
-        self.rebuild_dirty.clear();
+        self.data_dirty.clear();
         slots.sort_unstable();
         slots.dedup();
         slots
+    }
+
+    pub fn upload_dirty_chunk_table(
+        &self,
+        render_queue: &bevy::render::renderer::RenderQueue,
+        chunk_table_buffer: &Buffer,
+        full: bool,
+    ) {
+        let entry_size = std::mem::size_of::<GpuChunkTableEntry>() as u64;
+        if full {
+            render_queue.write_buffer(
+                chunk_table_buffer,
+                0,
+                bytemuck::cast_slice(&self.chunk_table),
+            );
+            return;
+        }
+        for &slot in &self.dirty_table_slots {
+            let offset = slot as u64 * entry_size;
+            let entry = self.chunk_table[slot as usize];
+            render_queue.write_buffer(
+                chunk_table_buffer,
+                offset,
+                bytemuck::bytes_of(&entry),
+            );
+        }
+    }
+
+    pub fn clear_dirty_table_slots(&mut self) {
+        self.dirty_table_slots.clear();
     }
 }
 

@@ -24,6 +24,8 @@ pub struct DrawBucket {
 pub struct DrawBucketRegistry {
     pub buckets: Vec<DrawBucket>,
     pub model_bucket_base: [u32; 8],
+    /// Index into `buckets` by bucket id, for O(1) lookup.
+    pub bucket_index_by_id: Vec<Option<usize>>,
 }
 
 impl DrawBucketRegistry {
@@ -78,9 +80,18 @@ impl DrawBucketRegistry {
             next_mesh += *count as u32;
         }
 
+        let max_id = buckets.iter().map(|b| b.id).max().unwrap_or(0);
+        let mut bucket_index_by_id = vec![None; max_id as usize + 1];
+        for (idx, bucket) in buckets.iter().enumerate() {
+            if (bucket.id as usize) < bucket_index_by_id.len() {
+                bucket_index_by_id[bucket.id as usize] = Some(idx);
+            }
+        }
+
         Self {
             buckets,
             model_bucket_base,
+            bucket_index_by_id,
         }
     }
 

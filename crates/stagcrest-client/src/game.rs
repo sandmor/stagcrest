@@ -16,9 +16,9 @@ use stagcrest_mod_client::{
 };
 use stagcrest_net::ServerMessage;
 use stagcrest_render::{
-    spawn_block_outline, BlockAtlasResource, GpuChunkCache, GpuVoxelPlugin, GpuVoxelStats,
-    GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage, VoxelCamera,
-    VoxelMaterialSource, VoxelRenderPlugin,
+    spawn_block_outline, BlockAtlasResource, GpuChunkCache, GpuChunkSyncState, GpuVoxelPlugin,
+    GpuVoxelStats, GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage, VoxelCamera,
+    VoxelMaterialSource, VoxelRenderConfig, VoxelRenderPlugin,
 };
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -64,8 +64,10 @@ impl Plugin for GamePlugin {
             .init_resource::<PlayerEnvironment>()
             .init_resource::<GpuChunkScheduler>()
             .init_resource::<GpuChunkCache>()
+            .init_resource::<GpuChunkSyncState>()
             .init_resource::<GpuVoxelStats>()
             .init_resource::<VoxelCamera>()
+            .init_resource::<VoxelRenderConfig>()
             .init_resource::<targeting::BlockTarget>()
             .init_resource::<CircuitPowerOverlay>()
             .init_resource::<BiomeGridCache>()
@@ -87,11 +89,18 @@ impl Plugin for GamePlugin {
                     player::block_interaction.run_if(in_state(AppState::InGame)),
                     block_outline::sync_block_outline.run_if(in_state(AppState::InGame)),
                     init_gpu_voxel_tables.run_if(in_state(AppState::InGame)),
-                    gpu_chunk_drain_dirty.run_if(in_state(AppState::InGame)),
-                    gpu_chunk_upload.run_if(in_state(AppState::InGame)),
+                    gpu_chunk_drain_dirty
+                        .after(net_poll_system)
+                        .run_if(in_state(AppState::InGame)),
+                    gpu_chunk_upload
+                        .after(net_poll_system)
+                        .after(gpu_chunk_drain_dirty)
+                        .run_if(in_state(AppState::InGame)),
                     gpu_chunk_recover
+                        .after(net_poll_system)
                         .before(gpu_chunk_upload)
                         .run_if(in_state(AppState::InGame)),
+                    sync_voxel_render_config.run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
                     update_fluid_anim.run_if(in_state(AppState::InGame)),
                     environment::update_player_environment
@@ -231,6 +240,14 @@ fn setup_game_camera(mut commands: Commands) {
             ..default()
         },
     ));
+}
+
+fn sync_voxel_render_config(
+    config: Res<GameConfig>,
+    mut render_config: ResMut<VoxelRenderConfig>,
+) {
+    render_config.horizontal = config.render_distance;
+    render_config.vertical = config.vertical_render_distance;
 }
 
 fn update_voxel_camera(

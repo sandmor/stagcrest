@@ -234,7 +234,7 @@ pub fn gpu_chunk_recover(
         if !world.is_generated(pos) || !world.has_chunk(pos) {
             continue;
         }
-        if cache.contains(pos) || scheduler.pending.contains_key(&pos) {
+        if cache.is_render_synced(pos) || scheduler.pending.contains_key(&pos) {
             continue;
         }
         scheduler.request(
@@ -273,5 +273,53 @@ pub fn request_face_neighbors(
                 world.clear_dirty(pos);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod recover_tests {
+    use super::*;
+    use stagcrest_protocol::ChunkPos;
+    use stagcrest_render::GpuChunkCache;
+
+    #[test]
+    fn recover_re_requests_when_not_render_synced() {
+        let mut scheduler = GpuChunkScheduler::default();
+        let mut cache = GpuChunkCache::default();
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        cache.commit(stagcrest_render::gpu_voxel::types::GpuChunkUpload {
+            pos,
+            air: stagcrest_protocol::BlockId(0),
+            blocks: [Default::default(); stagcrest_render::gpu_voxel::types::HALO_VOLUME],
+            power: [0; stagcrest_render::gpu_voxel::types::CHUNK_BLOCKS],
+            biome: [0; stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
+            climate: None,
+            tint_cells: [Default::default(); stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
+        });
+        assert!(!cache.is_render_synced(pos));
+
+        if !cache.is_render_synced(pos) && !scheduler.is_pending(pos) {
+            scheduler.request(pos, RemeshUrgency::Visible, 0);
+        }
+        assert!(scheduler.is_pending(pos));
+    }
+
+    #[test]
+    fn recover_skips_render_synced_chunks() {
+        let scheduler = GpuChunkScheduler::default();
+        let mut cache = GpuChunkCache::default();
+        let pos = ChunkPos { x: 1, y: 0, z: 0 };
+        cache.commit(stagcrest_render::gpu_voxel::types::GpuChunkUpload {
+            pos,
+            air: stagcrest_protocol::BlockId(0),
+            blocks: [Default::default(); stagcrest_render::gpu_voxel::types::HALO_VOLUME],
+            power: [0; stagcrest_render::gpu_voxel::types::CHUNK_BLOCKS],
+            biome: [0; stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
+            climate: None,
+            tint_cells: [Default::default(); stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
+        });
+        cache.apply_render_feedback(&std::iter::once(pos).collect(), &[], &[]);
+        assert!(cache.is_render_synced(pos));
+        assert!(!scheduler.is_pending(pos));
     }
 }

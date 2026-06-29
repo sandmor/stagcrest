@@ -73,10 +73,12 @@ pub fn prepare_voxel_draw_binds(
     let (Some(state), Some(tables), Some(camera), Some(atlas_image), Some(draw_pipeline)) =
         (state, tables, camera, atlas_image, draw_pipeline)
     else {
+        tracing::debug!("voxel draw prep skipped: missing required resources");
         bind_cache.prepared_draws.clear();
         return;
     };
     let Some(gpu_image) = gpu_images.get(&atlas_image.0) else {
+        tracing::debug!("voxel draw prep skipped: atlas GPU image not ready");
         bind_cache.prepared_draws.clear();
         return;
     };
@@ -254,9 +256,10 @@ fn collect_layer_draws(
         .iter()
         .enumerate()
     {
-        let Some(bucket) = tables.buckets.buckets.iter().find(|b| b.id == *bucket_id) else {
+        let Some(bucket_idx) = tables.buckets.bucket_index_by_id.get(*bucket_id as usize).copied().flatten() else {
             continue;
         };
+        let bucket = &tables.buckets.buckets[bucket_idx];
         if bucket.index_count == 0 {
             continue;
         }

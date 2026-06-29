@@ -80,12 +80,11 @@ impl WorldReplica {
         &mut self,
         update: BlockUpdate,
         gpu_scheduler: &mut GpuChunkScheduler,
-        gpu_cache: &mut GpuChunkCache,
+        _gpu_cache: &mut GpuChunkCache,
     ) {
         self.world.set_block(update.pos, update.id, update.state);
         let chunk = update.pos.chunk_pos();
         gpu_scheduler.request(chunk, RemeshUrgency::Interactive, 0);
-        gpu_cache.mark_dirty(chunk);
         request_face_neighbors(
             gpu_scheduler,
             &mut self.world,

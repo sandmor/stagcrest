@@ -121,12 +121,19 @@ fn meta_for(id: u32) -> GpuBlockMeta {
     return block_meta[id];
 }
 
+fn power_byte_at(byte_offset: u32) -> u32 {
+    let word_index = byte_offset / 4u;
+    let byte_in_word = byte_offset % 4u;
+    let word = chunk_power[word_index];
+    return (word >> (byte_in_word * 8u)) & 0xffu;
+}
+
 fn power_at(lx: i32, ly: i32, lz: i32) -> u32 {
     if lx < 0 || ly < 0 || lz < 0 || lx >= CHUNK_SIZE || ly >= CHUNK_SIZE || lz >= CHUNK_SIZE {
         return 0u;
     }
     let idx = u32(lx + lz * CHUNK_SIZE + ly * CHUNK_SIZE * CHUNK_SIZE);
-    return chunk_power[chunk_entry.power_offset + idx] & 0xFFu;
+    return power_byte_at(chunk_entry.power_offset + idx);
 }
 
 fn encode_power_tint(power: u32) -> f32 {
@@ -176,11 +183,13 @@ fn push_instance(bucket_id: u32, inst: VoxelInstance) {
     }
 }
 
+// Matches Rust `pack_tint_kinds(top, bottom, sides)`: low byte = top, next = bottom, high = sides.
+// Cube emit faces: 0 = bottom (-Y), 1 = top (+Y), 2..5 = sides.
 fn unpack_tint_kind(packed: u32, face: u32) -> u32 {
-    if face == 0u {
+    if face == 1u {
         return packed & 0xFFu;
     }
-    if face == 1u {
+    if face == 0u {
         return (packed >> 8u) & 0xFFu;
     }
     return (packed >> 16u) & 0xFFu;

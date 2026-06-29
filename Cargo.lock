@@ -4098,6 +4098,7 @@ dependencies = [
  "stagcrest-protocol",
  "stagcrest-storage",
  "stagcrest-world",
+ "tracing",
 ]
 
 [[package]]
