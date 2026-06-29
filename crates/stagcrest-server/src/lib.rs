@@ -371,6 +371,7 @@ pub async fn run_standalone(
                     server.tick(0.016);
                 }
                 if disconnected {
+                    server.pipeline.reset_client_delivery();
                     session = None;
                     server.handshake_complete = false;
                     server.handshake_pending = false;

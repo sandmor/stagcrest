@@ -18,6 +18,7 @@ pub fn handle_client_hello(server: &mut GameServer, hello: ClientHello) -> Resul
 }
 
 pub fn send_handshake(server: &mut GameServer) {
+    server.pipeline.reset_client_delivery();
     let world_name = server.config.world_name.clone();
     let world_seed = server.config.world_seed;
     server.queue_priority(GameMessage::Server(ServerMessage::Hello(ServerHello {

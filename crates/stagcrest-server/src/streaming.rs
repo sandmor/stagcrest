@@ -33,6 +33,11 @@ pub struct StreamingPipeline {
 }
 
 impl StreamingPipeline {
+    /// Forget which chunks were sent to the previous client session.
+    pub fn reset_client_delivery(&mut self) {
+        self.sent_to_client.clear();
+    }
+
     pub fn tick(
         &mut self,
         world: &mut World,
