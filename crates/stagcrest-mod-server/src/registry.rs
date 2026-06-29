@@ -1,6 +1,7 @@
 use stagcrest_protocol::{
-    observer_powered, repeater_powered, torch_lit, AtlasRect, BlockDef, BlockFaceTextures, BlockId,
-    BlockState, BlockTextures, FaceTexture, TextureAnimation, TextureDef, TextureId, TintKind,
+    observer_powered, piston_extended, piston_head_sticky, repeater_powered, torch_lit, AtlasRect,
+    BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures, FaceTexture, TextureAnimation,
+    TextureDef, TextureId, TintKind,
 };
 use std::collections::HashMap;
 
@@ -193,6 +194,22 @@ impl BlockRegistry {
                 output_lit,
                 "stagcrest:observer_side",
                 "stagcrest:observer_front",
+            );
+        }
+        if (def.namespaced_id == "stagcrest:piston" || def.namespaced_id == "stagcrest:sticky_piston")
+            && piston_extended(state)
+        {
+            return self.resolve_face_textures(
+                "stagcrest:piston_inner",
+                "stagcrest:piston_bottom",
+                "stagcrest:piston_side",
+            );
+        }
+        if def.namespaced_id == "stagcrest:piston_head" && piston_head_sticky(state) {
+            return self.resolve_face_textures(
+                "stagcrest:piston_top_sticky",
+                "stagcrest:piston_bottom",
+                "stagcrest:piston_side",
             );
         }
         if state.0 == 0 {

@@ -12,6 +12,7 @@ use crate::eval::{
     dispatch, is_button_geometry, is_torch_geometry, sync_block_state, BURNOUT_TOGGLE_LIMIT,
     BURNOUT_WINDOW_TICKS, EvalContext, EvalResult, OBSERVER_PULSE_TICKS,
 };
+use crate::piston::{try_extend, try_retract};
 use crate::event::{CircuitEvent, EventQueue};
 
 pub const MAX_EVALS_PER_TICK: usize = 4096;
@@ -21,6 +22,18 @@ pub const BUTTON_HOLD_TICKS: u64 = 30;
 struct TorchFlicker {
     count: u8,
     window_start: u64,
+}
+
+/// Position-keyed circuit state captured when a piston moves a block, so it can
+/// travel with the block to its destination cell.
+#[derive(Default)]
+pub(crate) struct MovedNodeState {
+    power: Option<u8>,
+    delay_input: Option<u8>,
+    pending_delay: Option<crate::event::ScheduledEval>,
+    button_release: Option<u64>,
+    torch_burnt_out: bool,
+    torch_flicker: Option<TorchFlicker>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -199,6 +212,79 @@ impl CircuitWorld {
         self.mark_chunk_dirty(pos);
     }
 
+    pub fn has_pending_delay(&self, pos: BlockPos) -> bool {
+        self.queue.has_pending_delay(pos)
+    }
+
+    pub(crate) fn record_block_move(
+        &mut self,
+        world: &mut World,
+        registry: &BlockRegistry,
+        pos: BlockPos,
+        id: stagcrest_protocol::BlockId,
+        state: BlockState,
+    ) {
+        self.visual_updates.push((id, pos, state));
+        self.mark_chunk_dirty(pos);
+        self.notify_block_changed(pos, world, registry);
+    }
+
+    /// Remove all position-keyed circuit state from `pos` (used when a piston is
+    /// about to move the block at `pos` to another cell). Returns the captured
+    /// state so it can be re-applied at the destination via [`apply_moved_node_state`].
+    pub(crate) fn take_moved_node_state(&mut self, pos: BlockPos) -> MovedNodeState {
+        MovedNodeState {
+            power: self.power.remove(&pos),
+            delay_input: self.delay_input.remove(&pos),
+            pending_delay: self.queue.take_delay(pos),
+            button_release: self.pending_button_release.remove(&pos),
+            torch_burnt_out: self.torch_burnt_out.remove(&pos),
+            torch_flicker: self.torch_flicker.remove(&pos),
+        }
+    }
+
+    /// Re-apply circuit state captured by [`take_moved_node_state`] at the block's
+    /// new position. This keeps a moved redstone component's published power and
+    /// in-flight pulse timer alive at its destination (Minecraft carries a moving
+    /// component's signal/scheduled tick with it).
+    pub(crate) fn apply_moved_node_state(
+        &mut self,
+        pos: BlockPos,
+        moved: MovedNodeState,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        let had_power = moved.power.is_some();
+        if let Some(p) = moved.power {
+            if p == 0 {
+                self.power.remove(&pos);
+            } else {
+                self.power.insert(pos, p);
+            }
+            self.power_updates.push((pos, p));
+            self.mark_chunk_dirty(pos);
+        }
+        if let Some(d) = moved.delay_input {
+            self.delay_input.insert(pos, d);
+        }
+        if let Some(eval) = moved.pending_delay {
+            self.queue.schedule_delay(eval.fire_tick, pos, eval.output);
+        }
+        if let Some(t) = moved.button_release {
+            self.pending_button_release.insert(pos, t);
+        }
+        if moved.torch_burnt_out {
+            self.torch_burnt_out.insert(pos);
+        }
+        if let Some(f) = moved.torch_flicker {
+            self.torch_flicker.insert(pos, f);
+        }
+        if had_power {
+            self.enqueue_circuit_neighbors(pos, world, registry);
+            self.enqueue_block_power_dependents(pos, world, registry);
+        }
+    }
+
     pub fn queue_update(&mut self, pos: BlockPos) {
         self.queue.enqueue_evaluate(pos);
     }
@@ -285,6 +371,13 @@ impl CircuitWorld {
             | CircuitKind::Observer { .. } => {
                 self.set_published_power(pos, output, id, state, def, node.kind, world, registry);
             }
+            CircuitKind::Piston { sticky } => {
+                if output == 1 {
+                    try_extend(self, world, registry, pos, sticky);
+                } else {
+                    try_retract(self, world, registry, pos, sticky);
+                }
+            }
             _ => {}
         }
     }
@@ -314,6 +407,18 @@ impl CircuitWorld {
             }
             self.trigger_observer(npos, world, registry);
         }
+    }
+
+    /// Fire an observer that was just moved by a piston. In Minecraft a moved
+    /// observer emits a pulse at its new position; this is what self-sustains
+    /// flying machines whose observers watch the air at the ends.
+    pub(crate) fn fire_moved_observer(
+        &mut self,
+        pos: BlockPos,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        self.trigger_observer(pos, world, registry);
     }
 
     fn trigger_observer(
@@ -587,7 +692,8 @@ impl CircuitWorld {
             CircuitKind::Inverter { .. }
             | CircuitKind::Wire { .. }
             | CircuitKind::Repeater { .. }
-            | CircuitKind::Observer { .. } => return,
+            | CircuitKind::Observer { .. }
+            | CircuitKind::Piston { .. } => return,
         };
 
         world.set_block(pos, id, new_state);

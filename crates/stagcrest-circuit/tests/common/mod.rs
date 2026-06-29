@@ -2,7 +2,8 @@ use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_server::BlockRegistry;
 use stagcrest_protocol::{
     torch_state, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, BlockPos, BlockState,
-    CircuitKind, CircuitNodeDef, ModelId, ModelRenderLayer, TextureId, TorchAttachment,
+    CircuitKind, CircuitNodeDef, ModelId, ModelRenderLayer, PushReaction, TextureId,
+    TorchAttachment,
 };
 use stagcrest_world::World;
 
@@ -15,6 +16,12 @@ pub struct TestBlocks {
     pub observer: BlockId,
     pub stone: BlockId,
     pub button: BlockId,
+    pub piston: BlockId,
+    pub sticky_piston: BlockId,
+    pub piston_head: BlockId,
+    pub slime: BlockId,
+    pub honey: BlockId,
+    pub bedrock: BlockId,
 }
 
 pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
@@ -28,6 +35,12 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         observer: BlockId(9),
         stone: BlockId(7),
         button: BlockId(8),
+        piston: BlockId(10),
+        sticky_piston: BlockId(11),
+        piston_head: BlockId(12),
+        slime: BlockId(13),
+        honey: BlockId(14),
+        bedrock: BlockId(15),
     };
 
     reg.register_block(test_block(blocks.source, CircuitKind::Source { level: 15 }));
@@ -53,6 +66,35 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         CircuitKind::Switch { output: 15 },
         BlockGeometry::Model(ModelId::Button),
     ));
+    reg.register_block(test_piston_block(
+        blocks.piston,
+        CircuitKind::Piston { sticky: false },
+        "test:piston",
+    ));
+    reg.register_block(test_piston_block(
+        blocks.sticky_piston,
+        CircuitKind::Piston { sticky: true },
+        "test:sticky_piston",
+    ));
+    reg.register_block(BlockDef {
+        id: blocks.piston_head,
+        namespaced_id: "test:piston_head".into(),
+        display_name: "Piston Head".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        hardness: 1.0,
+        face_textures: BlockFaceTextures::uniform(TextureId(0)),
+        circuit: None,
+        placeable: false,
+        geometry: BlockGeometry::Model(ModelId::PistonHead),
+        fluid: false,
+        render_layer: ModelRenderLayer::Opaque,
+        push_reaction: PushReaction::Normal,
+    });
+    reg.register_block(cube_block(blocks.slime, "test:slime_block", PushReaction::Normal));
+    reg.register_block(cube_block(blocks.honey, "test:honey_block", PushReaction::Normal));
+    reg.register_block(cube_block(blocks.bedrock, "test:bedrock", PushReaction::Block));
     reg.register_block(BlockDef {
         id: blocks.stone,
         namespaced_id: "test:stone".into(),
@@ -67,9 +109,48 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         geometry: BlockGeometry::Cube,
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
+        push_reaction: stagcrest_protocol::PushReaction::Normal,
     });
 
     (reg, blocks)
+}
+
+fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
+    BlockDef {
+        id,
+        namespaced_id: name.into(),
+        display_name: "Piston".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        hardness: 1.0,
+        face_textures: BlockFaceTextures::uniform(TextureId(0)),
+        circuit: Some(CircuitNodeDef { kind }),
+        placeable: true,
+        geometry: BlockGeometry::Model(ModelId::Piston),
+        fluid: false,
+        render_layer: ModelRenderLayer::Opaque,
+        push_reaction: PushReaction::Normal,
+    }
+}
+
+fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef {
+    BlockDef {
+        id,
+        namespaced_id: name.into(),
+        display_name: name.into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        hardness: 1.0,
+        face_textures: BlockFaceTextures::uniform(TextureId(0)),
+        circuit: None,
+        placeable: true,
+        geometry: BlockGeometry::Cube,
+        fluid: false,
+        render_layer: ModelRenderLayer::Opaque,
+        push_reaction,
+    }
 }
 
 fn test_block(id: BlockId, kind: CircuitKind) -> BlockDef {
@@ -91,6 +172,7 @@ fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeome
         geometry,
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
+        push_reaction: stagcrest_protocol::PushReaction::Normal,
     }
 }
 

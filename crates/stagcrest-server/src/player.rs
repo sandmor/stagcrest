@@ -1,11 +1,13 @@
 use glam::Vec3;
 use stagcrest_circuit::{is_player_toggleable, is_repeater};
 use stagcrest_mod_server::{
-    validate_mount_placement, validate_observer_placement, validate_repeater_placement,
-    validate_torch_placement,
+    validate_mount_placement, validate_observer_placement, validate_piston_placement,
+    validate_repeater_placement, validate_torch_placement,
 };
 use stagcrest_net::{BlockUpdate, PlayerAck, PlayerAction, PlayerActionKind};
-use stagcrest_protocol::{BlockPos, BlockState};
+use stagcrest_protocol::{
+    piston_extended, piston_facing, piston_front_pos, piston_head_facing, BlockPos, BlockState,
+};
 
 use crate::GameServer;
 
@@ -35,27 +37,52 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
             if !server.world.is_chunk_interactive(action.target.chunk_pos()) {
                 return ack(false, "chunk not interactive");
             }
-            let (id, _) = server.world.get_block(action.target);
-            if registry
-                .block(id)
-                .is_some_and(|d| d.namespaced_id == "stagcrest:bedrock")
-            {
-                return ack(false, "bedrock");
+            let (id, state) = server.world.get_block(action.target);
+            let break_positions = {
+                let registry = &server.registry;
+                if registry
+                    .block(id)
+                    .is_some_and(|d| d.namespaced_id == "stagcrest:bedrock")
+                {
+                    return ack(false, "bedrock");
+                }
+
+                let mut positions = vec![action.target];
+                if let Some(def) = registry.block(id) {
+                    if def.namespaced_id == "stagcrest:piston_head" {
+                        let facing = piston_head_facing(state);
+                        let body_pos = piston_front_pos(action.target, facing.opposite());
+                        positions.push(body_pos);
+                    } else if def.namespaced_id == "stagcrest:piston"
+                        || def.namespaced_id == "stagcrest:sticky_piston"
+                    {
+                        if piston_extended(state) {
+                            let head_pos = piston_front_pos(action.target, piston_facing(state));
+                            positions.push(head_pos);
+                        }
+                    }
+                }
+                positions
+            };
+
+            for pos in break_positions {
+                server.world.set_block(pos, air, BlockState(0));
+                server.circuit.notify_block_changed(
+                    pos,
+                    &mut server.world,
+                    &server.registry,
+                );
+                server.mark_chunk_dirty(pos.chunk_pos());
+                server.queue_priority(stagcrest_net::GameMessage::Server(
+                    stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
+                        pos,
+                        id: air,
+                        state: BlockState(0),
+                    }),
+                ));
             }
-            server.world.set_block(action.target, air, BlockState(0));
-            server
-                .circuit
-                .notify_block_changed(action.target, &mut server.world, registry);
-            server.circuit.tick(&mut server.world, registry);
+            server.circuit.tick(&mut server.world, &server.registry);
             server.broadcast_circuit_replication();
-            server.mark_chunk_dirty(action.target.chunk_pos());
-            server.queue_priority(stagcrest_net::GameMessage::Server(
-                stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
-                    pos: action.target,
-                    id: air,
-                    state: BlockState(0),
-                }),
-            ));
             ack(true, "")
         }
         PlayerActionKind::Place => {
@@ -89,10 +116,18 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
             };
 
-            let (dir_x, dir_z) = server
+            let (dir_x, dir_y, dir_z) = server
                 .latest_pose
-                .map(|p| (p.yaw.sin(), p.yaw.cos()))
-                .unwrap_or((0.0, 1.0));
+                .map(|p| {
+                    let yaw = p.yaw;
+                    let pitch = p.pitch;
+                    (
+                        yaw.sin() * pitch.cos(),
+                        -pitch.sin(),
+                        yaw.cos() * pitch.cos(),
+                    )
+                })
+                .unwrap_or((0.0, 0.0, 1.0));
 
             let selected_name = registry.block(block_id).map(|d| d.namespaced_id.as_str());
             let (nx, ny, nz) = (
@@ -132,6 +167,12 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                         validate_observer_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
                     else {
                         return ack(false, "invalid observer placement");
+                    };
+                    state
+                }
+                Some("stagcrest:piston") | Some("stagcrest:sticky_piston") => {
+                    let Some(state) = validate_piston_placement(place_pos, dir_x, dir_y, dir_z) else {
+                        return ack(false, "invalid piston placement");
                     };
                     state
                 }

@@ -60,6 +60,7 @@ fn reg_faced_block(
         render_layer: None,
         geometry: None,
         circuit: None,
+        push_reaction: None,
     });
 }
 
@@ -120,6 +121,7 @@ fn reg_log(reg: &mut impl ContentRegistrar, wood: &str) {
         render_layer: None,
         geometry: None,
         circuit: None,
+        push_reaction: None,
     });
 }
 

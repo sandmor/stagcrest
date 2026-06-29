@@ -29,6 +29,8 @@ pub struct RegisterBlockRequest {
     #[serde(default)]
     pub geometry: Option<String>,
     pub circuit: Option<RegisterCircuitRequest>,
+    #[serde(default)]
+    pub push_reaction: Option<PushReaction>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,6 +47,17 @@ pub enum CircuitKindRequest {
     Switch { output: u8 },
     Repeater { output: u8 },
     Observer { output: u8 },
+    Piston { sticky: bool },
+}
+
+/// How a block responds when pushed by a piston.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PushReaction {
+    #[default]
+    Normal,
+    Block,
+    Destroy,
 }
 
 #[derive(Serialize, Deserialize)]

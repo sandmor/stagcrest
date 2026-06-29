@@ -49,6 +49,14 @@ impl EventQueue {
         self.pending_delays.remove(&pos);
     }
 
+    pub fn take_delay(&mut self, pos: BlockPos) -> Option<ScheduledEval> {
+        self.pending_delays.remove(&pos)
+    }
+
+    pub fn has_pending_delay(&self, pos: BlockPos) -> bool {
+        self.pending_delays.contains_key(&pos)
+    }
+
     pub fn drain_due_delays(&mut self, tick: u64) -> Vec<ScheduledEval> {
         let due: Vec<BlockPos> = self
             .pending_delays

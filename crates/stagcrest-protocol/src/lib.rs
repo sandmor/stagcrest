@@ -418,6 +418,177 @@ pub fn observer_watches(observer_pos: BlockPos, facing: Facing, changed: BlockPo
     observer_watch_pos(observer_pos, facing) == changed
 }
 
+/// Full 6-axis facing for pistons and other blocks that can point up/down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum Facing6 {
+    #[default]
+    Down = 0,
+    Up = 1,
+    North = 2,
+    South = 3,
+    West = 4,
+    East = 5,
+}
+
+impl Facing6 {
+    pub fn from_bits(bits: u16) -> Self {
+        match bits {
+            1 => Self::Up,
+            2 => Self::North,
+            3 => Self::South,
+            4 => Self::West,
+            5 => Self::East,
+            _ => Self::Down,
+        }
+    }
+
+    pub fn to_bits(self) -> u16 {
+        self as u16
+    }
+
+    /// Unit step in the facing (output/front) direction.
+    pub fn delta(self) -> (i32, i32, i32) {
+        match self {
+            Self::Down => (0, -1, 0),
+            Self::Up => (0, 1, 0),
+            Self::North => (0, 0, -1),
+            Self::South => (0, 0, 1),
+            Self::West => (-1, 0, 0),
+            Self::East => (1, 0, 0),
+        }
+    }
+
+    /// Facing from a 3D look direction; piston front points away from the player.
+    pub fn from_look(lx: f32, ly: f32, lz: f32) -> Self {
+        let ax = lx.abs();
+        let ay = ly.abs();
+        let az = lz.abs();
+        if ay >= ax && ay >= az {
+            if ly >= 0.0 {
+                Self::Up
+            } else {
+                Self::Down
+            }
+        } else if ax >= az {
+            if lx >= 0.0 {
+                Self::East
+            } else {
+                Self::West
+            }
+        } else if lz >= 0.0 {
+            Self::South
+        } else {
+            Self::North
+        }
+    }
+
+    /// Whole-model Euler rotation (degrees) for canonical -Z front.
+    pub fn model_rotation(self) -> [f32; 3] {
+        match self {
+            Self::North => [0.0, 0.0, 0.0],
+            Self::South => [0.0, 180.0, 0.0],
+            Self::East => [0.0, 270.0, 0.0],
+            Self::West => [0.0, 90.0, 0.0],
+            Self::Up => [-90.0, 0.0, 0.0],
+            Self::Down => [90.0, 0.0, 0.0],
+        }
+    }
+
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Down => Self::Up,
+            Self::Up => Self::Down,
+            Self::North => Self::South,
+            Self::South => Self::North,
+            Self::West => Self::East,
+            Self::East => Self::West,
+        }
+    }
+}
+
+// Piston body state:
+//   bit 0      -> extended
+//   bits 1-3   -> Facing6 (output direction)
+pub const PISTON_EXTENDED_BIT: u16 = 1;
+pub const PISTON_FACING_SHIFT: u16 = 1;
+pub const PISTON_FACING_MASK: u16 = 0b1110;
+
+pub fn piston_state(extended: bool, facing: Facing6) -> BlockState {
+    let mut bits = facing.to_bits() << PISTON_FACING_SHIFT;
+    if extended {
+        bits |= PISTON_EXTENDED_BIT;
+    }
+    BlockState(bits)
+}
+
+pub fn piston_extended(state: BlockState) -> bool {
+    state.0 & PISTON_EXTENDED_BIT != 0
+}
+
+pub fn piston_facing(state: BlockState) -> Facing6 {
+    Facing6::from_bits((state.0 & PISTON_FACING_MASK) >> PISTON_FACING_SHIFT)
+}
+
+/// Model variant: `(extended << 3) | facing`.
+pub fn piston_variant(state: BlockState) -> ModelVariant {
+    let extended = ((state.0 & PISTON_EXTENDED_BIT) != 0) as u8;
+    let facing = ((state.0 & PISTON_FACING_MASK) >> PISTON_FACING_SHIFT) as u8;
+    (extended << 3) | facing
+}
+
+// Piston head state:
+//   bit 0      -> sticky
+//   bits 1-3   -> Facing6
+pub const PISTON_HEAD_STICKY_BIT: u16 = 1;
+pub const PISTON_HEAD_FACING_SHIFT: u16 = 1;
+pub const PISTON_HEAD_FACING_MASK: u16 = 0b1110;
+
+pub fn piston_head_state(facing: Facing6, sticky: bool) -> BlockState {
+    let mut bits = facing.to_bits() << PISTON_HEAD_FACING_SHIFT;
+    if sticky {
+        bits |= PISTON_HEAD_STICKY_BIT;
+    }
+    BlockState(bits)
+}
+
+pub fn piston_head_sticky(state: BlockState) -> bool {
+    state.0 & PISTON_HEAD_STICKY_BIT != 0
+}
+
+pub fn piston_head_facing(state: BlockState) -> Facing6 {
+    Facing6::from_bits((state.0 & PISTON_HEAD_FACING_MASK) >> PISTON_HEAD_FACING_SHIFT)
+}
+
+/// Model variant: `(sticky << 3) | facing`.
+pub fn piston_head_variant(state: BlockState) -> ModelVariant {
+    let sticky = ((state.0 & PISTON_HEAD_STICKY_BIT) != 0) as u8;
+    let facing = ((state.0 & PISTON_HEAD_FACING_MASK) >> PISTON_HEAD_FACING_SHIFT) as u8;
+    (sticky << 3) | facing
+}
+
+pub fn piston_front_pos(piston_pos: BlockPos, facing: Facing6) -> BlockPos {
+    let (dx, dy, dz) = facing.delta();
+    BlockPos::new(piston_pos.x + dx, piston_pos.y + dy, piston_pos.z + dz)
+}
+
+pub fn piston_back_pos(piston_pos: BlockPos, facing: Facing6) -> BlockPos {
+    let (dx, dy, dz) = facing.delta();
+    BlockPos::new(piston_pos.x - dx, piston_pos.y - dy, piston_pos.z - dz)
+}
+
+/// How a block responds when pushed by a piston.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PushReaction {
+    /// Block moves with the piston push.
+    #[default]
+    Normal,
+    /// Immovable; blocks the push (bedrock, obsidian).
+    Block,
+    /// Non-solid block that breaks when pushed into.
+    Destroy,
+}
+
 /// Fluid block state bits (MC-style; flow simulation not yet implemented).
 pub const FLUID_FLOWING_BIT: u16 = 1 << 8;
 pub const FLUID_LEVEL_MASK: u16 = 0xF << 9;
@@ -529,6 +700,8 @@ pub struct BlockDef {
     pub geometry: BlockGeometry,
     pub fluid: bool,
     pub render_layer: ModelRenderLayer,
+    #[serde(default)]
+    pub push_reaction: PushReaction,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -569,6 +742,10 @@ pub enum CircuitKind {
     /// Watches the block in front of its face; emits a short pulse on updates.
     Observer {
         output: u8,
+    },
+    /// Extends/retracts when powered; may push or pull adjacent blocks.
+    Piston {
+        sticky: bool,
     },
 }
 

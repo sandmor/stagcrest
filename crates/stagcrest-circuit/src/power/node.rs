@@ -89,6 +89,7 @@ pub fn signal_into(
                 0
             }
         }
+        CircuitKind::Piston { .. } => 0,
     }
 }
 

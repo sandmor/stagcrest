@@ -1,5 +1,5 @@
 use stagcrest_mod_sdk::{
-    CircuitKindRequest, ContentRegistrar, RegisterBlockRequest, RegisterCircuitRequest,
+    CircuitKindRequest, ContentRegistrar, PushReaction, RegisterBlockRequest, RegisterCircuitRequest,
     RegisterTextureRequest, RenderLayer,
 };
 
@@ -196,6 +196,35 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     register_texture_from_pack(reg, "stagcrest:observer_side", "observer_side", (90, 90, 90));
     register_texture_from_pack(reg, "stagcrest:observer_top", "observer_top", (95, 95, 95));
     register_optional_texture_from_pack(reg, "stagcrest:observer_back_on", "observer_back_on");
+    register_texture_from_pack(reg, "stagcrest:piston_top", "piston_top", (160, 160, 160));
+    register_texture_from_pack(
+        reg,
+        "stagcrest:piston_top_sticky",
+        "piston_top_sticky",
+        (160, 180, 160),
+    );
+    register_texture_from_pack(reg, "stagcrest:piston_side", "piston_side", (140, 140, 140));
+    register_texture_from_pack(reg, "stagcrest:piston_bottom", "piston_bottom", (120, 120, 120));
+    register_texture_from_pack(reg, "stagcrest:piston_inner", "piston_inner", (100, 100, 100));
+    register_texture_from_pack(reg, "stagcrest:slime_block", "slime_block", (120, 200, 120));
+    register_texture_from_pack(
+        reg,
+        "stagcrest:honey_block_top",
+        "honey_block_top",
+        (220, 160, 40),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:honey_block_side",
+        "honey_block_side",
+        (210, 150, 35),
+    );
+    register_texture_from_pack(
+        reg,
+        "stagcrest:honey_block_bottom",
+        "honey_block_bottom",
+        (200, 140, 30),
+    );
     register_texture_from_pack(
         reg,
         "stagcrest:smooth_stone",
@@ -249,6 +278,7 @@ fn register_layered_cross_plant(
         render_layer: None,
         geometry: Some("cross".into()),
         circuit: None,
+        push_reaction: None,
     });
 }
 
@@ -280,6 +310,7 @@ pub(crate) fn register_solid_block(
         render_layer,
         geometry: geometry.map(str::to_string),
         circuit,
+        push_reaction: None,
     });
 }
 
@@ -338,6 +369,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: None,
         circuit: None,
         render_layer: None,
+        push_reaction: None,
     });
     register_solid_block(
         reg,
@@ -393,20 +425,25 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: None,
         circuit: None,
         render_layer: Some(RenderLayer::Blend),
+        push_reaction: None,
     });
-    register_solid_block(
-        reg,
-        "stagcrest:bedrock",
-        "Bedrock",
-        "stagcrest:bedrock",
-        true,
-        false,
-        true,
-        false,
-        None,
-        None,
-        None,
-    );
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:bedrock".into(),
+        display_name: "Bedrock".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 1.0,
+        top_texture: "stagcrest:bedrock".into(),
+        bottom_texture: "stagcrest:bedrock".into(),
+        sides_texture: "stagcrest:bedrock".into(),
+        placeable: false,
+        geometry: None,
+        circuit: None,
+        render_layer: None,
+        push_reaction: Some(PushReaction::Block),
+    });
     register_solid_block(
         reg,
         "stagcrest:redstone_dust",
@@ -472,6 +509,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             kind: CircuitKindRequest::Switch { output: 15 },
         }),
         render_layer: None,
+        push_reaction: None,
     });
     // Stone button: a small stone box that sinks when pressed.
     reg.register_block(RegisterBlockRequest {
@@ -491,6 +529,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             kind: CircuitKindRequest::Switch { output: 15 },
         }),
         render_layer: None,
+        push_reaction: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:repeater".into(),
@@ -509,6 +548,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             kind: CircuitKindRequest::Repeater { output: 15 },
         }),
         render_layer: None,
+        push_reaction: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:observer".into(),
@@ -527,6 +567,96 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
             kind: CircuitKindRequest::Observer { output: 15 },
         }),
         render_layer: None,
+        push_reaction: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:piston".into(),
+        display_name: "Piston".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 0.5,
+        top_texture: "stagcrest:piston_top".into(),
+        bottom_texture: "stagcrest:piston_bottom".into(),
+        sides_texture: "stagcrest:piston_side".into(),
+        placeable: true,
+        geometry: Some("model:piston".into()),
+        circuit: Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Piston { sticky: false },
+        }),
+        render_layer: None,
+        push_reaction: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:sticky_piston".into(),
+        display_name: "Sticky Piston".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 0.5,
+        top_texture: "stagcrest:piston_top_sticky".into(),
+        bottom_texture: "stagcrest:piston_bottom".into(),
+        sides_texture: "stagcrest:piston_side".into(),
+        placeable: true,
+        geometry: Some("model:sticky_piston".into()),
+        circuit: Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Piston { sticky: true },
+        }),
+        render_layer: None,
+        push_reaction: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:piston_head".into(),
+        display_name: "Piston Head".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 0.5,
+        top_texture: "stagcrest:piston_top".into(),
+        bottom_texture: "stagcrest:piston_bottom".into(),
+        sides_texture: "stagcrest:piston_side".into(),
+        placeable: false,
+        geometry: Some("model:piston_head".into()),
+        circuit: None,
+        render_layer: None,
+        push_reaction: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:slime_block".into(),
+        display_name: "Slime Block".into(),
+        opaque: true,
+        transparent: true,
+        solid: true,
+        fluid: false,
+        hardness: 0.0,
+        top_texture: "stagcrest:slime_block".into(),
+        bottom_texture: "stagcrest:slime_block".into(),
+        sides_texture: "stagcrest:slime_block".into(),
+        placeable: true,
+        geometry: None,
+        circuit: None,
+        render_layer: Some(RenderLayer::Blend),
+        push_reaction: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:honey_block".into(),
+        display_name: "Honey Block".into(),
+        opaque: true,
+        transparent: true,
+        solid: true,
+        fluid: false,
+        hardness: 0.0,
+        top_texture: "stagcrest:honey_block_top".into(),
+        bottom_texture: "stagcrest:honey_block_bottom".into(),
+        sides_texture: "stagcrest:honey_block_side".into(),
+        placeable: true,
+        geometry: None,
+        circuit: None,
+        render_layer: Some(RenderLayer::Blend),
+        push_reaction: None,
     });
     register_solid_block(
         reg,
@@ -569,6 +699,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: None,
         circuit: None,
         render_layer: None,
+        push_reaction: None,
     });
     register_solid_block(
         reg,
@@ -644,6 +775,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: None,
         circuit: None,
         render_layer: None,
+        push_reaction: None,
     });
     register_solid_block(
         reg,

@@ -133,8 +133,14 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
             CircuitKindRequest::Switch { output } => CircuitKind::Switch { output },
             CircuitKindRequest::Repeater { output } => CircuitKind::Repeater { output },
             CircuitKindRequest::Observer { output } => CircuitKind::Observer { output },
+            CircuitKindRequest::Piston { sticky } => CircuitKind::Piston { sticky },
         },
     });
+
+    let push_reaction = json
+        .push_reaction
+        .map(push_reaction_from_sdk)
+        .unwrap_or(stagcrest_protocol::PushReaction::Normal);
 
     let render_layer = json
         .render_layer
@@ -159,7 +165,16 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
             .map(BlockGeometry::from_str)
             .unwrap_or_default(),
         render_layer,
+        push_reaction,
     });
+}
+
+fn push_reaction_from_sdk(reaction: stagcrest_mod_sdk::PushReaction) -> stagcrest_protocol::PushReaction {
+    match reaction {
+        stagcrest_mod_sdk::PushReaction::Normal => stagcrest_protocol::PushReaction::Normal,
+        stagcrest_mod_sdk::PushReaction::Block => stagcrest_protocol::PushReaction::Block,
+        stagcrest_mod_sdk::PushReaction::Destroy => stagcrest_protocol::PushReaction::Destroy,
+    }
 }
 
 fn resolve_render_layer(transparent: bool) -> stagcrest_protocol::ModelRenderLayer {

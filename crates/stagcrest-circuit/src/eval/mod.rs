@@ -1,4 +1,5 @@
 mod inverter;
+mod piston;
 mod observer;
 mod repeater;
 mod source;
@@ -8,7 +9,7 @@ mod torch;
 mod wire;
 
 pub use observer::OBSERVER_PULSE_TICKS;
-pub use sync::{is_button_geometry, is_observer, is_player_toggleable, is_repeater, is_torch_geometry, sync_block_state};
+pub use sync::{is_button_geometry, is_observer, is_piston, is_player_toggleable, is_repeater, is_torch_geometry, sync_block_state};
 pub use torch::{BURNOUT_TOGGLE_LIMIT, BURNOUT_WINDOW_TICKS};
 
 use crate::registry::BlockRegistry;
@@ -48,6 +49,7 @@ pub fn dispatch(
         CircuitKind::Inverter { output } => torch::evaluate(ctx, output, prev_input, burnt_out),
         CircuitKind::Repeater { output } => repeater::evaluate(ctx, output, prev_input),
         CircuitKind::Observer { .. } => observer::evaluate(),
+        CircuitKind::Piston { .. } => piston::evaluate(ctx),
     }
 }
 

@@ -105,6 +105,7 @@ pub fn block_power_at(
                     power.strong = power.strong.max(circuit.power_at(npos));
                 }
             }
+            CircuitKind::Piston { .. } => {}
         }
     }
 

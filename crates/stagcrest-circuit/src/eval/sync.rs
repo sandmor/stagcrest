@@ -37,6 +37,7 @@ pub fn sync_block_state(
             }
         }
         CircuitKind::Source { .. } => {}
+        CircuitKind::Piston { .. } => {}
     }
     None
 }
@@ -74,6 +75,15 @@ pub fn is_observer(def: &BlockDef) -> bool {
         def.circuit,
         Some(CircuitNodeDef {
             kind: CircuitKind::Observer { .. },
+        })
+    )
+}
+
+pub fn is_piston(def: &BlockDef) -> bool {
+    matches!(
+        def.circuit,
+        Some(CircuitNodeDef {
+            kind: CircuitKind::Piston { .. },
         })
     )
 }

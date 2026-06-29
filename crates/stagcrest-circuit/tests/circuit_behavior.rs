@@ -1,6 +1,6 @@
 mod common;
 
-use common::{place_wall_torch_not_gate, populate_chunks, settle, setup_registry};
+use common::{place_wall_torch_not_gate, populate_chunks, settle, setup_registry, TestBlocks};
 use stagcrest_circuit::{block_power_at, CircuitWorld};
 use stagcrest_protocol::{
     mount_on, mount_state, observer_state, repeater_state, torch_state, AttachFace, BlockId,
@@ -401,4 +401,392 @@ fn observer_behavior() {
     settle(&mut circuit, &mut world, &reg, 2);
     assert_eq!(circuit.power_at(observer_pos), 0);
     assert_eq!(circuit.power_at(output_pos), 0);
+}
+
+fn place_horizontal_piston(
+    world: &mut World,
+    blocks: &TestBlocks,
+    piston_pos: BlockPos,
+    sticky: bool,
+    powered: bool,
+) -> BlockPos {
+    use stagcrest_protocol::{piston_state, Facing6};
+    let input_pos = BlockPos::new(piston_pos.x - 1, piston_pos.y, piston_pos.z);
+    let front_pos = BlockPos::new(piston_pos.x + 1, piston_pos.y, piston_pos.z);
+    let piston_id = if sticky {
+        blocks.sticky_piston
+    } else {
+        blocks.piston
+    };
+    world.set_block(
+        piston_pos,
+        piston_id,
+        piston_state(false, Facing6::East),
+    );
+    if powered {
+        world.set_block(input_pos, blocks.source, BlockState(0));
+    }
+    populate_chunks(world, &[piston_pos, input_pos, front_pos]);
+    front_pos
+}
+
+#[test]
+fn piston_extends_and_retracts() {
+    use stagcrest_protocol::piston_extended;
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let front_pos = place_horizontal_piston(&mut world, &blocks, piston_pos, false, true);
+    let push_target = BlockPos::new(2, 0, 0);
+    world.set_block(front_pos, blocks.stone, BlockState(0));
+    populate_chunks(&mut world, &[push_target]);
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    let (_, piston_state_after) = world.get_block(piston_pos);
+    assert!(piston_extended(piston_state_after));
+    let (head_id, _) = world.get_block(front_pos);
+    assert_eq!(head_id, blocks.piston_head);
+    let (stone_id, _) = world.get_block(push_target);
+    assert_eq!(stone_id, blocks.stone);
+
+    world.set_block(BlockPos::new(-1, 0, 0), blocks.stone, BlockState(0));
+    circuit.notify_block_changed(BlockPos::new(-1, 0, 0), &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    let (_, retracted) = world.get_block(piston_pos);
+    assert!(!piston_extended(retracted));
+    let (front_id, _) = world.get_block(front_pos);
+    assert_eq!(front_id, BlockId(0));
+    let (beyond_id, _) = world.get_block(push_target);
+    assert_eq!(beyond_id, blocks.stone);
+}
+
+#[test]
+fn sticky_piston_pulls_block() {
+    use stagcrest_protocol::{piston_extended, piston_head_state, piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let front_pos = BlockPos::new(1, 0, 0);
+    let beyond = BlockPos::new(2, 0, 0);
+    world.set_block(
+        piston_pos,
+        blocks.sticky_piston,
+        piston_state(true, Facing6::East),
+    );
+    world.set_block(front_pos, blocks.piston_head, piston_head_state(Facing6::East, true));
+    world.set_block(beyond, blocks.stone, BlockState(0));
+    populate_chunks(&mut world, &[piston_pos, front_pos, beyond]);
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    let (_, state) = world.get_block(piston_pos);
+    assert!(!piston_extended(state));
+    let (front_id, _) = world.get_block(front_pos);
+    assert_eq!(front_id, blocks.stone);
+    let (beyond_id, _) = world.get_block(beyond);
+    assert_eq!(beyond_id, BlockId(0));
+}
+
+#[test]
+fn normal_piston_does_not_pull() {
+    use stagcrest_protocol::{piston_head_state, piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let front_pos = BlockPos::new(1, 0, 0);
+    let beyond = BlockPos::new(2, 0, 0);
+    world.set_block(
+        piston_pos,
+        blocks.piston,
+        piston_state(true, Facing6::East),
+    );
+    world.set_block(front_pos, blocks.piston_head, piston_head_state(Facing6::East, false));
+    world.set_block(beyond, blocks.stone, BlockState(0));
+    populate_chunks(&mut world, &[piston_pos, front_pos, beyond]);
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    let (beyond_id, _) = world.get_block(beyond);
+    assert_eq!(beyond_id, blocks.stone);
+}
+
+#[test]
+fn piston_push_limit_and_bedrock() {
+    use stagcrest_protocol::{piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let piston_pos = BlockPos::new(0, 0, 0);
+    world.set_block(BlockPos::new(-1, 0, 0), blocks.source, BlockState(0));
+    world.set_block(
+        piston_pos,
+        blocks.piston,
+        piston_state(false, Facing6::East),
+    );
+    let mut positions = vec![piston_pos, BlockPos::new(-1, 0, 0)];
+    for i in 1..=12 {
+        let pos = BlockPos::new(i, 0, 0);
+        world.set_block(pos, blocks.stone, BlockState(0));
+        positions.push(pos);
+    }
+    populate_chunks(&mut world, &positions);
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+    let (_, extended) = world.get_block(piston_pos);
+    assert!(stagcrest_protocol::piston_extended(extended));
+    let (end_id, _) = world.get_block(BlockPos::new(13, 0, 0));
+    assert_eq!(end_id, blocks.stone);
+
+    world.set_block(piston_pos, blocks.piston, piston_state(false, Facing6::East));
+    world.set_block(BlockPos::new(13, 0, 0), blocks.bedrock, BlockState(0));
+    for i in 1..=12 {
+        world.set_block(BlockPos::new(i, 0, 0), blocks.stone, BlockState(0));
+    }
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+    let (_, not_extended) = world.get_block(piston_pos);
+    assert!(!stagcrest_protocol::piston_extended(not_extended));
+}
+
+#[test]
+fn piston_pushes_slime_only() {
+    use stagcrest_protocol::{piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let front_pos = BlockPos::new(1, 0, 0);
+    world.set_block(BlockPos::new(-1, 0, 0), blocks.source, BlockState(0));
+    world.set_block(
+        piston_pos,
+        blocks.piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(front_pos, blocks.slime, BlockState(0));
+    populate_chunks(
+        &mut world,
+        &[
+            BlockPos::new(-1, 0, 0),
+            piston_pos,
+            front_pos,
+            BlockPos::new(2, 0, 0),
+        ],
+    );
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    assert_eq!(world.get_block(BlockPos::new(2, 0, 0)).0, blocks.slime);
+}
+
+#[test]
+fn slime_block_drags_adjacent_stone() {
+    use stagcrest_protocol::{piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let slime_pos = BlockPos::new(1, 0, 0);
+    let rider_pos = BlockPos::new(1, 1, 0);
+    let dest_slime = BlockPos::new(2, 0, 0);
+    let dest_rider = BlockPos::new(2, 1, 0);
+    world.set_block(BlockPos::new(-1, 0, 0), blocks.source, BlockState(0));
+    world.set_block(
+        piston_pos,
+        blocks.piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(slime_pos, blocks.slime, BlockState(0));
+    world.set_block(rider_pos, blocks.stone, BlockState(0));
+    populate_chunks(
+        &mut world,
+        &[
+            BlockPos::new(-1, 0, 0),
+            piston_pos,
+            slime_pos,
+            rider_pos,
+            dest_slime,
+            dest_rider,
+        ],
+    );
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    assert_eq!(world.get_block(dest_slime).0, blocks.slime);
+    assert_eq!(world.get_block(dest_rider).0, blocks.stone);
+}
+
+#[test]
+fn flying_machine_cycle_advances() {
+    use stagcrest_protocol::{observer_state, piston_state, Facing, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let slime_pos = BlockPos::new(1, 0, 0);
+    let observer_pos = BlockPos::new(1, 0, 1);
+    let watch_pos = BlockPos::new(2, 0, 1);
+
+    world.set_block(
+        piston_pos,
+        blocks.sticky_piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(slime_pos, blocks.slime, BlockState(0));
+    world.set_block(
+        observer_pos,
+        blocks.observer,
+        observer_state(false, Facing::East),
+    );
+    world.set_block(watch_pos, blocks.stone, BlockState(0));
+    world.set_block(BlockPos::new(-1, 0, 0), blocks.source, BlockState(0));
+    populate_chunks(
+        &mut world,
+        &[
+            BlockPos::new(-1, 0, 0),
+            piston_pos,
+            slime_pos,
+            observer_pos,
+            watch_pos,
+            BlockPos::new(2, 0, 0),
+            BlockPos::new(3, 0, 0),
+        ],
+    );
+
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 3);
+
+    assert_eq!(world.get_block(BlockPos::new(2, 0, 0)).0, blocks.slime);
+    assert_eq!(world.get_block(BlockPos::new(2, 0, 1)).0, blocks.observer);
+    assert!(stagcrest_protocol::piston_extended(world.get_block(piston_pos).1));
+
+    world.set_block(BlockPos::new(-1, 0, 0), blocks.stone, BlockState(0));
+    circuit.notify_block_changed(BlockPos::new(-1, 0, 0), &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 3);
+
+    assert!(!stagcrest_protocol::piston_extended(world.get_block(piston_pos).1));
+    assert_eq!(world.get_block(BlockPos::new(1, 0, 0)).0, blocks.slime);
+}
+
+/// Reproduces user flying-machine layout (2x4 grid):
+/// ```text
+/// O S
+/// R S
+/// S P
+/// S O
+/// ```
+#[test]
+fn flying_machine_drags_sticky_piston_on_push() {
+    use stagcrest_protocol::{observer_state, piston_state, Facing, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    // Grid: x=0,1  z=0..3 (y=0). P at (1,0,1) pushes South (+Z).
+    let p_pos = BlockPos::new(1, 0, 1);
+    let r_pos = BlockPos::new(0, 0, 2);
+    world.set_block(p_pos, blocks.piston, piston_state(false, Facing6::South));
+    world.set_block(r_pos, blocks.sticky_piston, piston_state(false, Facing6::North));
+    world.set_block(BlockPos::new(0, 0, 0), blocks.slime, BlockState(0));
+    world.set_block(BlockPos::new(0, 0, 1), blocks.slime, BlockState(0));
+    world.set_block(BlockPos::new(1, 0, 0), blocks.observer, observer_state(false, Facing::South));
+    world.set_block(BlockPos::new(1, 0, 2), blocks.slime, BlockState(0));
+    world.set_block(BlockPos::new(1, 0, 3), blocks.slime, BlockState(0));
+    world.set_block(BlockPos::new(0, 0, 3), blocks.observer, observer_state(false, Facing::North));
+    world.set_block(BlockPos::new(1, 0, 4), blocks.stone, BlockState(0)); // stopper
+    world.set_block(BlockPos::new(2, 0, 1), blocks.source, BlockState(0)); // power east of P
+
+    let all = [
+        BlockPos::new(2, 0, 1),
+        BlockPos::new(1, 0, 0),
+        BlockPos::new(0, 0, 0),
+        BlockPos::new(0, 0, 1),
+        BlockPos::new(0, 0, 2),
+        BlockPos::new(0, 0, 3),
+        BlockPos::new(1, 0, 0),
+        p_pos,
+        BlockPos::new(1, 0, 2),
+        BlockPos::new(1, 0, 3),
+        BlockPos::new(1, 0, 4),
+        BlockPos::new(0, 0, 5),
+        BlockPos::new(1, 0, 5),
+    ];
+    populate_chunks(&mut world, &all);
+
+    circuit.notify_block_changed(p_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    // Minecraft semantics: the firing piston P is anchored and extends in place.
+    assert_eq!(
+        world.get_block(p_pos).0,
+        blocks.piston,
+        "pusher piston body stays anchored at its cell"
+    );
+    assert!(
+        stagcrest_protocol::piston_extended(world.get_block(p_pos).1),
+        "pusher piston should be extended"
+    );
+    assert_eq!(
+        world.get_block(BlockPos::new(1, 0, 2)).0,
+        blocks.piston_head,
+        "piston head occupies the cell in front of P"
+    );
+
+    // The slime block in front of P must be pushed forward, NOT destroyed.
+    assert_eq!(
+        world.get_block(BlockPos::new(1, 0, 3)).0,
+        blocks.slime,
+        "front slime is pushed to (1,0,3), not turned to air"
+    );
+    assert_eq!(
+        world.get_block(BlockPos::new(1, 0, 4)).0,
+        blocks.slime,
+        "second front slime is pushed to (1,0,4)"
+    );
+
+    // R is glued to the front slime, so it is dragged along the push direction.
+    assert_eq!(
+        world.get_block(BlockPos::new(0, 0, 3)).0,
+        blocks.sticky_piston,
+        "sticky piston R is dragged by the slime it is stuck to"
+    );
+
+    // Stickiness does NOT propagate through R (a non-slime block) to the puller
+    // slimes behind it, so they stay put during a push (they only move when R
+    // retracts). This matches Minecraft.
+    assert_eq!(
+        world.get_block(BlockPos::new(0, 0, 1)).0,
+        blocks.slime,
+        "puller slime at (0,0,1) stays during push"
+    );
+    assert_eq!(
+        world.get_block(BlockPos::new(0, 0, 0)).0,
+        blocks.slime,
+        "puller slime at (0,0,0) stays during push"
+    );
+    // The observer behind P is only connected through R, so it stays put.
+    assert_eq!(
+        world.get_block(BlockPos::new(1, 0, 0)).0,
+        blocks.observer,
+        "observer behind P stays during push"
+    );
 }

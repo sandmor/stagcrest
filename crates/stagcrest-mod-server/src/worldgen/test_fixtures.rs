@@ -71,6 +71,11 @@ pub fn test_registry() -> BlockRegistry {
             } else {
                 stagcrest_protocol::ModelRenderLayer::Opaque
             },
+            push_reaction: if name == "stagcrest:bedrock" {
+                stagcrest_protocol::PushReaction::Block
+            } else {
+                stagcrest_protocol::PushReaction::Normal
+            },
         });
     }
     reg

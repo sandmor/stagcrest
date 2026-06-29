@@ -1247,6 +1247,7 @@ mod tests {
             } else {
                 ModelRenderLayer::Opaque
             },
+            push_reaction: stagcrest_protocol::PushReaction::Normal,
         }
     }
 

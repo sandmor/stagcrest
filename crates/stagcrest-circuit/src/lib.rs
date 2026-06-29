@@ -8,6 +8,7 @@
 //! (inverter, repeater) arm tick delays on input changes.
 
 pub mod wire_network;
+mod piston;
 mod eval;
 mod event;
 mod init;
@@ -16,7 +17,7 @@ mod registry;
 mod world;
 
 pub use wire_network::{compute_wire_connections, WireConnections, WireLink};
-pub use eval::{is_button_geometry, is_observer, is_player_toggleable, is_repeater};
+pub use eval::{is_button_geometry, is_observer, is_piston, is_player_toggleable, is_repeater};
 pub use init::init_circuit_blocks;
 pub use power::{block_power_at, signal_into, BlockPower};
 pub use world::{CircuitWorld, MAX_EVALS_PER_TICK};

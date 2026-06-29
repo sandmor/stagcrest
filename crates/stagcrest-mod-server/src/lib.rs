@@ -4,6 +4,7 @@ mod block_tints;
 mod colormap;
 mod host;
 mod mount_placement;
+mod piston_placement;
 mod registry;
 mod observer_placement;
 mod repeater_placement;
@@ -20,6 +21,7 @@ pub use host::{load_mods, ModError, ModHost};
 pub use mount_placement::{mount_can_attach, validate_mount_placement};
 pub use registry::BlockRegistry;
 pub use observer_placement::validate_observer_placement;
+pub use piston_placement::validate_piston_placement;
 pub use repeater_placement::validate_repeater_placement;
 pub use resourcepack::{
     infer_vertical_strip_animation, ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES,

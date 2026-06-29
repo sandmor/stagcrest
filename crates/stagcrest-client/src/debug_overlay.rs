@@ -436,6 +436,7 @@ fn format_circuit_kind(kind: CircuitKind) -> String {
         CircuitKind::Switch { output } => format!("switch out {output}"),
         CircuitKind::Repeater { output } => format!("repeater out {output}"),
         CircuitKind::Observer { output } => format!("observer out {output}"),
+        CircuitKind::Piston { sticky } => format!("piston sticky={sticky}"),
     }
 }
 
