@@ -7,7 +7,8 @@ use std::collections::{HashMap, HashSet};
 use crate::gpu_voxel::chunk_cache::GpuChunkExtractBatch;
 use crate::gpu_voxel::types::{
     GpuChunkTableEntry, GpuChunkUpload, CHUNK_BLOCKS, CHUNK_POWER_BYTES,
-    CHUNK_SCRATCH_CAPACITY, CHUNK_TABLE_VALID, HALO_VOLUME, max_chunk_store_slots,
+    CHUNK_SCRATCH_CAPACITY, CHUNK_TABLE_VALID, CHUNK_TINT_CELLS_BYTES, HALO_VOLUME,
+    max_chunk_store_slots,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -21,6 +22,7 @@ pub struct ChunkSlot {
 pub struct RenderChunkStore {
     pub blocks_buffer: Buffer,
     pub power_buffer: Buffer,
+    pub tint_cells_buffer: Buffer,
     pub scratch_instances_buffer: Buffer,
     pub scratch_counters_buffer: Buffer,
     pub scratch_overflow_buffer: Buffer,
@@ -45,6 +47,7 @@ impl RenderChunkStore {
         let chunk_capacity = max_chunk_store_slots();
         let blocks_size = crate::gpu_voxel::types::CHUNK_BLOCKS_BYTES * chunk_capacity as u64;
         let power_size = CHUNK_POWER_BYTES * chunk_capacity as u64;
+        let tint_cells_size = CHUNK_TINT_CELLS_BYTES * chunk_capacity as u64;
         let scratch_instances_size =
             crate::gpu_voxel::types::chunk_scratch_instance_bytes() * chunk_capacity as u64;
         let scratch_meta_size = chunk_capacity as u64 * std::mem::size_of::<u32>() as u64;
@@ -58,6 +61,12 @@ impl RenderChunkStore {
         let power_buffer = render_device.create_buffer(&BufferDescriptor {
             label: Some("voxel_concat_power"),
             size: power_size,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tint_cells_buffer = render_device.create_buffer(&BufferDescriptor {
+            label: Some("voxel_concat_tint_cells"),
+            size: tint_cells_size,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -86,12 +95,13 @@ impl RenderChunkStore {
             mapped_at_creation: false,
         });
 
-        let mut free_slots: Vec<u32> = (0..chunk_capacity).collect();
+        let free_slots: Vec<u32> = (0..chunk_capacity).collect();
         let chunk_table = vec![GpuChunkTableEntry::default(); chunk_capacity as usize];
 
         Self {
             blocks_buffer,
             power_buffer,
+            tint_cells_buffer,
             scratch_instances_buffer,
             scratch_counters_buffer,
             scratch_overflow_buffer,
@@ -229,6 +239,7 @@ fn chunk_table_entry(upload: &GpuChunkUpload, slot: u32) -> GpuChunkTableEntry {
         blocks_offset: slot * HALO_VOLUME as u32,
         power_offset: slot * CHUNK_BLOCKS as u32,
         scratch_offset: slot * CHUNK_SCRATCH_CAPACITY,
+        tint_cells_offset: slot * crate::gpu_voxel::types::BIOME_GRID_CELLS as u32,
         origin_x: upload.pos.x * CHUNK_SIZE,
         origin_y: upload.pos.y * CHUNK_SIZE,
         origin_z: upload.pos.z * CHUNK_SIZE,

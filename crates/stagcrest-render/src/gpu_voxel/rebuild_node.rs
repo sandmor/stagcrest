@@ -57,7 +57,7 @@ pub fn prepare_voxel_rebuild(
 ) {
     *frame = VoxelRebuildFrame::default();
 
-    let (Some(state), Some(mut store), Some(camera)) = (state, store.as_mut(), camera) else {
+    let (Some(state), Some(store), Some(camera)) = (state, store.as_mut(), camera) else {
         frame.skip = true;
         return;
     };
@@ -83,6 +83,8 @@ pub fn prepare_voxel_rebuild(
                 * std::mem::size_of::<crate::gpu_voxel::types::GpuBlockCell>() as u64;
             let power_off =
                 entry.power_offset as u64 * std::mem::size_of::<u32>() as u64;
+            let tint_off = entry.tint_cells_offset as u64
+                * std::mem::size_of::<crate::gpu_voxel::types::GpuChunkTintCell>() as u64;
             render_queue.write_buffer(
                 &store.blocks_buffer,
                 blocks_off,
@@ -93,6 +95,11 @@ pub fn prepare_voxel_rebuild(
                 &store.power_buffer,
                 power_off,
                 bytemuck::cast_slice(&power_u32),
+            );
+            render_queue.write_buffer(
+                &store.tint_cells_buffer,
+                tint_off,
+                bytemuck::cast_slice(&upload.tint_cells),
             );
         }
     }
@@ -204,6 +211,10 @@ pub fn prepare_voxel_rebuild(
                 },
                 BindGroupEntry {
                     binding: 8,
+                    resource: store.tint_cells_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 9,
                     resource: emit_uniform_buffer.as_entire_binding(),
                 },
             ],

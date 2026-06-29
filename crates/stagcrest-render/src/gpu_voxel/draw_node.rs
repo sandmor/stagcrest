@@ -31,7 +31,6 @@ pub struct VoxelDrawNode;
 struct LayerDraw {
     cache_key: (usize, u32),
     layer_idx: usize,
-    region_byte_offset: u64,
     indirect_byte_offset: u64,
 }
 
@@ -306,6 +305,10 @@ fn collect_layer_draws(
                         binding: 5,
                         resource: material_buffer.as_entire_binding(),
                     },
+                    BindGroupEntry {
+                        binding: 6,
+                        resource: buffers.block_meta_buffer.as_entire_binding(),
+                    },
                 ],
             )
         });
@@ -313,7 +316,6 @@ fn collect_layer_draws(
         draws.push(LayerDraw {
             cache_key,
             layer_idx,
-            region_byte_offset,
             indirect_byte_offset: indirect_idx as u64 * indirect_stride,
         });
     }

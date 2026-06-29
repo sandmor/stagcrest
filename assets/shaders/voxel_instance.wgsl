@@ -37,6 +37,22 @@ struct MaterialUniforms {
     atlas_size: vec4<f32>,
 }
 
+struct GpuBlockMeta {
+    geometry_kind: u32,
+    render_layer: u32,
+    flags: u32,
+    model_bucket_base: u32,
+    texture_top: u32,
+    texture_bottom: u32,
+    texture_sides: u32,
+    texture_overlay_top: u32,
+    texture_overlay_bottom: u32,
+    texture_overlay_sides: u32,
+    tint_kinds: u32,
+    overlay_tint_kinds: u32,
+    block_type_id: u32,
+}
+
 struct Vertex {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
@@ -60,8 +76,11 @@ struct VertexOutput {
 @group(0) @binding(3) var atlas_tex: texture_2d<f32>;
 @group(0) @binding(4) var atlas_s: sampler;
 @group(0) @binding(5) var<uniform> mats: MaterialUniforms;
+@group(0) @binding(6) var<storage, read> block_meta_table: array<GpuBlockMeta>;
 
 const MODEL_BUCKET_BASE: u32 = 16u;
+const TINT_EPS: f32 = 0.001;
+const TINT_WATER: f32 = 4.5;
 
 const FACE_NORMALS: array<vec3<f32>, 6> = array<vec3<f32>, 6>(
     vec3<f32>(0.0, -1.0, 0.0),
@@ -128,6 +147,13 @@ fn transform_wire_vertex(inst: VoxelInstance, local: vec3<f32>, face: u32) -> ve
 
 fn is_water(tint: f32) -> bool {
     return tint >= 4.25 && tint < 5.0;
+}
+
+fn meta_for(id: u32) -> GpuBlockMeta {
+    if id >= arrayLength(&block_meta_table) {
+        return GpuBlockMeta(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+    }
+    return block_meta_table[id];
 }
 
 fn atlas_uv(tex_id: u32, uv: vec2<f32>, water: bool) -> vec2<f32> {
@@ -197,18 +223,34 @@ fn vertex(vertex: Vertex, @builtin(instance_index) inst_idx: u32) -> VertexOutpu
         }
         let water = is_water(inst.tint);
         out.uv = atlas_uv(tex_id, vertex.uv, water);
+        let block_meta = meta_for(inst.block_id);
+        var overlay_tex = block_meta.texture_overlay_sides;
+        if face == 1u {
+            overlay_tex = block_meta.texture_overlay_top;
+        } else if face == 0u {
+            overlay_tex = block_meta.texture_overlay_bottom;
+        }
+        if overlay_tex != 0u {
+            out.overlay_uv = atlas_uv(overlay_tex, vertex.uv, false);
+        } else {
+            out.overlay_uv = vertex.overlay_uv;
+        }
     } else {
         out.uv = vertex.uv;
+        out.overlay_uv = vertex.overlay_uv;
     }
-    out.overlay_uv = vertex.overlay_uv;
     var tint = vertex.tint;
     // Redstone dust carries its power tint in inst.tint; models/cubes leave it 0
     // and must not be tinted just because they sit on a powered cell.
-    if tint == 0.0 && inst.tint > 0.0 {
+    if abs(tint) < TINT_EPS && inst.tint > TINT_EPS {
         tint = inst.tint;
     }
     out.tint = tint;
-    out.overlay_tint = vertex.overlay_tint;
+    var overlay_tint = vertex.overlay_tint;
+    if abs(overlay_tint) < TINT_EPS && inst.overlay_tint > TINT_EPS {
+        overlay_tint = inst.overlay_tint;
+    }
+    out.overlay_tint = overlay_tint;
     out.tint_mul = instance_tint_mul(inst);
     return out;
 }
@@ -266,7 +308,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     var rgb = apply_tint(base.rgb, in.tint, in.tint_mul);
-    if in.overlay_tint >= 0.5 {
+    if in.overlay_tint > TINT_EPS {
         let ov_uv = animated_uv(in.overlay_uv, in.overlay_tint);
         let ov = textureSample(atlas_tex, atlas_s, ov_uv);
         if mats.material_flags.x > 0.5 && ov.a < 0.5 {

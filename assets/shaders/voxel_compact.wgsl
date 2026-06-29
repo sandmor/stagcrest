@@ -14,6 +14,7 @@ struct GpuChunkTableEntry {
     blocks_offset: u32,
     power_offset: u32,
     scratch_offset: u32,
+    tint_cells_offset: u32,
     origin_x: i32,
     origin_y: i32,
     origin_z: i32,

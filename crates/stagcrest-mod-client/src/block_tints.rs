@@ -11,14 +11,15 @@ pub fn apply_block_face_tints(
         return;
     }
 
-    if matches!(
-        block_id,
-        "stagcrest:short_grass"
-            | "stagcrest:tall_grass"
-            | "stagcrest:dandelion"
-            | "stagcrest:poppy"
-            | "stagcrest:oak_leaves"
-    ) {
+    if block_id.ends_with("_leaves")
+        || matches!(
+            block_id,
+            "stagcrest:short_grass"
+                | "stagcrest:tall_grass"
+                | "stagcrest:dandelion"
+                | "stagcrest:poppy"
+        )
+    {
         apply_foliage_flat_tint(face_textures);
         return;
     }
@@ -89,5 +90,20 @@ mod tests {
         assert_eq!(faces.top.tint, TintKind::Water);
         assert_eq!(faces.sides.tint, TintKind::Water);
         let _ = (BlockId(0), TextureId(0));
+    }
+
+    #[test]
+    fn acacia_leaves_get_foliage_tint() {
+        let mut registry = crate::registry::BlockRegistry::new();
+        let tex = registry.register_texture(
+            "stagcrest:acacia_leaves".into(),
+            16,
+            16,
+            vec![0; 16 * 16 * 4],
+        );
+        let mut faces = BlockFaceTextures::uniform(tex);
+        apply_block_face_tints("stagcrest:acacia_leaves", false, &mut faces, &registry);
+        assert_eq!(faces.top.tint, TintKind::Foliage);
+        assert_eq!(faces.sides.tint, TintKind::Foliage);
     }
 }

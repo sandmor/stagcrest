@@ -1,6 +1,7 @@
 #![allow(dead_code)] // encase `ShaderType::check` helpers
 
 use bytemuck::{Pod, Zeroable};
+use stagcrest_mod_client::ChunkTintCell;
 use stagcrest_protocol::{BlockId, ChunkPos};
 
 pub const MAX_BLOCK_IDS: usize = 4096;
@@ -26,6 +27,9 @@ pub fn max_chunk_store_slots() -> u32 {
 pub const CHUNK_BLOCKS_BYTES: u64 = (HALO_VOLUME * 16) as u64;
 /// Bytes per chunk in the concatenated power SSBO.
 pub const CHUNK_POWER_BYTES: u64 = (CHUNK_BLOCKS * std::mem::size_of::<u32>()) as u64;
+/// Bytes per chunk in the concatenated biome tint SSBO.
+pub const CHUNK_TINT_CELLS_BYTES: u64 =
+    (BIOME_GRID_CELLS * std::mem::size_of::<GpuChunkTintCell>()) as u64;
 
 /// Per-bucket instance region capacity (in instances) in the partitioned
 /// instances SSBO. Cube/cross/wire buckets are shared across every chunk and
@@ -115,6 +119,11 @@ pub struct GpuBlockMeta {
     pub texture_top: u32,
     pub texture_bottom: u32,
     pub texture_sides: u32,
+    pub texture_overlay_top: u32,
+    pub texture_overlay_bottom: u32,
+    pub texture_overlay_sides: u32,
+    pub tint_kinds: u32,
+    pub overlay_tint_kinds: u32,
     pub block_type_id: u32,
 }
 
@@ -123,6 +132,23 @@ pub const BLOCK_FLAG_SOLID: u32 = 2;
 pub const BLOCK_FLAG_FLUID: u32 = 4;
 pub const BLOCK_FLAG_TRANSPARENT: u32 = 8;
 pub const BLOCK_FLAG_REDSTONE_DUST: u32 = 16;
+
+/// GPU-side biome tint cell (layout matches [`ChunkTintCell`]).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
+pub struct GpuChunkTintCell {
+    pub grass: [f32; 3],
+    pub foliage: [f32; 3],
+}
+
+impl From<ChunkTintCell> for GpuChunkTintCell {
+    fn from(value: ChunkTintCell) -> Self {
+        Self {
+            grass: value.grass,
+            foliage: value.foliage,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
@@ -181,6 +207,7 @@ pub struct GpuChunkTableEntry {
     pub blocks_offset: u32,
     pub power_offset: u32,
     pub scratch_offset: u32,
+    pub tint_cells_offset: u32,
     pub origin_x: i32,
     pub origin_y: i32,
     pub origin_z: i32,
@@ -230,6 +257,7 @@ pub struct GpuChunkUpload {
     pub power: [u8; CHUNK_BLOCKS],
     pub biome: [u8; BIOME_GRID_CELLS],
     pub climate: Option<GpuClimateData>,
+    pub tint_cells: [GpuChunkTintCell; BIOME_GRID_CELLS],
 }
 
 #[derive(Clone, Copy, Debug)]

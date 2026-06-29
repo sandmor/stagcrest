@@ -4029,6 +4029,7 @@ dependencies = [
 name = "stagcrest-mod-client"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "image",
  "stagcrest-circuit",
  "stagcrest-protocol",

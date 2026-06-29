@@ -58,10 +58,10 @@ pub fn poll_gpu_voxel_overflow(
     render_queue: Res<RenderQueue>,
     tables: Option<Res<GpuVoxelTables>>,
     mut state: Option<ResMut<GpuVoxelRenderState>>,
-    mut store: Option<ResMut<RenderChunkStore>>,
-    mut pool: Option<ResMut<InstanceBufferPool>>,
-    mut bind_cache: Option<ResMut<VoxelDrawBindCache>>,
-    mut stats: Option<ResMut<GpuVoxelStats>>,
+    store: Option<ResMut<RenderChunkStore>>,
+    pool: Option<ResMut<InstanceBufferPool>>,
+    bind_cache: Option<ResMut<VoxelDrawBindCache>>,
+    stats: Option<ResMut<GpuVoxelStats>>,
     mut tick: Local<u32>,
 ) {
     *tick = tick.wrapping_add(1);

@@ -18,7 +18,7 @@ pub fn stage_gpu_chunk_extract(
 pub fn apply_extracted_chunks(
     staging: Option<Res<GpuChunkExtractStaging>>,
     store: Option<ResMut<RenderChunkStore>>,
-    mut pending: Option<ResMut<PendingChunkExtract>>,
+    pending: Option<ResMut<PendingChunkExtract>>,
 ) {
     let Some(staging) = staging else {
         return;

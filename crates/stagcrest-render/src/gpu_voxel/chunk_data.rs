@@ -1,5 +1,8 @@
 use stagcrest_mesh::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
-use stagcrest_mod_client::{model_variant_for_block, BlockRegistry, ModelRegistry, PowerLookup};
+use stagcrest_mod_client::{
+    build_chunk_tint_cells, model_variant_for_block, BiomeRegistryClient, BlockRegistry,
+    ColormapSet, ModelRegistry, PowerLookup,
+};
 use stagcrest_protocol::{
     BlockId, BlockPos, ChunkPos, LocalBlockPos, CHUNK_SIZE, CHUNK_VOLUME,
 };
@@ -8,7 +11,7 @@ use stagcrest_world::{ChunkBlock, World};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::gpu_voxel::types::{GpuBlockCell, GpuChunkUpload, GpuClimateData, HALO_VOLUME};
+use crate::gpu_voxel::types::{GpuBlockCell, GpuChunkTintCell, GpuChunkUpload, GpuClimateData, HALO_VOLUME};
 
 fn halo_filled_with_air(air: BlockId) -> [GpuBlockCell; HALO_VOLUME] {
     let cell = GpuBlockCell {
@@ -26,6 +29,8 @@ pub fn capture_gpu_chunk_upload(
     registry: &BlockRegistry,
     power: Option<&dyn PowerLookup>,
     climate: Option<MeshClimateSnapshot>,
+    biomes: &BiomeRegistryClient,
+    colormaps: &ColormapSet,
 ) -> Option<GpuChunkUpload> {
     let snapshot = MeshSnapshot::capture(
         pos,
@@ -35,10 +40,20 @@ pub fn capture_gpu_chunk_upload(
         capture_power_grid(pos, power),
         climate,
     )?;
-    Some(pack_gpu_chunk_upload(&snapshot, registry))
+    Some(pack_gpu_chunk_upload(
+        &snapshot,
+        registry,
+        biomes,
+        colormaps,
+    ))
 }
 
-pub fn pack_gpu_chunk_upload(snapshot: &MeshSnapshot, registry: &BlockRegistry) -> GpuChunkUpload {
+pub fn pack_gpu_chunk_upload(
+    snapshot: &MeshSnapshot,
+    registry: &BlockRegistry,
+    biomes: &BiomeRegistryClient,
+    colormaps: &ColormapSet,
+) -> GpuChunkUpload {
     let mut blocks = halo_filled_with_air(snapshot.air);
 
     for ly in -1..=CHUNK_SIZE {
@@ -68,6 +83,9 @@ pub fn pack_gpu_chunk_upload(snapshot: &MeshSnapshot, registry: &BlockRegistry) 
         downfall: c.downfall,
     });
 
+    let tint_cells = build_chunk_tint_cells(&snapshot.center.biome_grid, biomes, colormaps)
+        .map(GpuChunkTintCell::from);
+
     GpuChunkUpload {
         pos: snapshot.pos,
         air: snapshot.air,
@@ -75,6 +93,7 @@ pub fn pack_gpu_chunk_upload(snapshot: &MeshSnapshot, registry: &BlockRegistry) 
         power: snapshot.power_grid,
         biome: snapshot.center.biome_grid,
         climate,
+        tint_cells,
     }
 }
 
@@ -85,6 +104,8 @@ pub fn pack_halo_from_world(
     registry: &BlockRegistry,
     center: &stagcrest_storage::InactiveChunk,
     power_grid: [u8; CHUNK_VOLUME],
+    biomes: &BiomeRegistryClient,
+    colormaps: &ColormapSet,
 ) -> GpuChunkUpload {
     let halo = capture_halo(world, pos, air);
     let mut blocks = halo_filled_with_air(air);
@@ -131,6 +152,9 @@ pub fn pack_halo_from_world(
         }
     }
 
+    let tint_cells = build_chunk_tint_cells(&center.biome_grid, biomes, colormaps)
+        .map(GpuChunkTintCell::from);
+
     GpuChunkUpload {
         pos,
         air,
@@ -138,6 +162,7 @@ pub fn pack_halo_from_world(
         power: power_grid,
         biome: center.biome_grid,
         climate: None,
+        tint_cells,
     }
 }
 

@@ -11,14 +11,15 @@ pub fn apply_block_face_tints(
         return;
     }
 
-    if matches!(
-        block_id,
-        "stagcrest:short_grass"
-            | "stagcrest:tall_grass"
-            | "stagcrest:dandelion"
-            | "stagcrest:poppy"
-            | "stagcrest:oak_leaves"
-    ) {
+    if block_id.ends_with("_leaves")
+        || matches!(
+            block_id,
+            "stagcrest:short_grass"
+                | "stagcrest:tall_grass"
+                | "stagcrest:dandelion"
+                | "stagcrest:poppy"
+        )
+    {
         apply_foliage_flat_tint(face_textures);
         return;
     }

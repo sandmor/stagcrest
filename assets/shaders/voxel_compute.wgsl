@@ -6,6 +6,11 @@ struct GpuBlockMeta {
     texture_top: u32,
     texture_bottom: u32,
     texture_sides: u32,
+    texture_overlay_top: u32,
+    texture_overlay_bottom: u32,
+    texture_overlay_sides: u32,
+    tint_kinds: u32,
+    overlay_tint_kinds: u32,
     block_type_id: u32,
 }
 
@@ -28,10 +33,16 @@ struct VoxelInstance {
     bucket_id: u32,
 }
 
+struct ChunkTintCell {
+    grass: array<f32, 3>,
+    foliage: array<f32, 3>,
+}
+
 struct GpuChunkTableEntry {
     blocks_offset: u32,
     power_offset: u32,
     scratch_offset: u32,
+    tint_cells_offset: u32,
     origin_x: i32,
     origin_y: i32,
     origin_z: i32,
@@ -68,6 +79,8 @@ const BUCKET_CUBE_BLEND: u32 = 2u;
 const BUCKET_CROSS_CUTOUT: u32 = 3u;
 const BUCKET_WIRE_CUTOUT: u32 = 4u;
 
+const TINT_KIND_GRASS: u32 = 1u;
+const TINT_KIND_FOLIAGE: u32 = 2u;
 const TINT_WATER: f32 = 4.5;
 
 const HALO_SIZE: i32 = 18;
@@ -87,12 +100,8 @@ const WIRE_UP: u32 = 2u;
 @group(0) @binding(5) var<storage, read_write> scratch_instances: array<VoxelInstance>;
 @group(0) @binding(6) var<storage, read_write> scratch_counters: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> scratch_overflow: array<atomic<u32>>;
-@group(0) @binding(8) var<uniform> emit_params: EmitParams;
-
-struct GpuCameraUniform {
-    view_proj: mat4x4<f32>,
-    position: vec4<f32>,
-}
+@group(0) @binding(8) var<storage, read> chunk_tint_cells: array<ChunkTintCell>;
+@group(0) @binding(9) var<uniform> emit_params: EmitParams;
 
 var<private> chunk_entry: GpuChunkTableEntry;
 var<private> chunk_slot: u32;
@@ -107,7 +116,7 @@ fn block_at(lx: i32, ly: i32, lz: i32) -> GpuBlockCell {
 
 fn meta_for(id: u32) -> GpuBlockMeta {
     if id >= arrayLength(&block_meta) {
-        return GpuBlockMeta(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+        return GpuBlockMeta(0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
     }
     return block_meta[id];
 }
@@ -167,11 +176,64 @@ fn push_instance(bucket_id: u32, inst: VoxelInstance) {
     }
 }
 
-fn cube_face_tint(block_meta: GpuBlockMeta) -> f32 {
+fn unpack_tint_kind(packed: u32, face: u32) -> u32 {
+    if face == 0u {
+        return packed & 0xFFu;
+    }
+    if face == 1u {
+        return (packed >> 8u) & 0xFFu;
+    }
+    return (packed >> 16u) & 0xFFu;
+}
+
+fn tint_kind_as_f32(kind: u32) -> f32 {
+    if kind == 4u {
+        return TINT_WATER;
+    }
+    return f32(kind);
+}
+
+fn biome_grid_index(lx: i32, ly: i32, lz: i32) -> u32 {
+    let gx = clamp(lx / 4, 0, 3);
+    let gy = clamp(ly / 4, 0, 3);
+    let gz = clamp(lz / 4, 0, 3);
+    return u32(gx + gy * 4 + gz * 16);
+}
+
+fn tint_mul_for_kind(lx: i32, ly: i32, lz: i32, kind: u32) -> vec3<f32> {
+    let idx = chunk_entry.tint_cells_offset + biome_grid_index(lx, ly, lz);
+    if idx >= arrayLength(&chunk_tint_cells) {
+        return vec3<f32>(1.0, 1.0, 1.0);
+    }
+    let cell = chunk_tint_cells[idx];
+    if kind == TINT_KIND_GRASS {
+        return vec3<f32>(cell.grass[0], cell.grass[1], cell.grass[2]);
+    }
+    if kind == TINT_KIND_FOLIAGE {
+        return vec3<f32>(cell.foliage[0], cell.foliage[1], cell.foliage[2]);
+    }
+    return vec3<f32>(1.0, 1.0, 1.0);
+}
+
+fn tint_mul_for_face(lx: i32, ly: i32, lz: i32, face: u32, block_meta: GpuBlockMeta) -> array<f32, 3> {
+    let overlay_kind = unpack_tint_kind(block_meta.overlay_tint_kinds, face);
+    var kind = unpack_tint_kind(block_meta.tint_kinds, face);
+    if overlay_kind == TINT_KIND_GRASS || overlay_kind == TINT_KIND_FOLIAGE {
+        kind = overlay_kind;
+    }
+    let mul = tint_mul_for_kind(lx, ly, lz, kind);
+    return array<f32, 3>(mul.x, mul.y, mul.z);
+}
+
+fn face_tint(face: u32, block_meta: GpuBlockMeta) -> f32 {
     if (block_meta.flags & BLOCK_FLAG_FLUID) != 0u {
         return TINT_WATER;
     }
-    return 0.0;
+    return tint_kind_as_f32(unpack_tint_kind(block_meta.tint_kinds, face));
+}
+
+fn face_overlay_tint(face: u32, block_meta: GpuBlockMeta) -> f32 {
+    return tint_kind_as_f32(unpack_tint_kind(block_meta.overlay_tint_kinds, face));
 }
 
 fn emit_cube_face(
@@ -191,14 +253,17 @@ fn emit_cube_face(
     let wy = chunk_entry.origin_y + ly;
     let wz = chunk_entry.origin_z + lz;
     let power = power_at(lx, ly, lz);
+    let tint = face_tint(face, block_meta);
+    let overlay_tint = face_overlay_tint(face, block_meta);
+    let tint_mul = tint_mul_for_face(lx, ly, lz, face, block_meta);
     push_instance(bucket_id, VoxelInstance(
         vec4<i32>(wx, wy, wz, i32(face)),
         cell.id,
         cell.state,
         array<u32, 3>(block_meta.texture_top, block_meta.texture_bottom, block_meta.texture_sides),
-        cube_face_tint(block_meta),
-        0.0,
-        array<f32, 3>(1.0, 1.0, 1.0),
+        tint,
+        overlay_tint,
+        tint_mul,
         power,
         bucket_id,
     ));
@@ -365,11 +430,14 @@ fn main(
         emit_cube_face(lx, ly, lz, cell, block_meta, 4u, lx - 1, ly, lz);
         emit_cube_face(lx, ly, lz, cell, block_meta, 5u, lx + 1, ly, lz);
     } else if block_meta.geometry_kind == GEO_CROSS {
+        let sides_kind = unpack_tint_kind(block_meta.tint_kinds, 2u);
+        let tint = tint_kind_as_f32(sides_kind);
+        let tint_mul = tint_mul_for_kind(lx, ly, lz, sides_kind);
         push_instance(BUCKET_CROSS_CUTOUT, VoxelInstance(
             vec4<i32>(chunk_entry.origin_x + lx, chunk_entry.origin_y + ly, chunk_entry.origin_z + lz, 0),
             cell.id, cell.state,
             array<u32, 3>(block_meta.texture_top, block_meta.texture_bottom, block_meta.texture_sides),
-            0.0, 0.0, array<f32, 3>(1.0, 1.0, 1.0), power_at(lx, ly, lz), BUCKET_CROSS_CUTOUT,
+            tint, 0.0, array<f32, 3>(tint_mul.x, tint_mul.y, tint_mul.z), power_at(lx, ly, lz), BUCKET_CROSS_CUTOUT,
         ));
     } else if block_meta.geometry_kind == GEO_WIRE {
         emit_wire_instances(lx, ly, lz, cell, block_meta);

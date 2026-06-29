@@ -139,6 +139,8 @@ fn capture_upload(
         &ctx.registry,
         &center,
         power_grid,
+        &ctx.biomes,
+        &ctx.colormaps,
     ))
 }
 

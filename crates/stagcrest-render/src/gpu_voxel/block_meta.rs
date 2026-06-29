@@ -1,7 +1,7 @@
 use stagcrest_mod_client::{
     model_variant_for_block, BlockRegistry, ModelRegistry,
 };
-use stagcrest_protocol::{BlockDef, BlockGeometry, ModelId};
+use stagcrest_protocol::{BlockDef, BlockGeometry, ModelId, TintKind};
 
 use crate::gpu_voxel::bucket::DrawBucketRegistry;
 use crate::gpu_voxel::types::{
@@ -136,8 +136,25 @@ fn block_meta_for_def(
         texture_top,
         texture_bottom,
         texture_sides,
+        texture_overlay_top: faces.top.overlay.map(|t| t.0).unwrap_or(0),
+        texture_overlay_bottom: faces.bottom.overlay.map(|t| t.0).unwrap_or(0),
+        texture_overlay_sides: faces.sides.overlay.map(|t| t.0).unwrap_or(0),
+        tint_kinds: pack_tint_kinds(faces.top.tint, faces.bottom.tint, faces.sides.tint),
+        overlay_tint_kinds: pack_tint_kinds(
+            faces.top.overlay_tint,
+            faces.bottom.overlay_tint,
+            faces.sides.overlay_tint,
+        ),
         block_type_id: block_type_hash(&def.namespaced_id),
     }
+}
+
+fn pack_tint_kind(kind: TintKind) -> u32 {
+    kind as u8 as u32
+}
+
+fn pack_tint_kinds(top: TintKind, bottom: TintKind, sides: TintKind) -> u32 {
+    pack_tint_kind(top) | (pack_tint_kind(bottom) << 8) | (pack_tint_kind(sides) << 16)
 }
 
 fn model_layer(model_id: ModelId, models: &ModelRegistry) -> GpuRenderLayer {
@@ -162,9 +179,9 @@ pub fn resolve_variant_for_block(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stagcrest_mod_client::{BlockRegistry, ModelRegistry, TextureAtlas};
+    use stagcrest_mod_client::{BlockRegistry, ModelRegistry};
     use stagcrest_protocol::{
-        BlockDef, BlockFaceTextures, BlockGeometry, BlockId, BlockState, FaceTexture,
+        BlockDef, BlockFaceTextures, BlockGeometry, BlockId, FaceTexture,
         ModelRenderLayer, TintKind,
     };
 

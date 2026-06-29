@@ -86,9 +86,6 @@ mod tests {
     fn unload_drops_gpu_cache_and_triggers_event() {
         use bevy::ecs::world::CommandQueue;
 
-        let mut world = WorldReplica::new(stagcrest_world::World::new(stagcrest_protocol::BlockId(
-            0,
-        )));
         let mut scheduler = GpuChunkScheduler::default();
         let mut cache = GpuChunkCache::default();
         let mut power = CircuitPowerOverlay::default();
@@ -103,6 +100,8 @@ mod tests {
             power: [0; stagcrest_render::gpu_voxel::types::CHUNK_BLOCKS],
             biome: [0; stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
             climate: None,
+            tint_cells: [stagcrest_render::gpu_voxel::types::GpuChunkTintCell::default();
+                stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
         });
         scheduler.request(pos, RemeshUrgency::Visible, 0);
         drop_chunk_assets(pos, &mut scheduler, &mut cache, &mut power, &mut commands);

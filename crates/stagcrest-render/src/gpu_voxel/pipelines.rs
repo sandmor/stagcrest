@@ -17,7 +17,8 @@ use stagcrest_mesh::GpuMeshVertex;
 
 use crate::gpu_voxel::types::{
     BucketFinalizeMeta, CompactUniform, EmitUniform, FinalizeUniform, GpuAtlasRect, GpuBlockCell,
-    GpuBlockMeta, GpuBucketRegion, GpuCameraUniform, GpuChunkTableEntry, VoxelInstance,
+    GpuBlockMeta, GpuBucketRegion, GpuCameraUniform, GpuChunkTableEntry, GpuChunkTintCell,
+    VoxelInstance,
 };
 
 pub const VOXEL_COMPUTE_SHADER: Handle<Shader> =
@@ -196,6 +197,7 @@ pub fn prepare_render_pipelines(
                     storage_buffer::<VoxelInstance>(false),
                     storage_buffer::<u32>(false),
                     storage_buffer::<u32>(false),
+                    storage_buffer_read_only::<GpuChunkTintCell>(false),
                     uniform_buffer::<EmitUniform>(false),
                 ),
             ),
@@ -285,6 +287,7 @@ pub fn prepare_render_pipelines(
                 texture_2d(TextureSampleType::Float { filterable: true }),
                 sampler(SamplerBindingType::Filtering),
                 uniform_buffer::<MaterialUniformsGpu>(false),
+                storage_buffer_read_only::<GpuBlockMeta>(false),
             ),
         ),
     );
