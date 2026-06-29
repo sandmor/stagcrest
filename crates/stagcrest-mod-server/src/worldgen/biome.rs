@@ -4,9 +4,10 @@ use stagcrest_protocol::BlockId;
 use std::collections::HashMap;
 
 pub use stagcrest_mod_sdk::{
-    BiomeDimension, BiomeEnvironment, FeatureKind, FeaturePlacement, NoiseRange,
+    BiomeDimension, BiomeEnvironment, FeatureKind, FeaturePlacement, HydrologyMode, NoiseRange,
     RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterCaveConfigRequest,
-    RegisterFeatureRequest, RegisterRiverConfigRequest, TreeShape,
+    RegisterFeatureRequest, RegisterRiverConfigRequest, RegisterRiverFeatureRequest,
+    RiverFeatureSlot, TreeShape,
 };
 
 /// Sampled climate parameters at a world position.
@@ -50,25 +51,68 @@ pub struct ResolvedBiome {
 }
 
 #[derive(Debug, Clone)]
+pub struct RiverFeature {
+    pub slot: RiverFeatureSlot,
+    pub placement: FeaturePlacement,
+    pub chance: f32,
+}
+
+#[derive(Debug, Clone)]
 pub struct RiverConfig {
     pub width: f32,
-    pub valley_depth: f32,
     pub bank_blocks: Vec<BlockId>,
     pub river_biome_index: u16,
     pub frozen_river_biome_index: u16,
     pub riverbank_biome_index: u16,
+    pub hydrology_mode: HydrologyMode,
+    pub terrace_step: i32,
+    pub terrace_offset: i32,
+    pub drainage_cell_size: i32,
+    pub drainage_relax_passes: u32,
+    pub waterfall_min_drop: i32,
+    pub channel_depth: i32,
+    pub max_channel_carve: i32,
+    pub mouth_sea_margin: i32,
+    pub features: Vec<RiverFeature>,
 }
 
 impl Default for RiverConfig {
     fn default() -> Self {
         Self {
-            width: 4.0,
-            valley_depth: 6.0,
+            width: 8.0,
             bank_blocks: Vec::new(),
             river_biome_index: 0,
             frozen_river_biome_index: 0,
             riverbank_biome_index: 0,
+            hydrology_mode: HydrologyMode::DrainageGrid,
+            terrace_step: 6,
+            terrace_offset: 0,
+            drainage_cell_size: 64,
+            drainage_relax_passes: 12,
+            waterfall_min_drop: 4,
+            channel_depth: 10,
+            max_channel_carve: 12,
+            mouth_sea_margin: 2,
+            features: Vec::new(),
         }
+    }
+}
+
+impl RiverConfig {
+    pub fn apply_to_terrain_config(&self, config: &mut crate::worldgen::config::TerrainConfig) {
+        config.hydrology_mode = match self.hydrology_mode {
+            HydrologyMode::Terrace => crate::worldgen::config::HydrologyMode::Terrace,
+            HydrologyMode::DrainageGrid => crate::worldgen::config::HydrologyMode::DrainageGrid,
+        };
+        config.river_terrace_step = self.terrace_step;
+        config.river_terrace_offset = self.terrace_offset;
+        config.drainage_cell_size = self.drainage_cell_size;
+        config.drainage_relax_passes = self.drainage_relax_passes;
+        config.waterfall_min_drop = self.waterfall_min_drop;
+        config.river_channel_depth = self.channel_depth;
+        config.max_channel_carve = self.max_channel_carve;
+        config.mouth_sea_margin = self.mouth_sea_margin;
+        config.river_width_blocks = self.width;
     }
 }
 
@@ -101,6 +145,7 @@ pub struct BiomeRegistry {
     pending_features: Vec<RegisterFeatureRequest>,
     pending_legacy_features: Vec<RegisterBiomeFeatureRequest>,
     pending_river: Option<RegisterRiverConfigRequest>,
+    pending_river_features: Vec<RegisterRiverFeatureRequest>,
     pending_cave: Option<RegisterCaveConfigRequest>,
     biomes: Vec<ResolvedBiome>,
     river_config: RiverConfig,
@@ -128,6 +173,11 @@ impl BiomeRegistry {
     pub fn register_river_config(&mut self, req: RegisterRiverConfigRequest) {
         self.finalized = false;
         self.pending_river = Some(req);
+    }
+
+    pub fn register_river_feature(&mut self, req: RegisterRiverFeatureRequest) {
+        self.finalized = false;
+        self.pending_river_features.push(req);
     }
 
     pub fn register_cave_config(&mut self, req: RegisterCaveConfigRequest) {
@@ -214,9 +264,17 @@ impl BiomeRegistry {
         }
 
         if let Some(river_req) = self.pending_river.take() {
+            let features: Vec<RiverFeature> = self
+                .pending_river_features
+                .drain(..)
+                .map(|f| RiverFeature {
+                    slot: f.slot,
+                    placement: f.placement,
+                    chance: f.chance.clamp(0.0, 1.0),
+                })
+                .collect();
             self.river_config = RiverConfig {
                 width: river_req.width,
-                valley_depth: river_req.valley_depth,
                 bank_blocks: river_req
                     .bank_blocks
                     .iter()
@@ -236,6 +294,16 @@ impl BiomeRegistry {
                 riverbank_biome_index: *id_to_index.get(&river_req.riverbank_biome_id).ok_or_else(
                     || format!("unknown riverbank biome: {}", river_req.riverbank_biome_id),
                 )?,
+                hydrology_mode: river_req.hydrology_mode,
+                terrace_step: river_req.terrace_step,
+                terrace_offset: river_req.terrace_offset,
+                drainage_cell_size: river_req.drainage_cell_size,
+                drainage_relax_passes: river_req.drainage_relax_passes,
+                waterfall_min_drop: river_req.waterfall_min_drop,
+                channel_depth: river_req.channel_depth,
+                max_channel_carve: river_req.max_channel_carve,
+                mouth_sea_margin: river_req.mouth_sea_margin,
+                features,
             };
         }
 
@@ -426,6 +494,13 @@ pub fn register_biome_feature_host(
 
 pub fn register_river_config_host(registry: &mut BiomeRegistry, json: RegisterRiverConfigRequest) {
     registry.register_river_config(json);
+}
+
+pub fn register_river_feature_host(
+    registry: &mut BiomeRegistry,
+    json: RegisterRiverFeatureRequest,
+) {
+    registry.register_river_feature(json);
 }
 
 pub fn register_cave_config_host(registry: &mut BiomeRegistry, json: RegisterCaveConfigRequest) {

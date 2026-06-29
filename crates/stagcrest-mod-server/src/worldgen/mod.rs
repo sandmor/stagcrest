@@ -3,6 +3,7 @@ mod caves;
 mod climate;
 mod config;
 mod decorate_snapshot;
+mod feature_primitives;
 mod features;
 mod generator;
 mod hybrid_tree;
@@ -15,8 +16,8 @@ mod test_fixtures;
 
 pub use biome::{
     register_biome_feature_host, register_biome_host, register_cave_config_host,
-    register_feature_host, register_river_config_host, BiomeRegistry, FeatureKind,
-    RegisterBiomeFeatureRequest, RegisterBiomeRequest, ResolvedBiome,
+    register_feature_host, register_river_config_host, register_river_feature_host, BiomeRegistry,
+    FeatureKind, RegisterBiomeFeatureRequest, RegisterBiomeRequest, ResolvedBiome,
 };
 pub use climate::ClimateSampler;
 pub use config::{terrain_chunk_y_range, world_chunk_y_bounds, TerrainConfig, SEA_LEVEL};

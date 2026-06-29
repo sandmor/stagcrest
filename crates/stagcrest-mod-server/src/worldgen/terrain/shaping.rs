@@ -98,21 +98,6 @@ impl<'a> TerrainShaper<'a> {
             elevation += n * amp;
         }
 
-        // River valley carving: continuous channel with bed below sea level
-        let river_strength = self.rivers.river_strength(wx, wz, erosion as f32) as f64;
-        if river_strength > 0.0 {
-            let bank = elevation;
-            let bed = (self.config.sea_level as f64)
-                - 1.0
-                - self.config.river_valley_depth * river_strength;
-            let carve = (bank - bed).max(0.0);
-            elevation = bank - carve * river_strength;
-            // Full river columns must sit below the water fill line.
-            if river_strength > 0.5 {
-                elevation = elevation.min((self.config.sea_level - 1) as f64);
-            }
-        }
-
         elevation
     }
 
@@ -130,6 +115,14 @@ impl<'a> TerrainShaper<'a> {
             wz as f64 * self.config.erosion_frequency,
         ) as f32;
         self.rivers.is_riverbank(wx, wz, erosion)
+    }
+
+    pub fn river_strength(&self, wx: i32, wz: i32) -> f32 {
+        let erosion = self.noise.get(TerrainLayer::Erosion).sample2d(
+            wx as f64 * self.config.erosion_frequency,
+            wz as f64 * self.config.erosion_frequency,
+        ) as f32;
+        self.rivers.river_strength(wx, wz, erosion)
     }
 
     fn roughness(&self, x: f64, z: f64) -> f64 {

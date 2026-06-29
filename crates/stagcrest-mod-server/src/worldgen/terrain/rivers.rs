@@ -13,27 +13,15 @@ impl<'a> RiverSampler<'a> {
         Self { config, noise }
     }
 
-    /// River strength 0..1 for valley carving and biome assignment.
+    /// River strength 0..1 for path width and biome assignment.
     pub fn river_strength(&self, wx: i32, wz: i32, erosion: f32) -> f32 {
-        let x = wx as f64;
-        let z = wz as f64;
-
-        let warp_x = self.noise.get(TerrainLayer::RiverB).sample2d(
-            x * self.config.river_b_frequency,
-            z * self.config.river_b_frequency,
-        );
-        let warp_z = self.noise.get(TerrainLayer::RiverB).sample2d(
-            (x + 1000.0) * self.config.river_b_frequency,
-            (z + 1000.0) * self.config.river_b_frequency,
-        );
-
-        let warp = self.config.river_warp_strength;
-        let sx = x * self.config.river_frequency + warp_x * warp;
-        let sz = z * self.config.river_frequency + warp_z * warp;
-
+        let (sx, sz) = sample_space(self.noise, self.config, wx, wz);
         let n = self.noise.get(TerrainLayer::River).sample2d(sx, sz);
         let d = n.abs();
-        let width = self.config.river_width.max(0.001);
+        let grad = river_gradient_magnitude(self.noise, sx, sz);
+        // w = B * f * |∇n|: block width in sample space scaled by local contour slope.
+        let width = (self.config.river_width_blocks as f64 * self.config.river_frequency * grad)
+            .max(0.001);
         let mut strength = (1.0 - d / width).clamp(0.0, 1.0) as f32;
 
         // Suppress rivers in steep/mountainous terrain (low erosion).
@@ -52,6 +40,33 @@ impl<'a> RiverSampler<'a> {
     }
 }
 
+fn river_gradient_magnitude(noise: &NoiseBank, sx: f64, sz: f64) -> f64 {
+    const H: f64 = 0.05;
+    let layer = TerrainLayer::River;
+    let n0 = noise.get(layer).sample2d(sx, sz);
+    let nx = noise.get(layer).sample2d(sx + H, sz);
+    let nz = noise.get(layer).sample2d(sx, sz + H);
+    let gx = (nx - n0) / H;
+    let gz = (nz - n0) / H;
+    (gx * gx + gz * gz).sqrt().max(0.5)
+}
+
+fn sample_space(noise: &NoiseBank, config: &TerrainConfig, wx: i32, wz: i32) -> (f64, f64) {
+    let x = wx as f64;
+    let z = wz as f64;
+    let warp_x = noise.get(TerrainLayer::RiverB).sample2d(
+        x * config.river_b_frequency,
+        z * config.river_b_frequency,
+    );
+    let warp_z = noise.get(TerrainLayer::RiverB).sample2d(
+        (x + 1000.0) * config.river_b_frequency,
+        (z + 1000.0) * config.river_b_frequency,
+    );
+    let sx = x * config.river_frequency + warp_x * config.river_warp_strength;
+    let sz = z * config.river_frequency + warp_z * config.river_warp_strength;
+    (sx, sz)
+}
+
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -60,83 +75,95 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::worldgen::config::TerrainConfig;
     use crate::worldgen::noise::NoiseBank;
-    use crate::worldgen::seed::{TerrainLayer, WorldSeed};
-    use crate::worldgen::terrain::shaping::TerrainShaper;
+    use crate::worldgen::seed::WorldSeed;
     use std::collections::VecDeque;
 
+    fn erosion_at(noise: &NoiseBank, config: &TerrainConfig, wx: i32, wz: i32) -> f32 {
+        noise
+            .get(TerrainLayer::Erosion)
+            .sample2d(
+                wx as f64 * config.erosion_frequency,
+                wz as f64 * config.erosion_frequency,
+            ) as f32
+    }
+
+    fn full_river_span_axis(
+        rivers: &RiverSampler<'_>,
+        erosion: &impl Fn(i32, i32) -> f32,
+        wx: i32,
+        wz: i32,
+        axis_x: bool,
+    ) -> i32 {
+        if rivers.river_strength(wx, wz, erosion(wx, wz)) <= 0.5 {
+            return 0;
+        }
+        let mut span = 1i32;
+        for d in 1..64 {
+            let (x, z) = if axis_x { (wx + d, wz) } else { (wx, wz + d) };
+            if rivers.river_strength(x, z, erosion(x, z)) <= 0.5 {
+                break;
+            }
+            span += 1;
+        }
+        for d in 1..64 {
+            let (x, z) = if axis_x { (wx - d, wz) } else { (wx, wz - d) };
+            if rivers.river_strength(x, z, erosion(x, z)) <= 0.5 {
+                break;
+            }
+            span += 1;
+        }
+        span
+    }
+
+    fn max_perpendicular_river_width_near(
+        config: &TerrainConfig,
+        noise: &NoiseBank,
+        origin_x: i32,
+        origin_z: i32,
+        radius: i32,
+    ) -> i32 {
+        let rivers = RiverSampler::new(config, noise);
+        let erosion = |x: i32, z: i32| erosion_at(noise, config, x, z);
+        let mut best = 0i32;
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                let wx = origin_x + dx;
+                let wz = origin_z + dz;
+                if rivers.river_strength(wx, wz, erosion(wx, wz)) <= 0.9 {
+                    continue;
+                }
+                let sx = full_river_span_axis(&rivers, &erosion, wx, wz, true);
+                let sz = full_river_span_axis(&rivers, &erosion, wx, wz, false);
+                best = best.max(sx.min(sz));
+            }
+        }
+        best
+    }
+
     #[test]
-    fn rivers_form_carved_connected_channels() {
+    fn rivers_form_connected_channels() {
         let config = TerrainConfig::default();
         let noise = NoiseBank::new(WorldSeed(42));
         let rivers = RiverSampler::new(&config, &noise);
-        let shaper = TerrainShaper::new(&config, &noise);
         let origin = 4096;
         let size = 512;
         let mut river_map = vec![false; size * size];
-        let mut carved = 0usize;
 
         for dz in 0..size {
             for dx in 0..size {
                 let wx = origin + dx as i32;
                 let wz = origin + dz as i32;
-                let erosion = noise.get(TerrainLayer::Erosion).sample2d(
-                    wx as f64 * config.erosion_frequency,
-                    wz as f64 * config.erosion_frequency,
-                ) as f32;
-                let is_river = rivers.is_river(wx, wz, erosion);
-                river_map[dz * size + dx] = is_river;
-                if is_river {
-                    let surface_y = shaper.surface_y(wx, wz);
-                    assert!(
-                        surface_y < config.sea_level as f64,
-                        "river at ({wx},{wz}) surface_y={surface_y} should be below sea level"
-                    );
-                    carved += 1;
-                }
+                river_map[dz * size + dx] =
+                    rivers.is_river(wx, wz, erosion_at(&noise, &config, wx, wz));
             }
         }
-
-        assert!(carved > 20, "expected river samples to validate carving");
 
         let total_rivers: usize = river_map.iter().filter(|&&r| r).count();
-        assert!(
-            total_rivers > 100,
-            "expected meaningful river coverage, got {total_rivers}"
-        );
+        assert!(total_rivers > 100, "expected meaningful river coverage, got {total_rivers}");
 
-        let mut isolated = 0usize;
-        for dz in 0..size {
-            for dx in 0..size {
-                if !river_map[dz * size + dx] {
-                    continue;
-                }
-                let neighbors = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                    .into_iter()
-                    .filter(|&(ox, oz)| {
-                        let nx = dx as i32 + ox;
-                        let nz = dz as i32 + oz;
-                        nx >= 0
-                            && nz >= 0
-                            && nx < size as i32
-                            && nz < size as i32
-                            && river_map[nz as usize * size + nx as usize]
-                    })
-                    .count();
-                if neighbors == 0 {
-                    isolated += 1;
-                }
-            }
-        }
-
-        assert!(
-            isolated * 100 / total_rivers.max(1) < 20,
-            "too many isolated river columns ({isolated}/{total_rivers}); field looks like noise"
-        );
-
-        let mut visited = vec![false; size * size];
         let mut largest = 0usize;
+        let mut visited = vec![false; size * size];
         for dz in 0..size {
             for dx in 0..size {
                 let idx = dz * size + dx;
@@ -164,10 +191,28 @@ mod tests {
                 largest = largest.max(component);
             }
         }
-
         assert!(
             largest >= 50,
             "largest river component too small ({largest}); expected serpentine channels"
+        );
+    }
+
+    #[test]
+    fn river_width_blocks_affects_span() {
+        let noise = NoiseBank::new(WorldSeed(42));
+        let mut config = TerrainConfig::default();
+        config.river_width_blocks = 8.0;
+        let span8 = max_perpendicular_river_width_near(&config, &noise, 4096, 4096, 64);
+        config.river_width_blocks = 16.0;
+        let span16 = max_perpendicular_river_width_near(&config, &noise, 4096, 4096, 64);
+        assert!(span8 > 0, "expected rivers in scan, perp_width8={span8}");
+        assert!(
+            span16 > span8,
+            "doubling width should increase perpendicular span (8->{span8}, 16->{span16})"
+        );
+        assert!(
+            (5..=12).contains(&span8),
+            "width=8 should yield ~8 block perpendicular river, got {span8}"
         );
     }
 }

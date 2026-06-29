@@ -144,8 +144,6 @@ fn build_single_block_mesh_internal(
             registry,
             0,
             0,
-            0,
-            0,
             None,
             None,
         );
@@ -173,8 +171,6 @@ fn build_single_block_mesh_internal(
         models,
         power,
         state,
-        0,
-        0,
         0,
         0,
         None,
@@ -219,23 +215,11 @@ fn neighbor_culls_face(
 /// Per-column grass and foliage tint multipliers for a chunk (indexed by local x, z).
 type ColumnTintCache = [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
 
-fn build_column_tint_cache(
-    base_x: i32,
-    base_z: i32,
-    climate: &MeshClimateTint<'_>,
-) -> ColumnTintCache {
-    let mut grid = [[([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
-    for lz in 0..CHUNK_SIZE as usize {
-        for lx in 0..CHUNK_SIZE as usize {
-            let wx = base_x + lx as i32;
-            let wz = base_z + lz as i32;
-            grid[lz][lx] = (
-                tint_mul_for_kind(TintKind::Grass, wx, wz, Some(climate)),
-                tint_mul_for_kind(TintKind::Foliage, wx, wz, Some(climate)),
-            );
-        }
-    }
-    grid
+fn build_column_tint_cache(climate: &MeshClimateTint<'_>) -> ColumnTintCache {
+    let grass = tint_mul_for_kind(TintKind::Grass, Some(climate));
+    let foliage = tint_mul_for_kind(TintKind::Foliage, Some(climate));
+    let cell = (grass, foliage);
+    [[cell; CHUNK_SIZE as usize]; CHUNK_SIZE as usize]
 }
 
 pub(crate) fn fluid_flow_textures(
@@ -272,7 +256,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
     let base_y = chunk_pos.y * CHUNK_SIZE;
     let base_z = chunk_pos.z * CHUNK_SIZE;
 
-    let column_tints = climate.map(|ctx| build_column_tint_cache(base_x, base_z, ctx));
+    let column_tints = climate.map(build_column_tint_cache);
 
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
@@ -350,8 +334,6 @@ pub(crate) fn build_chunk_mesh_neighbors(
                     models,
                     block_power,
                     block.state,
-                    wx,
-                    wz,
                     x as i32,
                     z as i32,
                     climate,
@@ -389,8 +371,6 @@ fn emit_block_geometry(
     models: &ModelRegistry,
     power: u8,
     state: BlockState,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -405,8 +385,6 @@ fn emit_block_geometry(
             face_textures,
             cube_bucket,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -423,8 +401,6 @@ fn emit_block_geometry(
                     textures,
                     power,
                     registry,
-                    wx,
-                    wz,
                     lx,
                     lz,
                     climate,
@@ -437,8 +413,6 @@ fn emit_block_geometry(
                     face_textures.sides,
                     power,
                     registry,
-                    wx,
-                    wz,
                     lx,
                     lz,
                     climate,
@@ -453,8 +427,6 @@ fn emit_block_geometry(
                 face_textures,
                 power,
                 registry,
-                wx,
-                wz,
                 lx,
                 lz,
                 climate,
@@ -475,8 +447,6 @@ fn emit_cube_faces(
     face_textures: &stagcrest_protocol::BlockFaceTextures,
     bucket: MeshBucket,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -510,8 +480,6 @@ fn emit_cube_faces(
             0,
             bucket,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -577,8 +545,6 @@ fn emit_dust_quad_raw(
     power: u8,
     power_tinted: bool,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -600,7 +566,7 @@ fn emit_dust_quad_raw(
     } else {
         0.0
     };
-    let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
+    let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
     let (verts, indices) = block_model::mesh_buffers(mesh, MeshBucket::Cutout);
     let base = verts.len() as u32;
     for (i, pos) in corners.iter().enumerate() {
@@ -626,8 +592,6 @@ fn emit_dust_layer_pair(
     normal_axis: usize,
     power: u8,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -644,8 +608,6 @@ fn emit_dust_layer_pair(
                 power,
                 false,
                 registry,
-                wx,
-                wz,
                 lx,
                 lz,
                 climate,
@@ -661,8 +623,6 @@ fn emit_dust_layer_pair(
         power,
         true,
         registry,
-        wx,
-        wz,
         lx,
         lz,
         climate,
@@ -678,8 +638,6 @@ fn emit_dust(
     textures: DustTextures,
     power: u8,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -705,8 +663,6 @@ fn emit_dust(
             1,
             power,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -764,8 +720,6 @@ fn emit_dust(
                     1,
                     power,
                     registry,
-                    wx,
-                    wz,
                     lx,
                     lz,
                     climate,
@@ -824,8 +778,6 @@ fn emit_dust(
                     axis,
                     power,
                     registry,
-                    wx,
-                    wz,
                     lx,
                     lz,
                     climate,
@@ -843,8 +795,6 @@ fn emit_flat(
     face_tex: FaceTexture,
     power: u8,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -865,8 +815,6 @@ fn emit_flat(
         power,
         MeshBucket::Cutout,
         registry,
-        wx,
-        wz,
         lx,
         lz,
         climate,
@@ -881,8 +829,6 @@ fn emit_cross_plants(
     face_textures: &stagcrest_protocol::BlockFaceTextures,
     power: u8,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -899,8 +845,6 @@ fn emit_cross_plants(
             face_textures.bottom,
             power,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -914,8 +858,6 @@ fn emit_cross_plants(
             face_textures.top,
             power,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -930,8 +872,6 @@ fn emit_cross_plants(
             uniform,
             power,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -948,8 +888,6 @@ fn emit_cross_layer(
     face_tex: FaceTexture,
     power: u8,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -978,8 +916,6 @@ fn emit_cross_layer(
             power,
             MeshBucket::Cutout,
             registry,
-            wx,
-            wz,
             lx,
             lz,
             climate,
@@ -993,8 +929,6 @@ const WHITE_TINT_MUL: [f32; 3] = [1.0, 1.0, 1.0];
 
 fn face_tint_mul(
     face_tex: &FaceTexture,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -1013,13 +947,11 @@ fn face_tint_mul(
             _ => WHITE_TINT_MUL,
         };
     }
-    tint_mul_for_kind(kind, wx, wz, climate)
+    tint_mul_for_kind(kind, climate)
 }
 
 fn tint_mul_for_kind(
     kind: TintKind,
-    wx: i32,
-    wz: i32,
     climate: Option<&MeshClimateTint<'_>>,
 ) -> [f32; 3] {
     let Some(ctx) = climate else {
@@ -1104,8 +1036,6 @@ fn emit_face_from_texture(
     power: u8,
     bucket: MeshBucket,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -1122,7 +1052,7 @@ fn emit_face_from_texture(
                 w: 0,
                 h: 0,
             });
-    let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
+    let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
     emit_face(
         mesh,
         origin,
@@ -1146,8 +1076,6 @@ fn emit_quad(
     power: u8,
     bucket: MeshBucket,
     registry: &BlockRegistry,
-    wx: i32,
-    wz: i32,
     lx: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
@@ -1178,7 +1106,7 @@ fn emit_quad(
     let uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)];
     let overlay_uvs = [(ou0, ov1), (ou1, ov1), (ou1, ov0), (ou0, ov0)];
     let tint = vertex_tint(face_tex, power);
-    let tint_mul = face_tint_mul(&face_tex, wx, wz, lx, lz, climate, column_tints);
+    let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
 
     for (i, pos) in corners.iter().enumerate() {
         verts.push(VoxelVertex {

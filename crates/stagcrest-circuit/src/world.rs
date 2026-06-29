@@ -1,4 +1,4 @@
-use crate::registry::{BlockRegistry, PowerLookup};
+use crate::registry::BlockRegistry;
 use stagcrest_protocol::{set_torch_lit, BlockPos, BlockState, CircuitKind};
 use stagcrest_world::World;
 use std::collections::HashMap;
@@ -228,12 +228,6 @@ impl CircuitWorld {
         // Delay-only change: remesh via set_block, but don't reset delay_input or
         // cancel in-flight timers (vanilla keeps timing when cycling delay).
         world.set_block(pos, id, new_state);
-    }
-}
-
-impl PowerLookup for CircuitWorld {
-    fn power_at(&self, pos: BlockPos) -> u8 {
-        CircuitWorld::power_at(self, pos)
     }
 }
 

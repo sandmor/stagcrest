@@ -2,6 +2,7 @@ use crate::registry::BlockRegistry;
 use crate::worldgen::biome::{BiomeDimension, BiomeRegistry};
 use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::terrain::column::ColumnBlocks;
+use crate::worldgen::terrain::density::DensitySampler;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos};
 
 /// Cave biome decoration pass.
@@ -30,7 +31,7 @@ impl<'a> CaveDecorator<'a> {
         _pos: ChunkPos,
         density_entries: &[(BlockPos, BlockId, BlockState)],
         climate_sampler: &crate::worldgen::climate::ClimateSampler<'_>,
-        density: &crate::worldgen::terrain::DensitySampler<'_>,
+        density: &DensitySampler<'_>,
     ) -> Vec<(BlockPos, BlockId, BlockState)> {
         let mut decor = Vec::new();
 
@@ -55,6 +56,10 @@ impl<'a> CaveDecorator<'a> {
                 continue;
             }
 
+            if density.touches_river_channel(wx, y, wz) {
+                continue;
+            }
+
             match biome.namespaced_id.as_str() {
                 "stagcrest:lush_caves" => {
                     if below == self.blocks.stone || below == id {
@@ -63,16 +68,24 @@ impl<'a> CaveDecorator<'a> {
                         }
                     }
                     if y % 7 == 0 {
+                        let glow_pos = BlockPos::new(wx, y + 1, wz);
+                        if density.touches_river_channel(wx, y + 1, wz) {
+                            continue;
+                        }
                         if let Some(glow) = self.resolve("stagcrest:glow_lichen") {
-                            decor.push((BlockPos::new(wx, y + 1, wz), glow, BlockState(0)));
+                            decor.push((glow_pos, glow, BlockState(0)));
                         }
                     }
                 }
                 "stagcrest:dripstone_caves" => {
                     let above_solid = above != self.blocks.air && above != self.blocks.water;
                     if y % 5 == 0 && above_solid {
+                        let stal_pos = BlockPos::new(wx, y + 1, wz);
+                        if density.touches_river_channel(wx, y + 1, wz) {
+                            continue;
+                        }
                         if let Some(stal) = self.resolve("stagcrest:pointed_dripstone") {
-                            decor.push((BlockPos::new(wx, y + 1, wz), stal, BlockState(0)));
+                            decor.push((stal_pos, stal, BlockState(0)));
                         }
                     }
                     if below == self.blocks.stone {

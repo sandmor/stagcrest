@@ -4,12 +4,12 @@ use crate::resourcepack::ResourcePackLoader;
 use crate::runtime::memory::{read_utf8, write_bytes};
 use crate::worldgen::{
     register_biome_feature_host, register_biome_host, register_cave_config_host,
-    register_feature_host, register_river_config_host, BiomeRegistry,
+    register_feature_host, register_river_config_host, register_river_feature_host, BiomeRegistry,
 };
 use stagcrest_mod_sdk::{
     RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest,
     RegisterCaveConfigRequest, RegisterFeatureRequest, RegisterRiverConfigRequest,
-    RegisterTextureRequest,
+    RegisterRiverFeatureRequest, RegisterTextureRequest,
 };
 use std::ptr;
 use wasmi::*;
@@ -119,6 +119,21 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
                 .map_err(|e| Error::new(format!("register_river_config json: {e}")))?;
             let biome_registry = unsafe { &mut *caller.data().biome_registry };
             register_river_config_host(biome_registry, req);
+            Ok(0)
+        },
+    )?;
+
+    linker.func_wrap(
+        "stagcrest_host",
+        "register_river_feature",
+        |caller: Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, Error> {
+            let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
+            let json = read_utf8(&memory, &caller, ptr, len)
+                .ok_or_else(|| Error::new("invalid register_river_feature payload"))?;
+            let req: RegisterRiverFeatureRequest = serde_json::from_str(&json)
+                .map_err(|e| Error::new(format!("register_river_feature json: {e}")))?;
+            let biome_registry = unsafe { &mut *caller.data().biome_registry };
+            register_river_feature_host(biome_registry, req);
             Ok(0)
         },
     )?;

@@ -1,7 +1,7 @@
 use crate::{
     RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest,
     RegisterCaveConfigRequest, RegisterFeatureRequest, RegisterRiverConfigRequest,
-    RegisterTextureRequest,
+    RegisterRiverFeatureRequest, RegisterTextureRequest,
 };
 use serde::Deserialize;
 
@@ -24,6 +24,8 @@ extern "C" {
     fn host_register_feature(ptr: i32, len: i32) -> i32;
     #[link_name = "register_river_config"]
     fn host_register_river_config(ptr: i32, len: i32) -> i32;
+    #[link_name = "register_river_feature"]
+    fn host_register_river_feature(ptr: i32, len: i32) -> i32;
     #[link_name = "register_cave_config"]
     fn host_register_cave_config(ptr: i32, len: i32) -> i32;
     #[link_name = "register_biome_feature"]
@@ -65,6 +67,11 @@ pub fn register_feature(req: RegisterFeatureRequest) -> i32 {
 pub fn register_river_config(req: RegisterRiverConfigRequest) -> i32 {
     let json = serde_json::to_string(&req).expect("serialize RegisterRiverConfigRequest");
     unsafe { with_utf8(&json, |ptr, len| host_register_river_config(ptr, len)) }
+}
+
+pub fn register_river_feature(req: RegisterRiverFeatureRequest) -> i32 {
+    let json = serde_json::to_string(&req).expect("serialize RegisterRiverFeatureRequest");
+    unsafe { with_utf8(&json, |ptr, len| host_register_river_feature(ptr, len)) }
 }
 
 pub fn register_cave_config(req: RegisterCaveConfigRequest) -> i32 {

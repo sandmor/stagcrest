@@ -2,6 +2,7 @@ use crate::registry::BlockRegistry;
 use crate::worldgen::biome::BiomeRegistry;
 use crate::worldgen::config::TerrainConfig;
 use crate::worldgen::decorate_snapshot::DecorateSnapshot;
+use crate::worldgen::feature_primitives::hash_biome_chance;
 use crate::worldgen::hybrid_tree::HybridTreeGenerator;
 use crate::worldgen::noise::NoiseBank;
 use crate::worldgen::occupancy::OccupancyMap;
@@ -133,7 +134,7 @@ impl<'a> FeaturePlacer<'a> {
         occupancy: &mut OccupancyMap,
         features: &mut Vec<(BlockPos, BlockId, BlockState)>,
     ) {
-        let roll = hash_chance(self.seed, wx, wz, placement);
+        let roll = hash_biome_chance(self.seed, wx, wz, placement);
         if roll >= chance {
             return;
         }
@@ -298,6 +299,8 @@ impl<'a> FeaturePlacer<'a> {
                     occupancy.place(pos, id);
                 }
             }
+            FeaturePlacement::WaterfallSheet { .. }
+            | FeaturePlacement::WaterfallPool { .. } => {}
             _ => {}
         }
     }
@@ -348,33 +351,5 @@ impl<'a> FeaturePlacer<'a> {
 
     fn resolve(&self, name: &str) -> BlockId {
         self.registry.block_by_name(name).unwrap_or(self.blocks.air)
-    }
-}
-
-fn hash_chance(seed: WorldSeed, wx: i32, wz: i32, placement: &FeaturePlacement) -> f32 {
-    let tag = placement_discriminant(placement);
-    let h = seed
-        .0
-        .wrapping_add(wx as u64)
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        .wrapping_add(wz as u64)
-        .wrapping_add(tag.wrapping_mul(0x517C_C1B7_2722_0A95));
-    let mixed = (h ^ (h >> 33)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    (mixed as f32 / u64::MAX as f32).clamp(0.0, 0.9999)
-}
-
-fn placement_discriminant(placement: &FeaturePlacement) -> u64 {
-    use FeaturePlacement::*;
-    match placement {
-        Plant { .. } => 1,
-        Patch { .. } => 2,
-        Tree { .. } => 3,
-        Boulder { .. } => 4,
-        Column { .. } => 5,
-        IceSpike => 6,
-        Stalagmite { .. } => 7,
-        Stalactite { .. } => 8,
-        SurfacePatch { .. } => 9,
-        GlowFlora { .. } => 10,
     }
 }

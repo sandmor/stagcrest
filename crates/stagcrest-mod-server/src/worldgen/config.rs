@@ -3,6 +3,14 @@ use std::ops::RangeInclusive;
 
 pub const SEA_LEVEL: i32 = 64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HydrologyMode {
+    Terrace,
+    #[default]
+    DrainageGrid,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Octave {
     pub frequency: f64,
@@ -60,12 +68,21 @@ pub struct TerrainConfig {
     pub ore_frequency: f64,
     pub ore_threshold: f64,
     pub ore_max_y: i32,
-    // Rivers
-    pub river_width: f64,
-    pub river_valley_depth: f64,
+    // Rivers / hydrology
+    /// Full river channel width in blocks (mod-facing).
+    pub river_width_blocks: f32,
     pub river_warp_strength: f64,
     /// Offset applied to erosion-gate edges for river suppression in mountains.
     pub river_erosion_bias: f64,
+    pub hydrology_mode: HydrologyMode,
+    pub river_terrace_step: i32,
+    pub river_terrace_offset: i32,
+    pub drainage_cell_size: i32,
+    pub drainage_relax_passes: u32,
+    pub waterfall_min_drop: i32,
+    pub river_channel_depth: i32,
+    pub max_channel_carve: i32,
+    pub mouth_sea_margin: i32,
 }
 
 impl Default for TerrainConfig {
@@ -127,10 +144,18 @@ impl Default for TerrainConfig {
             ore_frequency: 0.08,
             ore_threshold: 0.15,
             ore_max_y: 48,
-            river_width: 0.06,
-            river_valley_depth: 6.0,
+            river_width_blocks: 8.0,
             river_warp_strength: 0.4,
             river_erosion_bias: 0.0,
+            hydrology_mode: HydrologyMode::DrainageGrid,
+            river_terrace_step: 6,
+            river_terrace_offset: 0,
+            drainage_cell_size: 64,
+            drainage_relax_passes: 12,
+            waterfall_min_drop: 4,
+            river_channel_depth: 1,
+            max_channel_carve: 4,
+            mouth_sea_margin: 2,
         }
     }
 }

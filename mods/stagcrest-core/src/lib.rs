@@ -30,6 +30,13 @@ impl stagcrest_mod_sdk::ContentRegistrar for WasmRegistrar {
         stagcrest_mod_sdk::register_river_config(req)
     }
 
+    fn register_river_feature(
+        &mut self,
+        req: stagcrest_mod_sdk::RegisterRiverFeatureRequest,
+    ) -> i32 {
+        stagcrest_mod_sdk::register_river_feature(req)
+    }
+
     fn register_cave_config(&mut self, req: stagcrest_mod_sdk::RegisterCaveConfigRequest) -> i32 {
         stagcrest_mod_sdk::register_cave_config(req)
     }

@@ -4,6 +4,7 @@ use crate::worldgen::config::TerrainConfig;
 use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::terrain::column::ColumnBlocks;
 use crate::worldgen::terrain::density::DensitySampler;
+use crate::worldgen::terrain::hydrology::RiverSegment;
 use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_protocol::{
     still_water_state, BlockId, BlockPos, BlockState, ChunkPos, LocalBlockPos, CHUNK_SIZE,
@@ -12,7 +13,7 @@ use stagcrest_protocol::{
 
 pub struct ChunkFiller<'a> {
     config: &'a TerrainConfig,
-    density: DensitySampler<'a>,
+    density: &'a DensitySampler<'a>,
     climate: ClimateSampler<'a>,
     biomes: &'a BiomeRegistry,
     blocks: ColumnBlocks,
@@ -21,7 +22,7 @@ pub struct ChunkFiller<'a> {
 impl<'a> ChunkFiller<'a> {
     pub fn new(
         config: &'a TerrainConfig,
-        density: DensitySampler<'a>,
+        density: &'a DensitySampler<'a>,
         climate: ClimateSampler<'a>,
         biomes: &'a BiomeRegistry,
         blocks: ColumnBlocks,
@@ -42,6 +43,22 @@ impl<'a> ChunkFiller<'a> {
         let water_state = still_water_state();
         let mut entries = Vec::new();
 
+        self.density.hydrology().ensure_region(
+            base_x,
+            base_z,
+            base_x + CHUNK_SIZE - 1,
+            base_z + CHUNK_SIZE - 1,
+        );
+
+        let mut river_cols = [[None; CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let wx = base_x + lx;
+                let wz = base_z + lz;
+                river_cols[lz as usize][lx as usize] = self.density.river_column(wx, wz);
+            }
+        }
+
         for ly in 0..CHUNK_SIZE {
             for lz in 0..CHUNK_SIZE {
                 for lx in 0..CHUNK_SIZE {
@@ -49,11 +66,22 @@ impl<'a> ChunkFiller<'a> {
                     let y = base_y + ly;
                     let wz = base_z + lz;
                     let surface_y = self.density.surface_y(wx, wz);
+                    let river = river_cols[lz as usize][lx as usize];
 
                     let mut block = if y == self.config.world_min_y {
                         self.blocks.bedrock
                     } else if self.density.is_solid_at_y(wx, y, wz, surface_y) {
                         self.blocks.stone
+                    } else if let Some(col) = river {
+                        let in_pool = y > col.bed_y && y <= col.water_surface_y;
+                        let in_fall = col.segment == RiverSegment::Waterfall
+                            && y > col.downstream_water_y
+                            && y <= col.water_surface_y;
+                        if in_pool || in_fall {
+                            self.blocks.water
+                        } else {
+                            continue;
+                        }
                     } else if y < self.config.sea_level {
                         self.blocks.water
                     } else {
@@ -94,12 +122,18 @@ impl<'a> ChunkFiller<'a> {
         let mut states = vec![BlockState(0); CHUNK_VOLUME];
         let chunk_side = CHUNK_SIZE as usize;
         let mut surface_y_map = [[sea as f64; 16]; 16];
+        let mut water_y_map = [[sea; 16]; 16];
 
         for lz in 0..chunk_side {
             for lx in 0..chunk_side {
                 let wx = base_x + lx as i32;
                 let wz = base_z + lz as i32;
                 surface_y_map[lz][lx] = self.density.surface_y(wx, wz);
+                water_y_map[lz][lx] = self
+                    .density
+                    .river_column(wx, wz)
+                    .map(|c| c.water_surface_y)
+                    .unwrap_or(sea);
             }
         }
 
@@ -135,6 +169,8 @@ impl<'a> ChunkFiller<'a> {
                     }
 
                     let surface_y = surface_y_map[lz as usize][lx as usize];
+                    let water_y = water_y_map[lz as usize][lx as usize];
+                    let river_col = self.density.river_column(wx, wz);
                     let biome = self.biome_at_local(lx, ly, lz, biome_grid);
                     let on_island = self.density.sky_islands().is_solid(wx, y, wz);
 
@@ -163,17 +199,25 @@ impl<'a> ChunkFiller<'a> {
                     };
 
                     let above_open = above_id == self.blocks.air || above_id == self.blocks.water;
-                    let shoreline = y == sea && below_id == self.blocks.water;
+                    let shoreline = y == water_y && below_id == self.blocks.water;
+
+                    // Never cap a river column with surface blocks above the water line.
+                    if let Some(col) = river_col {
+                        if y > col.water_surface_y && (y as f64) < surface_y {
+                            continue;
+                        }
+                    }
 
                     if above_open || shoreline {
                         let top = if on_island && y as f64 >= surface_y - 2.0 {
                             biome.surface_top
-                        } else if y >= sea {
+                        } else if y >= water_y.saturating_sub(1) {
                             if self.density.is_riverbank(wx, wz) {
                                 biome.underwater_top.unwrap_or(self.blocks.sand)
                             } else if is_beach(
                                 surface_y,
                                 sea,
+                                water_y,
                                 biome.climate_downfall,
                                 &buffer,
                                 snapshot,
@@ -193,7 +237,7 @@ impl<'a> ChunkFiller<'a> {
                         };
                         buffer[idx] = top;
                         states[idx] = BlockState(0);
-                    } else if y >= sea {
+                    } else if y >= water_y.saturating_sub(1) {
                         let under = if on_island {
                             biome.surface_under
                         } else if above_id == biome.surface_top
@@ -226,32 +270,36 @@ impl<'a> ChunkFiller<'a> {
             }
         }
 
-        // Frozen rivers: ice cap on the top water block (sea_level - 1).
-        let water_top = sea - 1;
-        let water_top_ly = water_top - base_y;
-        if (0..CHUNK_SIZE).contains(&water_top_ly) {
-            for lz in 0..CHUNK_SIZE {
-                for lx in 0..CHUNK_SIZE {
-                    let wx = base_x + lx;
-                    let wz = base_z + lz;
-                    if !self.density.is_river(wx, wz) {
-                        continue;
-                    }
-                    let idx = LocalBlockPos {
-                        x: lx as u8,
-                        y: water_top_ly as u8,
-                        z: lz as u8,
-                    }
-                    .index();
-                    if buffer[idx] != self.blocks.water {
-                        continue;
-                    }
-                    let surface_y = surface_y_map[lz as usize][lx as usize];
-                    let params = self.climate.at_3d(wx, water_top, wz, surface_y);
-                    if params.temperature < 0.15 && self.blocks.ice != self.blocks.air {
-                        buffer[idx] = self.blocks.ice;
-                        states[idx] = BlockState(0);
-                    }
+        // Frozen rivers: ice cap on the top water block per column.
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let wx = base_x + lx;
+                let wz = base_z + lz;
+                let Some(river) = self.density.river_column(wx, wz) else {
+                    continue;
+                };
+                if river.segment == RiverSegment::Waterfall {
+                    continue;
+                }
+                let water_top = river.water_surface_y;
+                let water_top_ly = water_top - base_y;
+                if !(0..CHUNK_SIZE).contains(&water_top_ly) {
+                    continue;
+                }
+                let idx = LocalBlockPos {
+                    x: lx as u8,
+                    y: water_top_ly as u8,
+                    z: lz as u8,
+                }
+                .index();
+                if buffer[idx] != self.blocks.water {
+                    continue;
+                }
+                let surface_y = surface_y_map[lz as usize][lx as usize];
+                let params = self.climate.at_3d(wx, water_top, wz, surface_y);
+                if params.temperature < 0.15 && self.blocks.ice != self.blocks.air {
+                    buffer[idx] = self.blocks.ice;
+                    states[idx] = BlockState(0);
                 }
             }
         }
@@ -307,6 +355,7 @@ impl<'a> ChunkFiller<'a> {
 fn is_beach(
     surface_y: f64,
     sea: i32,
+    water_y: i32,
     downfall: f32,
     buffer: &[BlockId],
     snapshot: &DecorateSnapshot,
@@ -320,8 +369,20 @@ fn is_beach(
     if downfall <= 0.3 {
         return false;
     }
-    let near_sea = surface_y >= (sea - 1) as f64 && surface_y <= (sea + 1) as f64;
-    near_sea && has_adjacent_water(buffer, snapshot, base_x, base_y, base_z, lx, lz, sea, water)
+    let ref_level = sea.min(water_y);
+    let near_sea = surface_y >= (ref_level - 1) as f64 && surface_y <= (ref_level + 1) as f64;
+    near_sea
+        && has_adjacent_water(
+            buffer,
+            snapshot,
+            base_x,
+            base_y,
+            base_z,
+            lx,
+            lz,
+            ref_level,
+            water,
+        )
 }
 
 fn has_adjacent_water(

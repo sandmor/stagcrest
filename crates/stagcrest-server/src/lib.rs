@@ -96,6 +96,7 @@ impl GameServer {
             streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
         let world = World::with_lru_capacity(lru_cap, air);
         let mut terrain = WorldGenState::new(WorldSeed(config.world_seed));
+        terrain.apply_river_config(biomes.river_config());
         let generator = terrain.generator().clone();
 
         let spawn = BlockPos::new(8, SEA_LEVEL + 16, 8);

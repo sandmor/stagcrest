@@ -4,8 +4,9 @@ use crate::worldgen::config::TerrainConfig;
 use crate::worldgen::decorate_snapshot::DecorateSnapshot;
 use crate::worldgen::features::FeaturePlacer;
 use crate::worldgen::noise::NoiseBank;
+use crate::worldgen::occupancy::OccupancyMap;
 use crate::worldgen::seed::WorldSeed;
-use crate::worldgen::terrain::{CaveDecorator, ChunkFiller, ColumnBlocks, DensitySampler};
+use crate::worldgen::terrain::{CaveDecorator, ChunkFiller, ColumnBlocks, DensitySampler, RiverFeaturePlacer};
 use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
 use std::collections::HashMap;
@@ -60,7 +61,7 @@ impl TerrainGenerator {
         let density = DensitySampler::new(&self.config, &self.noise, self.seed);
         let climate = ClimateSampler::new(&self.config, &self.noise);
         let biomes = BiomeRegistry::default();
-        let filler = ChunkFiller::new(&self.config, density, climate, &biomes, blocks);
+        let filler = ChunkFiller::new(&self.config, &density, climate, &biomes, blocks);
         let entries = filler.fill_density(pos);
         ChunkGenData {
             pos,
@@ -103,19 +104,28 @@ impl TerrainGenerator {
 
                     let mut biome = biomes.biome_at(params, dimension);
 
-                    // River overrides
-                    if density.is_river(wx, wz) && y <= self.config.sea_level {
+                    let river_col = density.river_column(wx, wz);
+                    let in_river_water = river_col
+                        .map(|c| y >= c.bed_y && y <= c.water_surface_y)
+                        .unwrap_or(false);
+
+                    if in_river_water {
                         if params.temperature < 0.15 {
-                            if let Some(frozen) = biomes.index_of("stagcrest:frozen_river") {
-                                biome = biomes.biome_by_index(frozen).unwrap_or(biome);
-                            }
-                        } else if let Some(river) = biomes.index_of("stagcrest:river") {
-                            biome = biomes.biome_by_index(river).unwrap_or(biome);
+                            biome = biomes
+                                .biome_by_index(biomes.river_config().frozen_river_biome_index)
+                                .unwrap_or(biome);
+                        } else {
+                            biome = biomes
+                                .biome_by_index(biomes.river_config().river_biome_index)
+                                .unwrap_or(biome);
                         }
-                    } else if density.is_riverbank(wx, wz) {
-                        if let Some(bank) = biomes.index_of("stagcrest:riverbank") {
-                            biome = biomes.biome_by_index(bank).unwrap_or(biome);
-                        }
+                    } else if density.is_riverbank(wx, wz)
+                        && (y as f64) >= surface_y - 1.0
+                        && (y as f64) <= surface_y + 1.0
+                    {
+                        biome = biomes
+                            .biome_by_index(biomes.river_config().riverbank_biome_index)
+                            .unwrap_or(biome);
                     }
 
                     let idx = (gx + gy * 4 + gz * 16) as usize;
@@ -123,6 +133,7 @@ impl TerrainGenerator {
                 }
             }
         }
+
         grid
     }
 
@@ -138,8 +149,21 @@ impl TerrainGenerator {
         let climate = ClimateSampler::new(&self.config, &self.noise);
         let biome_grid = self.build_biome_grid(biomes, data.pos, &density, &climate);
 
-        let filler = ChunkFiller::new(&self.config, density, climate, biomes, blocks);
+        let filler = ChunkFiller::new(&self.config, &density, climate, biomes, blocks);
         let surface = filler.decorate(snapshot, data.pos, &data.entries, &biome_grid);
+
+        let mut occupancy =
+            OccupancyMap::from_surface_entries(&surface, data.pos, blocks.air);
+
+        let river_placer = RiverFeaturePlacer::new(
+            &density,
+            biomes.river_config(),
+            blocks,
+            registry,
+            self.seed,
+        );
+        let river_features =
+            river_placer.place(snapshot, data.pos, &surface, &mut occupancy);
 
         let placer = FeaturePlacer::new(
             &self.config,
@@ -161,6 +185,7 @@ impl TerrainGenerator {
         );
 
         let mut populate = surface;
+        populate.extend(river_features);
         populate.extend(features);
         populate.extend(cave_features);
 
@@ -208,6 +233,10 @@ impl WorldGenState {
             generated_chunks: std::collections::HashSet::new(),
             biome_grids: HashMap::new(),
         }
+    }
+
+    pub fn apply_river_config(&mut self, river: &crate::worldgen::biome::RiverConfig) {
+        river.apply_to_terrain_config(&mut self.generator.config);
     }
 
     pub fn seed(&self) -> WorldSeed {

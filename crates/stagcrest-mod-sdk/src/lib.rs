@@ -190,6 +190,37 @@ pub enum FeaturePlacement {
     GlowFlora {
         block: String,
     },
+    /// Optional lip block at waterfall top (river features only).
+    WaterfallSheet {
+        lip_block: Option<String>,
+    },
+    /// Pool decor at waterfall base (river features only).
+    WaterfallPool {
+        block: String,
+        radius: u8,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HydrologyMode {
+    Terrace,
+    DrainageGrid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiverFeatureSlot {
+    WaterfallLip,
+    WaterfallBase,
+    PoolSurface,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RegisterRiverFeatureRequest {
+    pub slot: RiverFeatureSlot,
+    pub placement: FeaturePlacement,
+    pub chance: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -199,15 +230,58 @@ pub struct RegisterFeatureRequest {
     pub chance: f32,
 }
 
-/// Global river carving configuration (one per mod pack).
+/// Global river hydrology configuration (one per mod pack).
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RegisterRiverConfigRequest {
+    /// Full river channel width in blocks (centerline to bank edge, both sides).
     pub width: f32,
-    pub valley_depth: f32,
     pub bank_blocks: Vec<String>,
     pub river_biome_id: String,
     pub frozen_river_biome_id: String,
     pub riverbank_biome_id: String,
+    #[serde(default = "default_hydrology_mode")]
+    pub hydrology_mode: HydrologyMode,
+    #[serde(default = "default_terrace_step")]
+    pub terrace_step: i32,
+    #[serde(default)]
+    pub terrace_offset: i32,
+    #[serde(default = "default_drainage_cell_size")]
+    pub drainage_cell_size: i32,
+    #[serde(default = "default_drainage_relax_passes")]
+    pub drainage_relax_passes: u32,
+    #[serde(default = "default_waterfall_min_drop")]
+    pub waterfall_min_drop: i32,
+    #[serde(default = "default_channel_depth")]
+    pub channel_depth: i32,
+    #[serde(default = "default_max_channel_carve")]
+    pub max_channel_carve: i32,
+    #[serde(default = "default_mouth_sea_margin")]
+    pub mouth_sea_margin: i32,
+}
+
+fn default_hydrology_mode() -> HydrologyMode {
+    HydrologyMode::DrainageGrid
+}
+fn default_terrace_step() -> i32 {
+    6
+}
+fn default_drainage_cell_size() -> i32 {
+    64
+}
+fn default_drainage_relax_passes() -> u32 {
+    12
+}
+fn default_waterfall_min_drop() -> i32 {
+    4
+}
+fn default_channel_depth() -> i32 {
+    10
+}
+fn default_max_channel_carve() -> i32 {
+    12
+}
+fn default_mouth_sea_margin() -> i32 {
+    2
 }
 
 /// Global cave carver tuning.
@@ -258,6 +332,10 @@ pub trait ContentRegistrar {
         let _ = req;
         0
     }
+    fn register_river_feature(&mut self, req: RegisterRiverFeatureRequest) -> i32 {
+        let _ = req;
+        0
+    }
     fn register_cave_config(&mut self, req: RegisterCaveConfigRequest) -> i32 {
         let _ = req;
         0
@@ -276,5 +354,6 @@ mod wasm;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{
     load_texture_from_pack, log, register_biome, register_biome_feature, register_block,
-    register_cave_config, register_feature, register_river_config, register_texture,
+    register_cave_config, register_feature, register_river_config, register_river_feature,
+    register_texture,
 };
