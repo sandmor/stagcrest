@@ -7,8 +7,13 @@ edition.workspace = true
 name = "stagcrest-client"
 path = "src/main.rs"
 
+[features]
+default = ["bevy-dynamic-linking"]
+# Faster local iteration; disable with `cargo build --no-default-features` for distributable binaries.
+bevy-dynamic-linking = ["bevy/dynamic_linking"]
+
 [dependencies]
-bevy = { workspace = true, features = ["dynamic_linking"] }
+bevy.workspace = true
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
 stagcrest-mesh.workspace = true

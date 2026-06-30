@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PLATFORM="${1:?platform label, e.g. linux-x86_64}"
+EXE_EXT="${2:-}"
+
+STAGING="$ROOT/dist/stagcrest-nightly"
+rm -rf "$STAGING"
+mkdir -p "$STAGING/mods/stagcrest-core"
+
+cp "$ROOT/target/release/stagcrest-client${EXE_EXT}" "$STAGING/"
+cp "$ROOT/target/release/stagcrest-server${EXE_EXT}" "$STAGING/"
+cp "$ROOT/mods/mods.toml" "$STAGING/mods/"
+cp "$ROOT/mods/stagcrest-core/stagcrest-core.wasm" "$STAGING/mods/stagcrest-core/"
+
+cat >"$STAGING/RUN.txt" <<'EOF'
+Stagcrest nightly build
+
+Run from this directory:
+  ./stagcrest-client          single-player (embedded server)
+  ./stagcrest-server        dedicated multiplayer server
+
+Optional: add Minecraft-format resource packs under resourcepacks/
+(see resourcepacks/resourcepacks.toml.example in the source repo).
+EOF
+
+mkdir -p "$ROOT/dist"
+rm -f "$ROOT/dist/stagcrest-nightly-${PLATFORM}"*
+
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN* | Windows*)
+  powershell -NoProfile -Command "Compress-Archive -Path '${STAGING}' -DestinationPath '${ROOT}/dist/stagcrest-nightly-${PLATFORM}.zip' -Force"
+  ;;
+*)
+  tar -czf "$ROOT/dist/stagcrest-nightly-${PLATFORM}.tar.gz" -C "$ROOT/dist" stagcrest-nightly
+  ;;
+esac

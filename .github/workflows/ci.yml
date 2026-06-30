@@ -2,14 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
 
 jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            exe_ext: ""
+          - os: macos-latest
+            platform: macos-aarch64
+            exe_ext: ""
+          - os: windows-latest
+            platform: windows-x86_64
+            exe_ext: .exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +35,18 @@ jobs:
       - name: Build workspace
         shell: bash
         run: |
-          cargo build -p stagcrest-client --release
+          cargo build -p stagcrest-client --release --no-default-features
           cargo build -p stagcrest-server --release
           cargo test -p stagcrest-net
+      - name: Package nightly
+        if: github.event_name == 'push'
+        shell: bash
+        run: bash scripts/package-nightly.sh "${{ matrix.platform }}" "${{ matrix.exe_ext }}"
+      - name: Upload nightly artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stagcrest-nightly-${{ matrix.platform }}
+          path: dist/stagcrest-nightly-${{ matrix.platform }}.*
+          retention-days: 14
+          if-no-files-found: error
