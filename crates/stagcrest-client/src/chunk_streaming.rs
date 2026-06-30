@@ -46,10 +46,10 @@ impl BiomeGridCache {
 }
 
 pub fn on_chunk_unloaded_remove_biome(
-    trigger: Trigger<ChunkUnloaded>,
+    on: On<ChunkUnloaded>,
     mut biome_cache: ResMut<BiomeGridCache>,
 ) {
-    biome_cache.remove(trigger.event().0);
+    biome_cache.remove(on.event().0);
 }
 
 pub fn drop_chunk_assets(

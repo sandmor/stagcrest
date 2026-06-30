@@ -1,5 +1,5 @@
 use crate::chunk_streaming::{
-    on_chunk_unloaded_remove_biome, BiomeGridCache, ChunkUnloaded,
+    on_chunk_unloaded_remove_biome, BiomeGridCache,
 };
 use crate::environment::{self, PlayerEnvironment};
 use crate::gpu_chunk_scheduler::{
@@ -17,8 +17,8 @@ use stagcrest_mod_client::{
 use stagcrest_net::ServerMessage;
 use stagcrest_render::{
     spawn_block_outline, BlockAtlasResource, GpuChunkCache, GpuChunkSyncState, GpuVoxelPlugin,
-    GpuVoxelStats, GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage, VoxelCamera,
-    VoxelMaterialSource, VoxelMemoryConfig, VoxelRenderConfig, VoxelRenderPlugin,
+    GpuVoxelStats, GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage,
+    VoxelCamera, VoxelMaterialSource, VoxelMemoryConfig, VoxelRenderConfig, VoxelRenderPlugin,
 };
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -72,7 +72,6 @@ impl Plugin for GamePlugin {
             .init_resource::<targeting::BlockTarget>()
             .init_resource::<CircuitPowerOverlay>()
             .init_resource::<BiomeGridCache>()
-            .add_event::<ChunkUnloaded>()
             .add_observer(on_chunk_unloaded_remove_biome)
             .add_plugins((VoxelRenderPlugin, GpuVoxelPlugin))
             .add_systems(
@@ -211,7 +210,7 @@ fn setup_block_outline(
 }
 
 fn setup_game_camera(mut commands: Commands) {
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         brightness: 800.0,
         ..default()
     });
@@ -262,43 +261,29 @@ fn sync_voxel_memory_config(
 
 fn update_voxel_camera(
     mut voxel_cam: ResMut<VoxelCamera>,
-    camera: Query<(&Transform, &Projection), With<player::FlyCamera>>,
+    camera: Query<(&GlobalTransform, &Projection), With<player::FlyCamera>>,
 ) {
     let Ok((transform, projection)) = camera.single() else {
         return;
     };
-    let proj = match projection {
+
+    // Match Bevy 0.19's infinite reverse-Z perspective and view transform.
+    let clip_from_view = match projection {
         Projection::Perspective(p) => {
-            // Bevy clears the shared depth buffer to 0.0 (far) and uses reverse-Z,
-            // so map standard [0,1] depth to reverse-Z [1,0] (near->1, far->0).
-            let reverse_z = glam::Mat4::from_cols(
-                glam::Vec4::new(1.0, 0.0, 0.0, 0.0),
-                glam::Vec4::new(0.0, 1.0, 0.0, 0.0),
-                glam::Vec4::new(0.0, 0.0, -1.0, 0.0),
-                glam::Vec4::new(0.0, 0.0, 1.0, 1.0),
-            );
-            reverse_z * glam::Mat4::perspective_rh(p.fov, p.aspect_ratio, p.near, p.far)
+            let m = Mat4::perspective_infinite_reverse_rh(p.fov, p.aspect_ratio, p.near);
+            glam::Mat4::from_cols_array_2d(&m.to_cols_array_2d())
         }
         _ => glam::Mat4::IDENTITY,
     };
-    let view = glam::Mat4::look_at_rh(
-        glam::Vec3::new(
-            transform.translation.x,
-            transform.translation.y,
-            transform.translation.z,
-        ),
-        glam::Vec3::new(
-            transform.translation.x + transform.forward().x * 10.0,
-            transform.translation.y + transform.forward().y * 10.0,
-            transform.translation.z + transform.forward().z * 10.0,
-        ),
-        glam::Vec3::Y,
-    );
-    voxel_cam.view_proj = proj * view;
+    let view_from_world = {
+        let m = Mat4::from(transform.affine().inverse());
+        glam::Mat4::from_cols_array_2d(&m.to_cols_array_2d())
+    };
+    voxel_cam.view_proj = clip_from_view * view_from_world;
     voxel_cam.position = glam::Vec3::new(
-        transform.translation.x,
-        transform.translation.y,
-        transform.translation.z,
+        transform.translation().x,
+        transform.translation().y,
+        transform.translation().z,
     );
 }
 
@@ -310,7 +295,7 @@ fn update_fluid_anim(time: Res<Time>, atlas: Option<ResMut<BlockAtlasResource>>)
 
 fn sync_underwater_vision(
     env: Res<PlayerEnvironment>,
-    mut ambient: ResMut<AmbientLight>,
+    mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut camera: Query<(&mut UnderwaterEffect, &mut DistanceFog), With<player::FlyCamera>>,
 ) {

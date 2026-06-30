@@ -1,8 +1,12 @@
 use bevy::prelude::*;
+use bevy::window::WindowResolution;
 use stagcrest_render::UnderwaterPlugin;
+
+use camera::UiCameraPlugin;
 
 pub mod block_icons;
 pub mod block_outline;
+pub mod camera;
 pub mod chunk_streaming;
 pub mod debug_overlay;
 pub mod environment;
@@ -25,7 +29,7 @@ fn window_plugin() -> WindowPlugin {
     WindowPlugin {
         primary_window: Some(Window {
             title: "Stagcrest".into(),
-            resolution: (1280.0, 720.0).into(),
+            resolution: WindowResolution::new(1280, 720),
             ..default()
         }),
         ..default()
@@ -55,26 +59,4 @@ pub fn run_app(launch: LaunchConfig) {
             UiCameraPlugin,
         ))
         .run();
-}
-
-struct UiCameraPlugin;
-
-impl Plugin for UiCameraPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_ui_camera);
-    }
-}
-
-#[derive(Component)]
-struct UiCamera;
-
-fn setup_ui_camera(mut commands: Commands) {
-    commands.spawn((
-        Camera2d::default(),
-        UiCamera,
-        Camera {
-            order: 1,
-            ..default()
-        },
-    ));
 }

@@ -2,7 +2,9 @@ use crate::block_outline;
 use crate::game::AppState;
 use crate::player::{self, FlyCamera};
 use crate::targeting::BlockTarget;
+use crate::ui::UiTheme;
 use bevy::prelude::*;
+use bevy::window::{CursorOptions, PrimaryWindow};
 use stagcrest_render::BlockOutlineMarker;
 
 pub struct PausePlugin;
@@ -21,7 +23,7 @@ impl Plugin for PausePlugin {
         app.add_systems(
             Update,
             (
-                toggle_pause.run_if(in_state(AppState::InGame).or(in_state(AppState::Paused))),
+                toggle_pause.run_if(in_state(AppState::InGame).or_else(in_state(AppState::Paused))),
                 pause_button_system.run_if(in_state(AppState::Paused)),
             ),
         )
@@ -38,7 +40,7 @@ fn toggle_pause(
     state: Res<State<AppState>>,
     mut next: ResMut<NextState<AppState>>,
     mut fly: Query<&mut FlyCamera>,
-    mut window: Query<&mut Window>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -48,8 +50,8 @@ fn toggle_pause(
         AppState::InGame => {
             if let Ok(mut fly) = fly.single_mut() {
                 if fly.captured {
-                    if let Ok(mut w) = window.single_mut() {
-                        player::release_cursor(&mut fly, &mut w);
+                    if let Ok(mut c) = cursor.single_mut() {
+                        player::release_cursor(&mut fly, &mut c);
                     }
                     return;
                 }
@@ -63,12 +65,13 @@ fn toggle_pause(
 
 fn spawn_pause_menu(
     mut commands: Commands,
+    theme: Res<UiTheme>,
     mut fly: Query<&mut FlyCamera>,
-    mut window: Query<&mut Window>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if let Ok(mut fly) = fly.single_mut() {
-        if let Ok(mut w) = window.single_mut() {
-            player::release_cursor(&mut fly, &mut w);
+        if let Ok(mut c) = cursor.single_mut() {
+            player::release_cursor(&mut fly, &mut c);
         }
     }
 
@@ -82,36 +85,36 @@ fn spawn_pause_menu(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
+            BackgroundColor(theme.overlay_bg),
         ))
         .with_children(|parent| {
             parent
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(12.0),
-                        padding: UiRect::all(Val::Px(24.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.15, 0.16, 0.2)),
-                    BorderRadius::all(Val::Px(8.0)),
-                ))
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(12.0),
+                    padding: UiRect::all(Val::Px(24.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                })
+                .insert(BackgroundColor(theme.panel_bg))
                 .with_children(|menu| {
                     menu.spawn((
                         Text::new("Paused"),
-                        TextFont {
-                            font_size: 32.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        theme.text_font(FontSize::Px(32.0)),
+                        TextColor(theme.text_primary),
                     ));
-                    spawn_pause_btn(menu, "Resume", PauseAction::Resume);
-                    spawn_pause_btn(menu, "Main Menu", PauseAction::MainMenu);
+                    spawn_pause_btn(menu, "Resume", PauseAction::Resume, &theme);
+                    spawn_pause_btn(menu, "Main Menu", PauseAction::MainMenu, &theme);
                 });
         });
 }
 
-fn spawn_pause_btn(parent: &mut ChildSpawnerCommands, label: &str, action: PauseAction) {
+fn spawn_pause_btn(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    action: PauseAction,
+    theme: &UiTheme,
+) {
     parent
         .spawn((
             action,
@@ -121,17 +124,15 @@ fn spawn_pause_btn(parent: &mut ChildSpawnerCommands, label: &str, action: Pause
                 height: Val::Px(40.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.25, 0.27, 0.32)),
         ))
+        .insert(BackgroundColor(theme.button_bg))
         .with_child((
             Text::new(label),
-            TextFont {
-                font_size: 18.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
+            theme.text_font(theme.subtitle_size),
+            TextColor(theme.text_primary),
         ));
 }
 

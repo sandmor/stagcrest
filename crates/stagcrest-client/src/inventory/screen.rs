@@ -1,8 +1,11 @@
 use super::hotbar::{InventoryScreenSlot, SlotIcon};
+use super::input::blur_search_focus_on_outside_pointer_press;
 use super::state::{filtered_placeable, InventoryUiState, HOTBAR_SLOTS, MAIN_SLOTS};
 use crate::block_icons::BlockIconCache;
 use crate::game::ModContext;
+use crate::ui::UiTheme;
 use bevy::prelude::*;
+use bevy::text::{EditableText, TextCursorStyle, TextEditChange, TextLayout};
 use bevy::ui::widget::NodeImageMode;
 use stagcrest_protocol::BlockId;
 
@@ -18,15 +21,15 @@ pub struct CatalogCell {
 }
 
 #[derive(Component)]
-pub struct SearchLabel;
+pub struct InventorySearchField;
 
 pub fn spawn_inventory_screen(
     commands: &mut Commands,
     ctx: &ModContext,
     icons: &BlockIconCache,
-    search: &str,
+    theme: &UiTheme,
 ) {
-    let blocks = filtered_placeable(&ctx.registry, search);
+    let blocks = filtered_placeable(&ctx.registry, "");
 
     commands
         .spawn((
@@ -38,40 +41,47 @@ pub fn spawn_inventory_screen(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
         ))
+        .observe(blur_search_focus_on_outside_pointer_press)
+        .insert(BackgroundColor(theme.overlay_bg))
         .with_children(|overlay| {
             overlay
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
-                        padding: UiRect::all(Val::Px(16.0)),
-                        max_height: Val::Percent(90.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.14, 0.15, 0.19)),
-                    BorderRadius::all(Val::Px(8.0)),
-                ))
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    padding: UiRect::all(Val::Px(16.0)),
+                    max_height: Val::Percent(90.0),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    ..default()
+                })
+                .insert(BackgroundColor(theme.panel_bg))
                 .with_children(|panel| {
                     panel.spawn((
                         Text::new("Creative Inventory"),
-                        TextFont {
-                            font_size: 22.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        theme.text_font(theme.body_size),
+                        TextColor(theme.text_primary),
                     ));
 
-                    panel.spawn((
-                        SearchLabel,
-                        Text::new(format_search_label(search)),
-                        TextFont {
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.75, 0.75, 0.8)),
-                    ));
+                    panel
+                        .spawn((
+                            InventorySearchField,
+                            EditableText {
+                                visible_width: Some(28.0),
+                                allow_newlines: false,
+                                ..default()
+                            },
+                            TextLayout::no_wrap(),
+                            theme.text_font(theme.caption_size),
+                            TextCursorStyle::default(),
+                            Node {
+                                padding: UiRect::all(Val::Px(6.0)),
+                                min_width: Val::Px(220.0),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                        ))
+                        .insert(BackgroundColor(theme.search_bg))
+                        .insert(BorderColor::all(theme.slot_border));
 
                     panel
                         .spawn((
@@ -89,20 +99,18 @@ pub fn spawn_inventory_screen(
                         ))
                         .with_children(|grid| {
                             for &block_id in &blocks {
-                                spawn_catalog_cell(grid, ctx, icons, block_id);
+                                spawn_catalog_cell(grid, ctx, icons, block_id, theme);
                             }
                         });
 
-                    panel.spawn((
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Px(2.0),
-                            margin: UiRect::vertical(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.4, 0.4, 0.46, 0.6)),
-                        BorderRadius::all(Val::Px(1.0)),
-                    ));
+                    panel.spawn(Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(2.0),
+                        margin: UiRect::vertical(Val::Px(4.0)),
+                        border_radius: BorderRadius::all(Val::Px(1.0)),
+                        ..default()
+                    })
+                    .insert(BackgroundColor(theme.divider));
 
                     panel
                         .spawn(Node {
@@ -121,7 +129,7 @@ pub fn spawn_inventory_screen(
                                     .with_children(|row_node| {
                                         for col in 0..9 {
                                             let index = row * 9 + col;
-                                            spawn_main_slot(row_node, index);
+                                            spawn_main_slot(row_node, index, theme);
                                         }
                                     });
                             }
@@ -135,7 +143,7 @@ pub fn spawn_inventory_screen(
                         })
                         .with_children(|hotbar_row| {
                             for i in 0..HOTBAR_SLOTS {
-                                spawn_screen_hotbar_slot(hotbar_row, i);
+                                spawn_screen_hotbar_slot(hotbar_row, i, theme);
                             }
                         });
 
@@ -143,22 +151,11 @@ pub fn spawn_inventory_screen(
                         Text::new(
                             "LMB pick / place / swap  |  Shift+LMB quick-move  |  Click empty space to discard  |  Type to search  |  E to close",
                         ),
-                        TextFont {
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.65, 0.65, 0.7)),
+                        theme.text_font(theme.hint_size),
+                        TextColor(theme.text_hint),
                     ));
                 });
         });
-}
-
-fn format_search_label(search: &str) -> String {
-    if search.is_empty() {
-        "Search: (type to filter blocks)".to_string()
-    } else {
-        format!("Search: {search}")
-    }
 }
 
 fn spawn_catalog_cell(
@@ -166,6 +163,7 @@ fn spawn_catalog_cell(
     ctx: &ModContext,
     icons: &BlockIconCache,
     block_id: BlockId,
+    theme: &UiTheme,
 ) {
     let name = ctx
         .registry
@@ -183,11 +181,11 @@ fn spawn_catalog_cell(
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(2.0),
                 padding: UiRect::all(Val::Px(4.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.22, 0.23, 0.28)),
-            BorderRadius::all(Val::Px(4.0)),
         ))
+        .insert(BackgroundColor(theme.catalog_cell_bg))
         .with_children(|cell| {
             cell.spawn((Node {
                 width: Val::Px(40.0),
@@ -209,16 +207,13 @@ fn spawn_catalog_cell(
                 });
             cell.spawn((
                 Text::new(name),
-                TextFont {
-                    font_size: 10.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.85, 0.85, 0.9)),
+                theme.text_font(theme.hint_size),
+                TextColor(theme.text_muted),
             ));
         });
 }
 
-fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize) {
+fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize, theme: &UiTheme) {
     let kind = super::state::SlotKind::Main(index);
     parent
         .spawn((
@@ -231,12 +226,12 @@ fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize) {
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.15, 0.85)),
-            BorderColor(Color::srgba(0.35, 0.35, 0.4, 0.9)),
-            BorderRadius::all(Val::Px(4.0)),
         ))
+        .insert(BackgroundColor(theme.slot_bg))
+        .insert(BorderColor::all(theme.slot_border))
         .with_children(|slot| {
             slot.spawn((Node {
                 width: Val::Px(40.0),
@@ -248,7 +243,7 @@ fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize) {
             },))
                 .with_children(|icon_box| {
                     icon_box.spawn((
-                        super::hotbar::empty_slot_image(),
+                        ImageNode::default().with_mode(NodeImageMode::Auto),
                         Node {
                             width: Val::Px(40.0),
                             height: Val::Px(40.0),
@@ -258,12 +253,13 @@ fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize) {
                             kind,
                             icon_index: index,
                         },
+                        Visibility::Hidden,
                     ));
                 });
         });
 }
 
-fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
+fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize, theme: &UiTheme) {
     let kind = super::state::SlotKind::Hotbar(index);
     parent
         .spawn((
@@ -276,12 +272,12 @@ fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.15, 0.85)),
-            BorderColor(Color::srgba(0.35, 0.35, 0.4, 0.9)),
-            BorderRadius::all(Val::Px(4.0)),
         ))
+        .insert(BackgroundColor(theme.slot_bg))
+        .insert(BorderColor::all(theme.slot_border))
         .with_children(|slot| {
             slot.spawn((Node {
                 width: Val::Px(40.0),
@@ -293,7 +289,7 @@ fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
             },))
                 .with_children(|icon_box| {
                     icon_box.spawn((
-                        super::hotbar::empty_slot_image(),
+                        ImageNode::default().with_mode(NodeImageMode::Auto),
                         Node {
                             width: Val::Px(40.0),
                             height: Val::Px(40.0),
@@ -303,47 +299,54 @@ fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
                             kind,
                             icon_index: index + MAIN_SLOTS,
                         },
+                        Visibility::Hidden,
                     ));
                 });
         });
 }
 
-pub fn update_search_label(
+pub fn on_search_text_changed(
+    trigger: On<TextEditChange>,
     ui: Res<InventoryUiState>,
-    mut labels: Query<&mut Text, With<SearchLabel>>,
-) {
-    if !ui.is_changed() {
-        return;
-    }
-    for mut text in &mut labels {
-        **text = format_search_label(&ui.search);
-    }
-}
-
-pub fn rebuild_catalog_if_needed(
-    ui: Res<InventoryUiState>,
+    theme: Res<UiTheme>,
     mod_ctx: Option<Res<ModContext>>,
     icons: Option<Res<BlockIconCache>>,
+    search_fields: Query<Entity, With<InventorySearchField>>,
+    search_text: Query<&EditableText>,
     mut commands: Commands,
     grids: Query<Entity, With<CatalogGrid>>,
     children_q: Query<&Children>,
-    mut last_search: Local<String>,
 ) {
     if !ui.open {
-        last_search.clear();
         return;
     }
-    if ui.search == *last_search {
+    let entity = trigger.event_target();
+    if !search_fields.contains(entity) {
         return;
     }
-    *last_search = ui.search.clone();
+    let Ok(editable) = search_text.get(entity) else {
+        return;
+    };
+    let search = editable.value().to_string();
 
     let (Some(ctx), Some(icons)) = (mod_ctx, icons) else {
         return;
     };
 
-    let blocks = filtered_placeable(&ctx.registry, &ui.search);
-    for grid_entity in &grids {
+    rebuild_catalog(&search, &ctx, &icons, &theme, &mut commands, &grids, &children_q);
+}
+
+fn rebuild_catalog(
+    search: &str,
+    ctx: &ModContext,
+    icons: &BlockIconCache,
+    theme: &UiTheme,
+    commands: &mut Commands,
+    grids: &Query<Entity, With<CatalogGrid>>,
+    children_q: &Query<&Children>,
+) {
+    let blocks = filtered_placeable(&ctx.registry, search);
+    for grid_entity in grids {
         if let Ok(children) = children_q.get(grid_entity) {
             for &child in children {
                 commands.entity(child).despawn();
@@ -351,7 +354,7 @@ pub fn rebuild_catalog_if_needed(
         }
         commands.entity(grid_entity).with_children(|grid| {
             for &block_id in &blocks {
-                spawn_catalog_cell(grid, &ctx, &icons, block_id);
+                spawn_catalog_cell(grid, ctx, icons, block_id, theme);
             }
         });
     }

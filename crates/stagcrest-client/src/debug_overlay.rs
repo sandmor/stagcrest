@@ -12,6 +12,7 @@ use crate::game::{AppState, GameConfig, ModContext};
 use crate::net_client::GameNetClient;
 use crate::player::{FlyCamera, SelectedBlock};
 use crate::targeting::BlockTarget;
+use crate::ui::UiTheme;
 use crate::world_replica::WorldReplica;
 use stagcrest_render::{GpuChunkCache, GpuVoxelStats};
 
@@ -35,7 +36,7 @@ impl Plugin for DebugPlugin {
             .add_systems(
                 Update,
                 (toggle_debug_overlay, update_debug_overlay)
-                    .run_if(in_state(AppState::InGame).or(in_state(AppState::Paused))),
+                    .run_if(in_state(AppState::InGame).or_else(in_state(AppState::Paused))),
             );
     }
 }
@@ -50,7 +51,7 @@ pub fn cleanup_debug_overlay(
     commands.insert_resource(DebugOverlayVisible(false));
 }
 
-pub fn spawn_debug_overlay(mut commands: Commands) {
+pub fn spawn_debug_overlay(mut commands: Commands, theme: Res<UiTheme>) {
     commands
         .spawn((
             DebugOverlayRoot,
@@ -59,20 +60,17 @@ pub fn spawn_debug_overlay(mut commands: Commands) {
                 top: Val::Px(12.0),
                 left: Val::Px(12.0),
                 padding: UiRect::all(Val::Px(10.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.15, 0.85)),
-            BorderRadius::all(Val::Px(4.0)),
-            Visibility::Hidden,
         ))
+        .insert(BackgroundColor(theme.panel_bg))
+        .insert(Visibility::Hidden)
         .with_child((
             DebugOverlayText,
             Text::new(""),
-            TextFont {
-                font_size: 14.0,
-                ..default()
-            },
-            TextColor(Color::srgba(0.95, 0.95, 0.95, 1.0)),
+            theme.text_font(theme.caption_size),
+            TextColor(theme.text_primary),
         ));
 }
 

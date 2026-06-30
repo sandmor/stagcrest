@@ -1,10 +1,10 @@
+use crate::game::{AppState, GameConfig, ModContext};
+use crate::ui::UiTheme;
 use bevy::prelude::*;
 use bevy::tasks::{block_on, IoTaskPool, Task};
 use futures_lite::future;
 use stagcrest_mod_client::content::ContentRuntime;
 use stagcrest_render::{atlas_pixels_to_image, BlockAtlasResource, VoxelAtlasImage};
-
-use crate::game::{AppState, GameConfig, ModContext};
 use crate::net_client::{connect_tcp, GameNetClient};
 use crate::world_replica::WorldReplica;
 use stagcrest_protocol::manifest::{AtlasTransfer, ContentManifest};
@@ -220,6 +220,7 @@ fn fluid_anim_uniform(registry: &stagcrest_mod_client::BlockRegistry, atlas_heig
 fn loading_ui(
     mut commands: Commands,
     state: Res<LoadingState>,
+    theme: Res<UiTheme>,
     query: Query<Entity, With<LoadingRoot>>,
 ) {
     if !state.is_changed() && !query.is_empty() {
@@ -252,19 +253,16 @@ fn loading_ui(
                 row_gap: Val::Px(16.0),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.05, 0.05, 0.08)),
+            BackgroundColor(theme.screen_bg),
         ))
         .with_children(|parent| {
             parent.spawn((
                 Text::new(message),
-                TextFont {
-                    font_size: 24.0,
-                    ..default()
-                },
+                theme.text_font(theme.body_size),
                 TextColor(if state.error.is_some() {
-                    Color::srgb(1.0, 0.4, 0.4)
+                    theme.error_text
                 } else {
-                    Color::WHITE
+                    theme.text_primary
                 }),
             ));
             if state.error.is_some() {
@@ -277,17 +275,15 @@ fn loading_ui(
                             height: Val::Px(40.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
                             ..default()
                         },
-                        BackgroundColor(Color::srgb(0.25, 0.27, 0.32)),
                     ))
+                    .insert(BackgroundColor(theme.button_bg))
                     .with_child((
                         Text::new("Main Menu"),
-                        TextFont {
-                            font_size: 18.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
+                        theme.text_font(theme.subtitle_size),
+                        TextColor(theme.text_primary),
                     ));
             }
         });

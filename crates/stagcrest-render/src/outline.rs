@@ -1,17 +1,19 @@
-use bevy::asset::{load_internal_asset, weak_handle, Handle};
+use bevy::asset::{load_internal_asset, uuid_handle, Handle, RenderAssetUsages};
+use bevy::camera::visibility::NoFrustumCulling;
+use bevy::mesh::{Mesh, PrimitiveTopology};
 use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
-use bevy::render::mesh::{Mesh, MeshVertexBufferLayoutRef, PrimitiveTopology};
-use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, Shader, ShaderRef, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
 };
-use bevy::render::view::visibility::NoFrustumCulling;
+use bevy::render::view::NoIndirectDrawing;
+use bevy::shader::{Shader, ShaderRef};
 use stagcrest_mesh::SelectionBounds;
 use stagcrest_protocol::BlockPos;
 
 pub const OUTLINE_SHADER_HANDLE: Handle<Shader> =
-    weak_handle!("b8d4f012-5c6e-4a2f-9d1b-0123456789cd");
+    uuid_handle!("b8d4f012-5c6e-4a2f-9d1b-0123456789cd");
 
 #[derive(Default)]
 pub struct OutlineMaterialPlugin;
@@ -43,13 +45,13 @@ impl Material for OutlineMaterial {
     }
 
     fn specialize(
-        _pipeline: &MaterialPipeline<Self>,
+        _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         _layout: &MeshVertexBufferLayoutRef,
         _key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         if let Some(ds) = descriptor.depth_stencil.as_mut() {
-            ds.depth_write_enabled = false;
+            ds.depth_write_enabled = Some(false);
         }
         Ok(())
     }
@@ -132,6 +134,7 @@ pub fn spawn_block_outline(
             Mesh3d(mesh),
             MeshMaterial3d(material),
             NoFrustumCulling,
+            NoIndirectDrawing,
             Visibility::Hidden,
         ))
         .id()

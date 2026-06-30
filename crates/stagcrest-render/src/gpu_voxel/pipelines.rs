@@ -1,16 +1,19 @@
 #![allow(dead_code)] // encase `ShaderType::check` helpers
 
-use bevy::asset::{load_internal_asset, weak_handle, Handle};
+use bevy::asset::{load_internal_asset, uuid_handle, Handle};
+use bevy::mesh::VertexBufferLayout;
 use bevy::prelude::*;
 use bevy::render::render_resource::{
     binding_types::{sampler, storage_buffer, storage_buffer_read_only, storage_buffer_read_only_sized, texture_2d, uniform_buffer},
-    BindGroupLayout, BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation,
-    BlendState, CachedComputePipelineId, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+    BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BlendComponent, BlendFactor, BlendOperation,
+    BlendState, CachedComputePipelineId, ColorTargetState, ColorWrites,
     ComputePipelineDescriptor, Face, FragmentState, FrontFace, MultisampleState, PipelineCache,
-    PolygonMode, PrimitiveState, RenderPipelineDescriptor, SamplerBindingType, Shader,
-    ShaderStages, ShaderType, TextureFormat, TextureSampleType, VertexBufferLayout, VertexFormat,
+    PolygonMode, PrimitiveState, RenderPipelineDescriptor, SamplerBindingType, SpecializedRenderPipeline,
+    ShaderStages, ShaderType, TextureFormat, TextureSampleType, VertexFormat,
     VertexState, VertexStepMode,
 };
+use bevy::core_pipeline::core_3d::CORE_3D_DEPTH_FORMAT;
+use bevy::shader::Shader;
 use bevy::render::render_resource::SamplerDescriptor;
 use bevy::render::renderer::RenderDevice;
 use stagcrest_mesh::GpuMeshVertex;
@@ -22,14 +25,14 @@ use crate::gpu_voxel::types::{
 };
 
 pub const VOXEL_COMPUTE_SHADER: Handle<Shader> =
-    weak_handle!("b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e");
+    uuid_handle!("b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e");
 pub const VOXEL_INSTANCE_SHADER: Handle<Shader> =
-    weak_handle!("c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f");
+    uuid_handle!("c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f");
 pub const VOXEL_FINALIZE_SHADER: Handle<Shader> =
-    weak_handle!("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a");
+    uuid_handle!("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a");
 
 pub const VOXEL_COMPACT_SHADER: Handle<Shader> =
-    weak_handle!("e4f5a6b7-c8d9-4e0f-1a2b-3c4d5e6f7a8b");
+    uuid_handle!("e4f5a6b7-c8d9-4e0f-1a2b-3c4d5e6f7a8b");
 
 #[derive(Resource)]
 pub struct VoxelComputePipeline {
@@ -52,9 +55,44 @@ pub struct VoxelCompactPipeline {
 #[derive(Resource)]
 pub struct VoxelDrawPipeline {
     pub layout: BindGroupLayout,
+    pub layout_descriptor: BindGroupLayoutDescriptor,
+    pub vertex_layout: VertexBufferLayout,
     pub sampler: bevy::render::render_resource::Sampler,
-    /// Indexed by [`msaa_pipeline_index`]; each entry is [opaque, cutout, blend].
-    pub pipelines: [[CachedRenderPipelineId; 3]; 4],
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+pub struct VoxelDrawPipelineKey {
+    pub target_format: TextureFormat,
+    pub samples: u32,
+    /// 0 = opaque, 1 = cutout, 2 = blend
+    pub layer: u32,
+}
+
+impl SpecializedRenderPipeline for VoxelDrawPipeline {
+    type Key = VoxelDrawPipelineKey;
+
+    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+        let cutout = key.layer == 1;
+        let blend = if key.layer == 2 {
+            Some(voxel_blend_state())
+        } else {
+            None
+        };
+        let label = match key.layer {
+            0 => "voxel_opaque",
+            1 => "voxel_cutout",
+            _ => "voxel_blend",
+        };
+        build_voxel_pipeline_descriptor(
+            label,
+            &self.layout_descriptor,
+            &self.vertex_layout,
+            blend,
+            cutout,
+            key.samples,
+            key.target_format,
+        )
+    }
 }
 
 /// Maps `Msaa::samples()` (1, 2, 4, 8) to a pipeline table index.
@@ -185,86 +223,86 @@ pub fn prepare_render_pipelines(
 ) {
     if existing_compute.is_none() {
         let visibility = ShaderStages::COMPUTE;
-        let layout = render_device.create_bind_group_layout(
-            "voxel_compute_layout",
-            &[
-                storage_buffer_read_only::<GpuBlockMeta>(false).build(0, visibility),
-                storage_buffer_read_only::<GpuBlockCell>(false).build(1, visibility),
-                storage_buffer_read_only_sized(false, None).build(2, visibility),
-                storage_buffer_read_only::<GpuChunkTableEntry>(false).build(3, visibility),
-                storage_buffer_read_only::<u32>(false).build(4, visibility),
-                storage_buffer::<VoxelInstance>(false).build(5, visibility),
-                storage_buffer::<u32>(false).build(6, visibility),
-                storage_buffer::<u32>(false).build(7, visibility),
-                storage_buffer_read_only::<GpuChunkTintCell>(false).build(8, visibility),
-                uniform_buffer::<EmitUniform>(false).build(9, visibility),
-            ],
-        );
+        let entries = [
+            storage_buffer_read_only::<GpuBlockMeta>(false).build(0, visibility),
+            storage_buffer_read_only::<GpuBlockCell>(false).build(1, visibility),
+            storage_buffer_read_only_sized(false, None).build(2, visibility),
+            storage_buffer_read_only::<GpuChunkTableEntry>(false).build(3, visibility),
+            storage_buffer_read_only::<u32>(false).build(4, visibility),
+            storage_buffer::<VoxelInstance>(false).build(5, visibility),
+            storage_buffer::<u32>(false).build(6, visibility),
+            storage_buffer::<u32>(false).build(7, visibility),
+            storage_buffer_read_only::<GpuChunkTintCell>(false).build(8, visibility),
+            uniform_buffer::<EmitUniform>(false).build(9, visibility),
+        ];
+        let layout_descriptor =
+            BindGroupLayoutDescriptor::new("voxel_compute_layout", &entries);
+        let layout = pipeline_cache.get_bind_group_layout(&layout_descriptor);
         let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some("voxel_compute".into()),
-            layout: vec![layout.clone()],
+            layout: vec![layout_descriptor],
             shader: VOXEL_COMPUTE_SHADER,
             shader_defs: vec![],
-            entry_point: "main".into(),
-            push_constant_ranges: vec![],
+            entry_point: Some("main".into()),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         });
         commands.insert_resource(VoxelComputePipeline { layout, pipeline_id });
     }
 
     if existing_compact.is_none() {
-        let layout = render_device.create_bind_group_layout(
-            "voxel_compact_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    storage_buffer_read_only::<GpuChunkTableEntry>(false),
-                    storage_buffer_read_only::<u32>(false),
-                    storage_buffer_read_only::<VoxelInstance>(false),
-                    storage_buffer_read_only::<u32>(false),
-                    storage_buffer::<VoxelInstance>(false),
-                    storage_buffer::<u32>(false),
-                    storage_buffer_read_only::<GpuBucketRegion>(false),
-                    uniform_buffer::<CompactUniform>(false),
-                    storage_buffer::<u32>(false),
-                ),
+        let entries = BindGroupLayoutEntries::sequential(
+            ShaderStages::COMPUTE,
+            (
+                storage_buffer_read_only::<GpuChunkTableEntry>(false),
+                storage_buffer_read_only::<u32>(false),
+                storage_buffer_read_only::<VoxelInstance>(false),
+                storage_buffer_read_only::<u32>(false),
+                storage_buffer::<VoxelInstance>(false),
+                storage_buffer::<u32>(false),
+                storage_buffer_read_only::<GpuBucketRegion>(false),
+                uniform_buffer::<CompactUniform>(false),
+                storage_buffer::<u32>(false),
             ),
         );
+        let layout_descriptor =
+            BindGroupLayoutDescriptor::new("voxel_compact_layout", &entries);
+        let layout = pipeline_cache.get_bind_group_layout(&layout_descriptor);
         let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some("voxel_compact".into()),
-            layout: vec![layout.clone()],
+            layout: vec![layout_descriptor],
             shader: VOXEL_COMPACT_SHADER,
             shader_defs: vec![],
-            entry_point: "main".into(),
-            push_constant_ranges: vec![],
+            entry_point: Some("main".into()),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         });
         commands.insert_resource(VoxelCompactPipeline { layout, pipeline_id });
     }
 
     if existing_finalize.is_none() {
-        let layout = render_device.create_bind_group_layout(
-            "voxel_finalize_layout",
-            &BindGroupLayoutEntries::sequential(
-                ShaderStages::COMPUTE,
-                (
-                    storage_buffer_read_only::<u32>(false),
-                    storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
-                    storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
-                    storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
-                    storage_buffer_read_only::<BucketFinalizeMeta>(false),
-                    uniform_buffer::<FinalizeUniform>(false),
-                    storage_buffer::<u32>(false),
-                ),
+        let entries = BindGroupLayoutEntries::sequential(
+            ShaderStages::COMPUTE,
+            (
+                storage_buffer_read_only::<u32>(false),
+                storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
+                storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
+                storage_buffer::<DrawIndexedIndirectArgsGpu>(false),
+                storage_buffer_read_only::<BucketFinalizeMeta>(false),
+                uniform_buffer::<FinalizeUniform>(false),
+                storage_buffer::<u32>(false),
             ),
         );
+        let layout_descriptor =
+            BindGroupLayoutDescriptor::new("voxel_finalize_layout", &entries);
+        let layout = pipeline_cache.get_bind_group_layout(&layout_descriptor);
         let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some("voxel_finalize".into()),
-            layout: vec![layout.clone()],
+            layout: vec![layout_descriptor],
             shader: VOXEL_FINALIZE_SHADER,
             shader_defs: vec![],
-            entry_point: "main".into(),
-            push_constant_ranges: vec![],
+            entry_point: Some("main".into()),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         });
         commands.insert_resource(VoxelFinalizePipeline { layout, pipeline_id });
@@ -274,66 +312,23 @@ pub fn prepare_render_pipelines(
         return;
     }
 
-    let draw_layout = render_device.create_bind_group_layout(
-        "voxel_draw_layout",
-        &BindGroupLayoutEntries::sequential(
-            ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-            (
-                uniform_buffer::<GpuCameraUniform>(false),
-                storage_buffer_read_only::<VoxelInstance>(false),
-                storage_buffer_read_only::<GpuAtlasRect>(false),
-                texture_2d(TextureSampleType::Float { filterable: true }),
-                sampler(SamplerBindingType::Filtering),
-                uniform_buffer::<MaterialUniformsGpu>(false),
-                storage_buffer_read_only::<GpuBlockMeta>(false),
-            ),
+    let draw_entries = BindGroupLayoutEntries::sequential(
+        ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+        (
+            uniform_buffer::<GpuCameraUniform>(false),
+            storage_buffer_read_only::<VoxelInstance>(false),
+            storage_buffer_read_only::<GpuAtlasRect>(false),
+            texture_2d(TextureSampleType::Float { filterable: true }),
+            sampler(SamplerBindingType::Filtering),
+            uniform_buffer::<MaterialUniformsGpu>(false),
+            storage_buffer_read_only::<GpuBlockMeta>(false),
         ),
     );
+    let draw_layout_descriptor =
+        BindGroupLayoutDescriptor::new("voxel_draw_layout", &draw_entries);
+    let draw_layout = pipeline_cache.get_bind_group_layout(&draw_layout_descriptor);
 
     let vertex_layout = voxel_mesh_vertex_layout();
-
-    let blend_state = BlendState {
-        color: BlendComponent {
-            src_factor: BlendFactor::SrcAlpha,
-            dst_factor: BlendFactor::OneMinusSrcAlpha,
-            operation: BlendOperation::Add,
-        },
-        alpha: BlendComponent {
-            src_factor: BlendFactor::One,
-            dst_factor: BlendFactor::OneMinusSrcAlpha,
-            operation: BlendOperation::Add,
-        },
-    };
-
-    let pipelines: [[CachedRenderPipelineId; 3]; 4] =
-        [1u32, 2, 4, 8].map(|samples| {
-            [
-                pipeline_cache.queue_render_pipeline(build_voxel_pipeline_descriptor(
-                    "voxel_opaque",
-                    &draw_layout,
-                    &vertex_layout,
-                    None,
-                    false,
-                    samples,
-                )),
-                pipeline_cache.queue_render_pipeline(build_voxel_pipeline_descriptor(
-                    "voxel_cutout",
-                    &draw_layout,
-                    &vertex_layout,
-                    None,
-                    true,
-                    samples,
-                )),
-                pipeline_cache.queue_render_pipeline(build_voxel_pipeline_descriptor(
-                    "voxel_blend",
-                    &draw_layout,
-                    &vertex_layout,
-                    Some(blend_state),
-                    false,
-                    samples,
-                )),
-            ]
-        });
 
     let sampler = render_device.create_sampler(&SamplerDescriptor {
         label: Some("voxel_atlas_sampler"),
@@ -344,9 +339,25 @@ pub fn prepare_render_pipelines(
 
     commands.insert_resource(VoxelDrawPipeline {
         layout: draw_layout,
+        layout_descriptor: draw_layout_descriptor,
+        vertex_layout,
         sampler,
-        pipelines,
     });
+}
+
+fn voxel_blend_state() -> BlendState {
+    BlendState {
+        color: BlendComponent {
+            src_factor: BlendFactor::SrcAlpha,
+            dst_factor: BlendFactor::OneMinusSrcAlpha,
+            operation: BlendOperation::Add,
+        },
+        alpha: BlendComponent {
+            src_factor: BlendFactor::One,
+            dst_factor: BlendFactor::OneMinusSrcAlpha,
+            operation: BlendOperation::Add,
+        },
+    }
 }
 
 #[derive(ShaderType, Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -361,11 +372,12 @@ struct DrawIndexedIndirectArgsGpu {
 
 fn build_voxel_pipeline_descriptor(
     label: &'static str,
-    draw_layout: &BindGroupLayout,
+    draw_layout: &BindGroupLayoutDescriptor,
     vertex_layout: &VertexBufferLayout,
     blend: Option<BlendState>,
     cutout: bool,
     msaa_samples: u32,
+    target_format: TextureFormat,
 ) -> RenderPipelineDescriptor {
     let mut shader_defs = vec![];
     if cutout {
@@ -374,18 +386,19 @@ fn build_voxel_pipeline_descriptor(
     RenderPipelineDescriptor {
         label: Some(label.into()),
         layout: vec![draw_layout.clone()],
+        immediate_size: 0,
         vertex: VertexState {
             shader: VOXEL_INSTANCE_SHADER,
             shader_defs: shader_defs.clone(),
-            entry_point: "vertex".into(),
+            entry_point: Some("vertex".into()),
             buffers: vec![vertex_layout.clone()],
         },
         fragment: Some(FragmentState {
             shader: VOXEL_INSTANCE_SHADER,
             shader_defs,
-            entry_point: "fragment".into(),
+            entry_point: Some("fragment".into()),
             targets: vec![Some(ColorTargetState {
-                format: TextureFormat::bevy_default(),
+                format: target_format,
                 blend,
                 write_mask: ColorWrites::ALL,
             })],
@@ -400,9 +413,9 @@ fn build_voxel_pipeline_descriptor(
             conservative: false,
         },
         depth_stencil: Some(bevy::render::render_resource::DepthStencilState {
-            format: TextureFormat::Depth32Float,
-            depth_write_enabled: blend.is_none(),
-            depth_compare: bevy::render::render_resource::CompareFunction::GreaterEqual,
+            format: CORE_3D_DEPTH_FORMAT,
+            depth_write_enabled: Some(blend.is_none()),
+            depth_compare: Some(bevy::render::render_resource::CompareFunction::GreaterEqual),
             stencil: bevy::render::render_resource::StencilState::default(),
             bias: bevy::render::render_resource::DepthBiasState::default(),
         }),
@@ -411,7 +424,6 @@ fn build_voxel_pipeline_descriptor(
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
-        push_constant_ranges: vec![],
         zero_initialize_workgroup_memory: false,
     }
 }

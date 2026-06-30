@@ -77,8 +77,10 @@ pub(crate) fn sync_block_outline(
     let bounds = block_selection_bounds(def.geometry, model);
     let mesh_id = mesh3d.0.id();
     let updated = block_outline_mesh(bounds, hit.block, OUTLINE_INFLATE);
-    if let Some(existing) = meshes.get_mut(mesh_id) {
-        *existing = updated;
+    if meshes.get(mesh_id).is_some() {
+        if let Some(mut existing) = meshes.get_mut(mesh_id) {
+            *existing = updated;
+        }
     } else {
         mesh3d.0 = meshes.add(updated);
     }

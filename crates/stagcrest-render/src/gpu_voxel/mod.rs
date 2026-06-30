@@ -1,10 +1,11 @@
 use bevy::prelude::*;
-use bevy::render::{
-    extract_resource::ExtractResourcePlugin,
-    render_graph::RenderGraphApp,
-    ExtractSchedule, Render, RenderApp,
+use bevy::core_pipeline::{
+    core_3d::main_opaque_pass_3d,
+    schedule::{Core3d, Core3dSystems},
 };
-use bevy::core_pipeline::core_3d::graph::{Core3d, Node3d};
+use bevy::render::extract_resource::ExtractResourcePlugin;
+use bevy::render::render_resource::SpecializedRenderPipelines;
+use bevy::render::{ExtractSchedule, Render, RenderApp, RenderSystems};
 
 pub mod block_meta;
 pub mod bucket;
@@ -31,16 +32,16 @@ pub use gpu_resources::{GpuVoxelStats, GpuVoxelTables};
 pub use memory_config::VoxelMemoryConfig;
 pub use pipelines::load_voxel_shaders;
 
-use crate::gpu_voxel::draw_node::{prepare_voxel_draw_binds, VoxelDrawBindCache, VoxelDrawLabel, VoxelDrawNode};
+use crate::gpu_voxel::draw_node::{prepare_voxel_draw_binds, prepare_voxel_draw_pipelines, voxel_draw_pass, VoxelDrawBindCache, VoxelSpecializedPipelineCache};
 use crate::gpu_voxel::extract_chunk::{apply_extracted_chunks, stage_gpu_chunk_extract, GpuChunkExtractStaging, PendingChunkExtract};
 use crate::gpu_voxel::pipelines::prepare_render_pipelines;
+use crate::gpu_voxel::pipelines::VoxelDrawPipeline;
 use crate::gpu_voxel::prepare::{
     poll_gpu_voxel_overflow, prepare_gpu_voxel_buffers, publish_gpu_chunk_feedback,
     resize_voxel_memory_if_needed, sync_gpu_voxel_stats,
 };
 use crate::gpu_voxel::rebuild_node::{
-    prepare_voxel_rebuild, VoxelRebuildFrame, VoxelRebuildLabel,
-    VoxelRebuildNode, VoxelRebuildPersistent,
+    prepare_voxel_rebuild, voxel_rebuild_pass, VoxelRebuildFrame, VoxelRebuildPersistent,
 };
 use crate::plugin::{VoxelAtlasImage, VoxelCamera, VoxelMaterialSource, VoxelRenderConfig as VoxelRenderConfigResource};
 
@@ -77,6 +78,8 @@ impl Plugin for GpuVoxelPlugin {
             .init_resource::<VoxelRebuildPersistent>()
             .init_resource::<PendingChunkExtract>()
             .init_resource::<GpuChunkRenderFeedback>()
+            .init_resource::<VoxelSpecializedPipelineCache>()
+            .init_resource::<SpecializedRenderPipelines<VoxelDrawPipeline>>()
             .add_systems(
                 ExtractSchedule,
                 (
@@ -94,23 +97,20 @@ impl Plugin for GpuVoxelPlugin {
                     poll_gpu_voxel_overflow.after(resize_voxel_memory_if_needed),
                     prepare_voxel_rebuild.after(poll_gpu_voxel_overflow),
                     prepare_voxel_draw_binds.after(prepare_voxel_rebuild),
+                    prepare_voxel_draw_pipelines.after(prepare_voxel_draw_binds),
                     sync_gpu_voxel_stats,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(RenderSystems::Prepare),
             )
-            .add_render_graph_node::<VoxelRebuildNode>(Core3d, VoxelRebuildLabel)
-            .add_render_graph_node::<bevy::render::render_graph::ViewNodeRunner<VoxelDrawNode>>(
-                Core3d,
-                VoxelDrawLabel,
-            )
-            .add_render_graph_edges(
+            .add_systems(
                 Core3d,
                 (
-                    Node3d::StartMainPass,
-                    VoxelRebuildLabel,
-                    VoxelDrawLabel,
-                    Node3d::MainOpaquePass,
-                ),
+                    voxel_rebuild_pass,
+                    voxel_draw_pass.after(voxel_rebuild_pass).before(main_opaque_pass_3d),
+                )
+                    .chain()
+                    .in_set(Core3dSystems::MainPass),
             );
     }
 }

@@ -1,5 +1,6 @@
+use bevy::math::Vec3;
 use bevy::prelude::*;
-use glam::Vec3;
+use bevy::window::{CursorOptions, PrimaryWindow};
 use stagcrest_net::{PlayerAction, PlayerActionKind};
 
 use crate::net_client::GameNetClient;
@@ -27,7 +28,7 @@ pub struct SelectedBlock(pub stagcrest_protocol::BlockId);
 
 pub fn camera_system(
     keys: Res<ButtonInput<KeyCode>>,
-    mut motion: EventReader<bevy::input::mouse::MouseMotion>,
+    mut motion: MessageReader<bevy::input::mouse::MouseMotion>,
     mut camera: Query<(&mut Transform, &FlyCamera)>,
     time: Res<Time>,
 ) {
@@ -170,12 +171,12 @@ pub fn block_interaction(
 pub fn capture_cursor(
     mut fly: Query<&mut FlyCamera>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut window: Query<&mut Window>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if mouse.just_pressed(MouseButton::Left) {
-        if let Ok(mut w) = window.single_mut() {
-            w.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-            w.cursor_options.visible = false;
+        if let Ok(mut c) = cursor.single_mut() {
+            c.grab_mode = bevy::window::CursorGrabMode::Locked;
+            c.visible = false;
         }
         for mut f in &mut fly {
             f.captured = true;
@@ -183,8 +184,8 @@ pub fn capture_cursor(
     }
 }
 
-pub fn release_cursor(fly: &mut FlyCamera, window: &mut Window) {
-    window.cursor_options.grab_mode = bevy::window::CursorGrabMode::None;
-    window.cursor_options.visible = true;
+pub fn release_cursor(fly: &mut FlyCamera, cursor: &mut CursorOptions) {
+    cursor.grab_mode = bevy::window::CursorGrabMode::None;
+    cursor.visible = true;
     fly.captured = false;
 }

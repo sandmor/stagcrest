@@ -131,7 +131,6 @@ pub enum SlotKind {
 #[derive(Resource, Default)]
 pub struct InventoryUiState {
     pub open: bool,
-    pub search: String,
     /// Block currently "held" on the mouse cursor (click-to-carry model).
     pub cursor: Option<BlockId>,
 }

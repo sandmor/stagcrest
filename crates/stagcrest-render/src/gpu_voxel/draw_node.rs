@@ -1,31 +1,56 @@
-use bevy::ecs::query::QueryItem;
+use bevy::camera::{MainPassResolutionOverride, Viewport};
 use bevy::prelude::*;
 use bevy::render::{
+    camera::ExtractedCamera,
     render_asset::RenderAssets,
-    render_graph::{NodeRunError, RenderGraphContext, RenderLabel, ViewNode},
     render_resource::{
         BindGroup, BindGroupEntry, BindingResource, Buffer, BufferInitDescriptor, BufferSize,
-        BufferUsages, PipelineCache, RenderPassDescriptor, StoreOp,
+        BufferUsages, PipelineCache, RenderPassDescriptor, SpecializedRenderPipelines, StoreOp,
     },
-    renderer::{RenderContext, RenderDevice, RenderQueue},
+    renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
     texture::GpuImage,
-    view::{Msaa, ViewDepthTexture, ViewTarget},
+    view::{ExtractedView, Msaa, ViewDepthTexture, ViewTarget},
 };
 use std::collections::HashMap;
 
 use crate::gpu_voxel::extract::camera_to_gpu_uniform;
 use crate::gpu_voxel::gpu_resources::{GpuVoxelTables, InstanceBufferPool};
-use crate::gpu_voxel::pipelines::{material_uniforms_from, msaa_pipeline_index, VoxelDrawPipeline};
+use crate::gpu_voxel::pipelines::{material_uniforms_from, VoxelDrawPipeline, VoxelDrawPipelineKey};
 use crate::gpu_voxel::prepare::GpuVoxelRenderState;
 use crate::gpu_voxel::types::{instance_slot_byte_size, GpuRenderLayer};
 
 use crate::plugin::{VoxelAtlasImage, VoxelCamera, VoxelMaterialSource};
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct VoxelDrawLabel;
+/// Cached specialized voxel draw pipelines keyed by view format, MSAA, and layer.
+#[derive(Resource, Default)]
+pub struct VoxelSpecializedPipelineCache {
+    pub pipelines: HashMap<VoxelDrawPipelineKey, bevy::render::render_resource::CachedRenderPipelineId>,
+}
 
-#[derive(Default)]
-pub struct VoxelDrawNode;
+/// Ensures voxel draw pipelines exist for each active view format.
+pub fn prepare_voxel_draw_pipelines(
+    views: Query<(&ExtractedView, &Msaa)>,
+    draw_pipeline: Option<Res<VoxelDrawPipeline>>,
+    pipeline_cache: Res<PipelineCache>,
+    mut specialized: ResMut<SpecializedRenderPipelines<VoxelDrawPipeline>>,
+    mut cache: ResMut<VoxelSpecializedPipelineCache>,
+) {
+    let Some(draw_pipeline) = draw_pipeline else {
+        return;
+    };
+    for (view, msaa) in views {
+        for layer in 0..3u32 {
+            let key = VoxelDrawPipelineKey {
+                target_format: view.target_format,
+                samples: msaa.samples(),
+                layer,
+            };
+            cache.pipelines.entry(key).or_insert_with(|| {
+                specialized.specialize(&pipeline_cache, &draw_pipeline, key)
+            });
+        }
+    }
+}
 
 #[derive(Clone)]
 struct LayerDraw {
@@ -78,7 +103,6 @@ pub fn prepare_voxel_draw_binds(
         return;
     };
     let Some(gpu_image) = gpu_images.get(&atlas_image.0) else {
-        tracing::debug!("voxel draw prep skipped: atlas GPU image not ready");
         bind_cache.prepared_draws.clear();
         return;
     };
@@ -160,68 +184,79 @@ pub fn prepare_voxel_draw_binds(
     }
 }
 
-impl ViewNode for VoxelDrawNode {
-    type ViewQuery = (
-        &'static ViewTarget,
-        &'static ViewDepthTexture,
-        &'static Msaa,
+pub fn voxel_draw_pass(
+    world: &World,
+    view: ViewQuery<(
+        &ExtractedCamera,
+        &ViewTarget,
+        &ViewDepthTexture,
+        &Msaa,
+        &ExtractedView,
+        Option<&MainPassResolutionOverride>,
+    )>,
+    mut ctx: RenderContext,
+) {
+    let (camera, target, depth, msaa, extracted_view, resolution_override) = view.into_inner();
+
+    let Some(state) = world.get_resource::<GpuVoxelRenderState>() else {
+        return;
+    };
+    if world.get_resource::<VoxelDrawPipeline>().is_none() {
+        return;
+    };
+    let bind_cache = world.resource::<VoxelDrawBindCache>();
+    if bind_cache.prepared_draws.is_empty() {
+        return;
+    }
+
+    let pipeline_cache = world.resource::<PipelineCache>();
+    let pipeline_cache_resource = world.resource::<VoxelSpecializedPipelineCache>();
+    let target_format = extracted_view.target_format;
+
+    let color_attachment = target.get_color_attachment();
+    let depth_attachment = depth.get_attachment(StoreOp::Store);
+    let mut pass = ctx.begin_tracked_render_pass(RenderPassDescriptor {
+        label: Some("voxel_draw_pass"),
+        color_attachments: &[Some(color_attachment)],
+        depth_stencil_attachment: Some(depth_attachment),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+    });
+
+    if let Some(viewport) =
+        Viewport::from_viewport_and_override(camera.viewport.as_ref(), resolution_override)
+    {
+        pass.set_camera_viewport(&viewport);
+    }
+
+    pass.set_vertex_buffer(0, state.buffers.mesh_vertex_buffer.slice(..));
+    pass.set_index_buffer(
+        state.buffers.mesh_index_buffer.slice(..),
+        bevy::render::render_resource::IndexFormat::Uint32,
     );
 
-    fn run(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        (target, depth, msaa): QueryItem<Self::ViewQuery>,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
-        let Some(state) = world.get_resource::<GpuVoxelRenderState>() else {
-            return Ok(());
+    for draw in &bind_cache.prepared_draws {
+        let key = VoxelDrawPipelineKey {
+            target_format,
+            samples: msaa.samples(),
+            layer: draw.layer_idx as u32,
         };
-        let Some(draw_pipeline) = world.get_resource::<VoxelDrawPipeline>() else {
-            return Ok(());
+        let Some(pipeline_id) = pipeline_cache_resource.pipelines.get(&key) else {
+            continue;
         };
-        let bind_cache = world.resource::<VoxelDrawBindCache>();
-        if bind_cache.prepared_draws.is_empty() {
-            return Ok(());
-        }
-
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let msaa_pipelines = &draw_pipeline.pipelines[msaa_pipeline_index(msaa.samples())];
-
-        let color_attachment = target.get_color_attachment();
-        let depth_attachment = depth.get_attachment(StoreOp::Store);
-        let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("voxel_draw_pass"),
-            color_attachments: &[Some(color_attachment)],
-            depth_stencil_attachment: Some(depth_attachment),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        pass.set_vertex_buffer(0, state.buffers.mesh_vertex_buffer.slice(..));
-        pass.set_index_buffer(
-            state.buffers.mesh_index_buffer.slice(..),
-            0,
-            bevy::render::render_resource::IndexFormat::Uint32,
+        let Some(pipeline) = pipeline_cache.get_render_pipeline(*pipeline_id) else {
+            continue;
+        };
+        let Some(bind_group) = bind_cache.bucket_binds.get(&draw.cache_key) else {
+            continue;
+        };
+        pass.set_render_pipeline(pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.draw_indexed_indirect(
+            &state.buffers.indirect_buffers[draw.layer_idx],
+            draw.indirect_byte_offset,
         );
-
-        for draw in &bind_cache.prepared_draws {
-            let pipeline_id = msaa_pipelines[draw.layer_idx];
-            let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
-                continue;
-            };
-            let Some(bind_group) = bind_cache.bucket_binds.get(&draw.cache_key) else {
-                continue;
-            };
-            pass.set_render_pipeline(pipeline);
-            pass.set_bind_group(0, bind_group, &[]);
-            pass.draw_indexed_indirect(
-                &state.buffers.indirect_buffers[draw.layer_idx],
-                draw.indirect_byte_offset,
-            );
-        }
-
-        Ok(())
     }
 }
 
@@ -277,7 +312,7 @@ fn collect_layer_draws(
         let cache_key = (layer_idx, *bucket_id);
         bind_cache.bucket_binds.entry(cache_key).or_insert_with(|| {
             render_device.create_bind_group(
-                Some("voxel_draw_bind_group"),
+                "voxel_draw_bind_group",
                 &draw_pipeline.layout,
                 &[
                     BindGroupEntry {

@@ -1,12 +1,9 @@
 use bevy::prelude::*;
-use bevy::render::{
-    render_graph::{Node, NodeRunError, RenderGraphContext, RenderLabel},
-    render_resource::{
-        BindGroup, BindGroupEntry, Buffer, BufferDescriptor, BufferInitDescriptor, BufferUsages,
-        ComputePassDescriptor, PipelineCache,
-    },
-    renderer::{RenderContext, RenderDevice, RenderQueue},
+use bevy::render::render_resource::{
+    BindGroup, BindGroupEntry, Buffer, BufferDescriptor, BufferInitDescriptor, BufferUsages,
+    ComputePassDescriptor, PipelineCache,
 };
+use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue};
 use stagcrest_protocol::ChunkPos;
 use std::collections::{HashMap, HashSet};
 
@@ -20,12 +17,6 @@ use crate::gpu_voxel::types::{CompactUniform, EmitUniform, FinalizeUniform};
 
 /// Must match `EMIT_TILES_PER_AXIS` in `voxel_compute.wgsl`.
 const EMIT_TILES_PER_AXIS: u32 = 4;
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct VoxelRebuildLabel;
-
-#[derive(Default)]
-pub struct VoxelRebuildNode;
 
 /// Dirty-chunk emit job (compact is batched separately).
 pub struct ChunkEmitJob {
@@ -105,7 +96,7 @@ impl ChunkComputeBindCache {
         render_queue.write_buffer(&dispatch_buffer, 0, bytemuck::bytes_of(&slot));
 
         let bind_group = render_device.create_bind_group(
-            Some("voxel_emit_bind_group"),
+            "voxel_emit_bind_group",
             compute_layout,
             &[
                 BindGroupEntry {
@@ -342,7 +333,7 @@ pub fn prepare_voxel_rebuild(
             bytemuck::bytes_of(&compact_uniform),
         );
         frame.compact_bind_group = Some(render_device.create_bind_group(
-            Some("voxel_compact_bind_group"),
+            "voxel_compact_bind_group",
             &compact_pipeline.layout,
             &[
                 BindGroupEntry {
@@ -398,8 +389,8 @@ pub fn prepare_voxel_rebuild(
         "voxel_finalize_uniform",
         bytemuck::bytes_of(&finalize_uniform),
     );
-    frame.finalize_bind_group = Some(render_device.create_bind_group(
-        Some("voxel_finalize_bind_group"),
+        frame.finalize_bind_group = Some(render_device.create_bind_group(
+            "voxel_finalize_bind_group",
         &finalize_pipeline.layout,
         &[
             BindGroupEntry {
@@ -482,84 +473,74 @@ fn ensure_uniform_buffer(
     buffer.as_ref().expect("uniform buffer").clone()
 }
 
-impl Node for VoxelRebuildNode {
-    fn run<'w>(
-        &self,
-        _graph: &mut RenderGraphContext,
-        render_context: &mut RenderContext<'w>,
-        world: &'w World,
-    ) -> Result<(), NodeRunError> {
-        let Some(state) = world.get_resource::<GpuVoxelRenderState>() else {
-            return Ok(());
-        };
-        let Some(frame) = world.get_resource::<VoxelRebuildFrame>() else {
-            return Ok(());
-        };
-        if frame.skip {
-            return Ok(());
-        }
+pub fn voxel_rebuild_pass(world: &World, mut ctx: RenderContext) {
+    let Some(state) = world.get_resource::<GpuVoxelRenderState>() else {
+        return;
+    };
+    let Some(frame) = world.get_resource::<VoxelRebuildFrame>() else {
+        return;
+    };
+    if frame.skip {
+        return;
+    }
 
-        let Some(compute_pipeline) = world.get_resource::<VoxelComputePipeline>() else {
-            return Ok(());
-        };
-        let Some(compact_pipeline) = world.get_resource::<VoxelCompactPipeline>() else {
-            return Ok(());
-        };
-        let Some(finalize_pipeline) = world.get_resource::<VoxelFinalizePipeline>() else {
-            return Ok(());
-        };
+    let Some(compute_pipeline) = world.get_resource::<VoxelComputePipeline>() else {
+        return;
+    };
+    let Some(compact_pipeline) = world.get_resource::<VoxelCompactPipeline>() else {
+        return;
+    };
+    let Some(finalize_pipeline) = world.get_resource::<VoxelFinalizePipeline>() else {
+        return;
+    };
 
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let gpu_buffers = &state.buffers;
-        let encoder = render_context.command_encoder();
+    let pipeline_cache = world.resource::<PipelineCache>();
+    let gpu_buffers = &state.buffers;
+    let encoder = ctx.command_encoder();
 
-        if let Some(emit_pipeline) = pipeline_cache.get_compute_pipeline(compute_pipeline.pipeline_id)
-        {
-            for job in &frame.emit_jobs {
-                let mut emit_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("voxel_emit_pass"),
-                    timestamp_writes: None,
-                });
-                emit_pass.set_pipeline(emit_pipeline);
-                emit_pass.set_bind_group(0, &job.emit_bind_group, &[]);
-                emit_pass.dispatch_workgroups(
-                    EMIT_TILES_PER_AXIS,
-                    EMIT_TILES_PER_AXIS,
-                    EMIT_TILES_PER_AXIS,
-                );
-            }
-        }
-
-        if let (Some(compact_bind), Some(compact)) = (
-            frame.compact_bind_group.as_ref(),
-            pipeline_cache.get_compute_pipeline(compact_pipeline.pipeline_id),
-        ) {
-            if !frame.visible.is_empty() {
-                let compact_wg_y = (frame.scratch_capacity + 63) / 64;
-                let mut compact_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("voxel_compact_pass"),
-                    timestamp_writes: None,
-                });
-                compact_pass.set_pipeline(compact);
-                compact_pass.set_bind_group(0, compact_bind, &[]);
-                compact_pass.dispatch_workgroups(frame.visible.len() as u32, compact_wg_y, 1);
-            }
-        }
-
-        if let (Some(finalize_bind), Some(finalize)) = (
-            frame.finalize_bind_group.as_ref(),
-            pipeline_cache.get_compute_pipeline(finalize_pipeline.pipeline_id),
-        ) {
-            let workgroups = (gpu_buffers.bucket_slot_count + 63) / 64;
-            let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("voxel_finalize_pass"),
+    if let Some(emit_pipeline) = pipeline_cache.get_compute_pipeline(compute_pipeline.pipeline_id) {
+        for job in &frame.emit_jobs {
+            let mut emit_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("voxel_emit_pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(finalize);
-            pass.set_bind_group(0, finalize_bind, &[]);
-            pass.dispatch_workgroups(workgroups, 1, 1);
+            emit_pass.set_pipeline(emit_pipeline);
+            emit_pass.set_bind_group(0, &job.emit_bind_group, &[]);
+            emit_pass.dispatch_workgroups(
+                EMIT_TILES_PER_AXIS,
+                EMIT_TILES_PER_AXIS,
+                EMIT_TILES_PER_AXIS,
+            );
         }
+    }
 
-        Ok(())
+    if let (Some(compact_bind), Some(compact)) = (
+        frame.compact_bind_group.as_ref(),
+        pipeline_cache.get_compute_pipeline(compact_pipeline.pipeline_id),
+    ) {
+        if !frame.visible.is_empty() {
+            let compact_wg_y = (frame.scratch_capacity + 63) / 64;
+            let mut compact_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                label: Some("voxel_compact_pass"),
+                timestamp_writes: None,
+            });
+            compact_pass.set_pipeline(compact);
+            compact_pass.set_bind_group(0, compact_bind, &[]);
+            compact_pass.dispatch_workgroups(frame.visible.len() as u32, compact_wg_y, 1);
+        }
+    }
+
+    if let (Some(finalize_bind), Some(finalize)) = (
+        frame.finalize_bind_group.as_ref(),
+        pipeline_cache.get_compute_pipeline(finalize_pipeline.pipeline_id),
+    ) {
+        let workgroups = (gpu_buffers.bucket_slot_count + 63) / 64;
+        let mut pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+            label: Some("voxel_finalize_pass"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(finalize);
+        pass.set_bind_group(0, finalize_bind, &[]);
+        pass.dispatch_workgroups(workgroups, 1, 1);
     }
 }

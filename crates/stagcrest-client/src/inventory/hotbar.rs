@@ -1,6 +1,10 @@
 use super::state::{CreativeInventory, InventoryUiState, SlotKind, HOTBAR_SLOTS};
 use crate::block_icons::BlockIconCache;
+use crate::inventory::input::editable_text_has_focus;
+use crate::ui::UiTheme;
+use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui::widget::NodeImageMode;
 
 #[derive(Component)]
@@ -11,7 +15,7 @@ pub struct HotbarSlot {
     pub index: usize,
 }
 
-pub fn spawn_hotbar(commands: &mut Commands) {
+pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
     commands
         .spawn((
             HotbarRoot,
@@ -27,12 +31,12 @@ pub fn spawn_hotbar(commands: &mut Commands) {
         ))
         .with_children(|parent| {
             for i in 0..HOTBAR_SLOTS {
-                spawn_world_hotbar_slot(parent, i);
+                spawn_world_hotbar_slot(parent, i, theme);
             }
         });
 }
 
-fn spawn_world_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
+fn spawn_world_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize, theme: &UiTheme) {
     let kind = SlotKind::Hotbar(index);
     parent
         .spawn((
@@ -46,12 +50,12 @@ fn spawn_world_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.15, 0.85)),
-            BorderColor(Color::srgba(0.35, 0.35, 0.4, 0.9)),
-            BorderRadius::all(Val::Px(4.0)),
         ))
+        .insert(BackgroundColor(theme.slot_bg))
+        .insert(BorderColor::all(theme.slot_border))
         .with_children(|slot| {
             slot.spawn((Node {
                 width: Val::Px(40.0),
@@ -63,7 +67,7 @@ fn spawn_world_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
             },))
                 .with_children(|icon_box| {
                     icon_box.spawn((
-                        empty_slot_image(),
+                        ImageNode::default().with_mode(NodeImageMode::Auto),
                         Node {
                             width: Val::Px(40.0),
                             height: Val::Px(40.0),
@@ -73,6 +77,7 @@ fn spawn_world_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize) {
                             kind,
                             icon_index: index,
                         },
+                        Visibility::Hidden,
                     ));
                 });
         });
@@ -89,15 +94,16 @@ pub struct SlotIcon {
     pub icon_index: usize,
 }
 
-/// A slot icon image that starts fully transparent so empty slots don't show
-/// the default white placeholder texture before `update_hotbar_highlight` runs.
-pub fn empty_slot_image() -> ImageNode {
-    let mut node = ImageNode::default().with_mode(NodeImageMode::Auto);
-    node.color = Color::NONE;
-    node
-}
-
-pub fn hotbar_keyboard(keys: Res<ButtonInput<KeyCode>>, mut inventory: ResMut<CreativeInventory>) {
+pub fn hotbar_keyboard(
+    keys: Res<ButtonInput<KeyCode>>,
+    input_focus: Res<InputFocus>,
+    editable: Query<Entity, With<EditableText>>,
+    ui: Res<InventoryUiState>,
+    mut inventory: ResMut<CreativeInventory>,
+) {
+    if ui.open || editable_text_has_focus(&input_focus, &editable) {
+        return;
+    }
     for i in 0..HOTBAR_SLOTS {
         let key = match i {
             0 => KeyCode::Digit1,
@@ -117,7 +123,7 @@ pub fn hotbar_keyboard(keys: Res<ButtonInput<KeyCode>>, mut inventory: ResMut<Cr
 }
 
 pub fn hotbar_scroll(
-    mut wheel: EventReader<bevy::input::mouse::MouseWheel>,
+    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     mut inventory: ResMut<CreativeInventory>,
 ) {
     let delta: f32 = wheel.read().map(|e| e.y).sum();
@@ -164,16 +170,17 @@ pub fn update_hotbar_visibility(
 pub fn update_hotbar_highlight(
     inventory: Res<CreativeInventory>,
     ui: Res<InventoryUiState>,
+    theme: Res<UiTheme>,
     mut hotbar_slots: Query<(&HotbarSlot, &mut BorderColor), Without<InventoryScreenSlot>>,
     mut screen_slots: Query<(&InventoryScreenSlot, &mut BorderColor)>,
     icons: Option<Res<BlockIconCache>>,
-    mut images: Query<(&SlotIcon, &mut ImageNode)>,
+    mut images: Query<(&SlotIcon, &mut ImageNode, &mut Visibility)>,
 ) {
     let Some(icons) = icons else { return };
 
     for (slot, mut border) in &mut hotbar_slots {
         let selected = !ui.open && slot.index == inventory.selected_index;
-        *border = slot_border(selected);
+        *border = slot_border(selected, &theme);
     }
 
     for (slot, mut border) in &mut screen_slots {
@@ -181,20 +188,21 @@ pub fn update_hotbar_highlight(
             SlotKind::Hotbar(i) => i == inventory.selected_index,
             SlotKind::Main(_) => false,
         };
-        *border = slot_border(selected);
+        *border = slot_border(selected, &theme);
     }
 
-    for (icon, mut node) in &mut images {
+    for (icon, mut node, mut vis) in &mut images {
         let block = inventory.get_slot(icon.kind);
         match block {
             Some(id) => {
+                *vis = Visibility::Inherited;
                 node.image = icons.get(id);
                 node.image_mode = NodeImageMode::Auto;
                 node.color = Color::WHITE;
             }
             None => {
+                *vis = Visibility::Hidden;
                 node.image = Handle::default();
-                node.color = Color::NONE;
             }
         }
     }
@@ -206,11 +214,11 @@ pub struct InventoryScreenSlot {
     pub index: usize,
 }
 
-fn slot_border(selected: bool) -> BorderColor {
+fn slot_border(selected: bool, theme: &UiTheme) -> BorderColor {
     if selected {
-        BorderColor(Color::WHITE)
+        BorderColor::all(theme.slot_selected)
     } else {
-        BorderColor(Color::srgba(0.35, 0.35, 0.4, 0.9))
+        BorderColor::all(theme.slot_border)
     }
 }
 

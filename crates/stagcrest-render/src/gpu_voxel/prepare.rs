@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::render::render_resource::{CommandEncoderDescriptor, MapMode, Maintain};
+use bevy::render::render_resource::{CommandEncoderDescriptor, MapMode, PollType};
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::MainWorld;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -204,7 +204,7 @@ pub fn poll_gpu_voxel_overflow(
     mut feedback: Option<ResMut<GpuChunkRenderFeedback>>,
     mut readback: Local<OverflowReadbackState>,
 ) {
-    render_device.poll(Maintain::Poll);
+    let _ = render_device.poll(PollType::Poll);
 
     let (
         Some(tables),

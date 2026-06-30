@@ -1,4 +1,5 @@
 use crate::game::AppState;
+use crate::ui::UiTheme;
 use bevy::prelude::*;
 
 pub struct MenuPlugin;
@@ -23,7 +24,7 @@ enum MenuButton {
     Quit,
 }
 
-fn spawn_main_menu(mut commands: Commands) {
+fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
     commands
         .spawn((
             MainMenuRoot,
@@ -36,31 +37,25 @@ fn spawn_main_menu(mut commands: Commands) {
                 row_gap: Val::Px(16.0),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.08, 0.09, 0.12)),
         ))
+        .insert(BackgroundColor(theme.screen_bg))
         .with_children(|parent| {
             parent.spawn((
                 Text::new("Stagcrest"),
-                TextFont {
-                    font_size: 64.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.85, 0.7)),
+                theme.text_font(theme.title_size),
+                TextColor(theme.accent),
             ));
             parent.spawn((
                 Text::new("Mod-first voxel engine"),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.6, 0.6, 0.65)),
+                theme.text_font(theme.subtitle_size),
+                TextColor(theme.text_muted),
             ));
-            spawn_button(parent, "Play", MenuButton::Play);
-            spawn_button(parent, "Quit", MenuButton::Quit);
+            spawn_button(parent, "Play", MenuButton::Play, &theme);
+            spawn_button(parent, "Quit", MenuButton::Quit, &theme);
         });
 }
 
-fn spawn_button(parent: &mut ChildSpawnerCommands, label: &str, action: MenuButton) {
+fn spawn_button(parent: &mut ChildSpawnerCommands, label: &str, action: MenuButton, theme: &UiTheme) {
     parent
         .spawn((
             action,
@@ -70,28 +65,26 @@ fn spawn_button(parent: &mut ChildSpawnerCommands, label: &str, action: MenuButt
                 height: Val::Px(48.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.2, 0.22, 0.28)),
-            BorderRadius::all(Val::Px(6.0)),
         ))
+        .insert(BackgroundColor(theme.button_bg))
         .with_child((
             Text::new(label),
-            TextFont {
-                font_size: 22.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
+            theme.text_font(theme.body_size),
+            TextColor(theme.text_primary),
         ));
 }
 
 fn menu_button_system(
+    theme: Res<UiTheme>,
     mut interaction_query: Query<
         (&Interaction, &MenuButton, &mut BackgroundColor),
         (Changed<Interaction>, With<Button>),
     >,
     mut next_state: ResMut<NextState<AppState>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for (interaction, action, mut bg) in &mut interaction_query {
         match *interaction {
@@ -104,10 +97,10 @@ fn menu_button_system(
                 }
             },
             Interaction::Hovered => {
-                *bg = BackgroundColor(Color::srgb(0.28, 0.32, 0.4));
+                *bg = BackgroundColor(theme.button_hover);
             }
             Interaction::None => {
-                *bg = BackgroundColor(Color::srgb(0.2, 0.22, 0.28));
+                *bg = BackgroundColor(theme.button_bg);
             }
         }
     }

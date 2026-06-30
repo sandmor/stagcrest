@@ -3,25 +3,47 @@ use super::screen::CatalogCell;
 use super::state::{CreativeInventory, InventoryUiState, SlotKind};
 use crate::block_icons::BlockIconCache;
 use crate::player::{release_cursor, FlyCamera, SelectedBlock};
+use crate::ui::UiTheme;
+use bevy::input_focus::InputFocus;
+use bevy::picking::events::{Pointer, Press};
+use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
+use bevy::text::EditableText;
 use bevy::ui::widget::NodeImageMode;
-use bevy::window::PrimaryWindow;
+use bevy::window::{CursorOptions, PrimaryWindow};
 
 #[derive(Component)]
 pub struct CursorGhost;
 
+/// True when keyboard input should go to a focused [`EditableText`] widget.
+pub(crate) fn editable_text_has_focus(
+    input_focus: &InputFocus,
+    editable: &Query<Entity, With<EditableText>>,
+) -> bool {
+    input_focus
+        .get()
+        .is_some_and(|entity| editable.contains(entity))
+}
+
 pub fn toggle_inventory_screen(
     keys: Res<ButtonInput<KeyCode>>,
+    editable: Query<Entity, With<EditableText>>,
     mut ui: ResMut<InventoryUiState>,
     mut commands: Commands,
+    theme: Res<UiTheme>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
     icons: Option<Res<BlockIconCache>>,
     mut fly: Query<&mut FlyCamera>,
-    mut window: Query<&mut Window, With<PrimaryWindow>>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     existing: Query<Entity, With<super::screen::InventoryScreenRoot>>,
     ghost: Query<Entity, With<CursorGhost>>,
+    mut input_focus: ResMut<InputFocus>,
 ) {
     if !keys.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+    // Let the focused search field receive printable keys (including E).
+    if editable_text_has_focus(&input_focus, &editable) {
         return;
     }
 
@@ -29,18 +51,19 @@ pub fn toggle_inventory_screen(
 
     if ui.open {
         if let Ok(mut fly) = fly.single_mut() {
-            if let Ok(mut w) = window.single_mut() {
-                release_cursor(&mut fly, &mut w);
+            if let Ok(mut c) = cursor.single_mut() {
+                release_cursor(&mut fly, &mut c);
             }
         }
         let (Some(ctx), Some(icons)) = (mod_ctx, icons) else {
             ui.open = false;
             return;
         };
-        super::screen::spawn_inventory_screen(&mut commands, &ctx, &icons, &ui.search);
-        spawn_cursor_ghost(&mut commands, &icons);
+        super::screen::spawn_inventory_screen(&mut commands, &ctx, &icons, &theme);
+        spawn_cursor_ghost(&mut commands);
     } else {
         ui.cursor = None;
+        input_focus.clear();
         for e in &existing {
             commands.entity(e).despawn();
         }
@@ -48,85 +71,68 @@ pub fn toggle_inventory_screen(
             commands.entity(e).despawn();
         }
         if let Ok(mut fly) = fly.single_mut() {
-            if let Ok(mut w) = window.single_mut() {
-                w.cursor_options.grab_mode = bevy::window::CursorGrabMode::Locked;
-                w.cursor_options.visible = false;
+            if let Ok(mut c) = cursor.single_mut() {
+                c.grab_mode = bevy::window::CursorGrabMode::Locked;
+                c.visible = false;
                 fly.captured = true;
             }
         }
     }
 }
 
-fn spawn_cursor_ghost(commands: &mut Commands, _icons: &BlockIconCache) {
-    commands.spawn((
-        CursorGhost,
-        Node {
-            position_type: PositionType::Absolute,
-            width: Val::Px(40.0),
-            height: Val::Px(40.0),
-            ..default()
-        },
-        Visibility::Hidden,
-        ImageNode::default().with_mode(NodeImageMode::Auto),
-        ZIndex(1000),
-    ));
+fn spawn_cursor_ghost(commands: &mut Commands) {
+    commands
+        .spawn((
+            CursorGhost,
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Px(40.0),
+                height: Val::Px(40.0),
+                ..default()
+            },
+            ImageNode::default().with_mode(NodeImageMode::Auto),
+            ZIndex(1000),
+        ))
+        .insert(Visibility::Hidden);
 }
 
-pub fn inventory_search_keyboard(
+pub fn clear_search_on_escape(
     keys: Res<ButtonInput<KeyCode>>,
-    mut ui: ResMut<InventoryUiState>,
+    ui: Res<InventoryUiState>,
+    mut search: Query<&mut EditableText, With<super::screen::InventorySearchField>>,
+    mut input_focus: ResMut<InputFocus>,
 ) {
-    if !ui.open {
+    if !ui.open || !keys.just_pressed(KeyCode::Escape) {
         return;
     }
-
-    if keys.just_pressed(KeyCode::Escape) {
-        ui.search.clear();
-        return;
+    for mut field in &mut search {
+        field.clear();
     }
-
-    if keys.just_pressed(KeyCode::Backspace) {
-        ui.search.pop();
-        return;
-    }
-
-    for key in keys.get_just_pressed() {
-        if let Some(ch) = keycode_to_char(*key) {
-            ui.search.push(ch);
-        }
-    }
+    input_focus.clear();
 }
 
-fn keycode_to_char(key: KeyCode) -> Option<char> {
-    match key {
-        KeyCode::KeyA => Some('a'),
-        KeyCode::KeyB => Some('b'),
-        KeyCode::KeyC => Some('c'),
-        KeyCode::KeyD => Some('d'),
-        KeyCode::KeyE => None, // reserved for toggle
-        KeyCode::KeyF => Some('f'),
-        KeyCode::KeyG => Some('g'),
-        KeyCode::KeyH => Some('h'),
-        KeyCode::KeyI => Some('i'),
-        KeyCode::KeyJ => Some('j'),
-        KeyCode::KeyK => Some('k'),
-        KeyCode::KeyL => Some('l'),
-        KeyCode::KeyM => Some('m'),
-        KeyCode::KeyN => Some('n'),
-        KeyCode::KeyO => Some('o'),
-        KeyCode::KeyP => Some('p'),
-        KeyCode::KeyQ => Some('q'),
-        KeyCode::KeyR => Some('r'),
-        KeyCode::KeyS => Some('s'),
-        KeyCode::KeyT => Some('t'),
-        KeyCode::KeyU => Some('u'),
-        KeyCode::KeyV => Some('v'),
-        KeyCode::KeyW => Some('w'),
-        KeyCode::KeyX => Some('x'),
-        KeyCode::KeyY => Some('y'),
-        KeyCode::KeyZ => Some('z'),
-        KeyCode::Space => Some(' '),
-        _ => None,
+/// Clears search [`InputFocus`] when the user presses outside the search field.
+///
+/// Attached to [`super::screen::InventoryScreenRoot`] so bubbling pointer events
+/// reach it for any in-inventory click except the search box itself (which stops
+/// propagation so it can keep focus for typing).
+pub fn blur_search_focus_on_outside_pointer_press(
+    press: On<Pointer<Press>>,
+    search_fields: Query<Entity, With<super::screen::InventorySearchField>>,
+    mut input_focus: ResMut<InputFocus>,
+) {
+    if press.button != PointerButton::Primary {
+        return;
+    }
+    let clicked = press.original_event_target();
+    if search_fields.iter().any(|search| search == clicked) {
+        return;
+    }
+    let Some(focused) = input_focus.get() else {
+        return;
+    };
+    if search_fields.iter().any(|search| search == focused) {
+        input_focus.clear();
     }
 }
 
@@ -148,7 +154,6 @@ pub fn inventory_click(
 
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
-    // 1. Clicked a catalog cell: infinite supply, picks onto the cursor.
     for (interaction, cell) in &cells {
         if *interaction != Interaction::Pressed {
             continue;
@@ -164,7 +169,6 @@ pub fn inventory_click(
         return;
     }
 
-    // 2. Clicked an inventory slot: pick up / place / swap (or shift quick-move).
     for (interaction, slot) in &screen_slots {
         if *interaction != Interaction::Pressed {
             continue;
@@ -184,7 +188,6 @@ pub fn inventory_click(
         return;
     }
 
-    // 3. Clicked empty space while holding a block: discard it.
     if ui.cursor.is_some() {
         ui.cursor = None;
     }

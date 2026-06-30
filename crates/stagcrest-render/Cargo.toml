@@ -19,7 +19,7 @@ tracing.workspace = true
 default = []
 
 [dev-dependencies]
-naga = "24.0.0"
+naga = "29.0.3"
 
 [[test]]
 name = "gpu_block_meta"
