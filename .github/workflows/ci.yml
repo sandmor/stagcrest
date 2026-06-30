@@ -10,9 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libudev-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.95"
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Build core mod
