@@ -28,6 +28,14 @@ Single-player embeds the server in-process (no second terminal). Remote play: ru
 - **macOS**: Xcode Command Line Tools (includes Metal support)
 - **Windows**: Visual Studio Build Tools or MSVC toolchain (DirectX 12 support)
 
+## Nightly builds
+
+Pre-built binaries for Linux, macOS, and Windows are published on every push to `main`:
+
+**[Releases → Nightly](https://github.com/sandmor/stagcrest/releases/tag/nightly)**
+
+Download the archive for your platform, extract it, and run `stagcrest-client` from that folder (see `RUN.txt` inside).
+
 ## Build core mod (required)
 
 Mods are built artifacts (not committed). Build before running:

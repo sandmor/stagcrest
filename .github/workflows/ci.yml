@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -42,11 +45,56 @@ jobs:
         if: github.event_name == 'push'
         shell: bash
         run: bash scripts/package-nightly.sh "${{ matrix.platform }}" "${{ matrix.exe_ext }}"
-      - name: Upload nightly artifact
+      - name: Upload nightly package
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: stagcrest-nightly-${{ matrix.platform }}
           path: dist/stagcrest-nightly-${{ matrix.platform }}.*
-          retention-days: 14
+          retention-days: 1
           if-no-files-found: error
+
+  publish-nightly:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: stagcrest-nightly-*
+          merge-multiple: true
+          path: dist
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(dist/stagcrest-nightly-*.tar.gz dist/stagcrest-nightly-*.zip)
+          if ((${#files[@]} != 3)); then
+            echo "Expected 3 platform archives, found ${#files[@]}: ${files[*]}"
+            ls -laR dist
+            exit 1
+          fi
+
+          {
+            echo "Automated nightly build from [\`${GITHUB_SHA::7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})."
+            echo
+            echo "Download the archive for your platform below, extract, and run \`stagcrest-client\` from that folder (see \`RUN.txt\`)."
+            echo
+            echo "| Platform | File |"
+            echo "| --- | --- |"
+            echo "| Linux x86_64 | \`stagcrest-nightly-linux-x86_64.tar.gz\` |"
+            echo "| macOS Apple Silicon | \`stagcrest-nightly-macos-aarch64.tar.gz\` |"
+            echo "| Windows x86_64 | \`stagcrest-nightly-windows-x86_64.zip\` |"
+          } > release-notes.md
+
+          gh release delete nightly --yes 2>/dev/null || true
+
+          gh release create nightly \
+            "${files[@]}" \
+            --prerelease \
+            --title "Nightly" \
+            --target "${GITHUB_SHA}" \
+            --notes-file release-notes.md

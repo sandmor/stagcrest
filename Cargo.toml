@@ -93,6 +93,7 @@ stagcrest-render = { path = "crates/stagcrest-render" }
 lto = true
 codegen-units = 1
 opt-level = "z"
+strip = true
 
 [profile.dev]
 opt-level = 1
