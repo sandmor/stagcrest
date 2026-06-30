@@ -30,7 +30,11 @@ rm -f "$ROOT/dist/stagcrest-nightly-${PLATFORM}"*
 
 case "$(uname -s)" in
 MINGW* | MSYS* | CYGWIN* | Windows*)
-  powershell -NoProfile -Command "Compress-Archive -Path '${STAGING}' -DestinationPath '${ROOT}/dist/stagcrest-nightly-${PLATFORM}.zip' -Force"
+  # Built-in tar on Windows runners; avoids PowerShell/Git Bash path translation issues.
+  (
+    cd "$ROOT/dist"
+    tar -a -cf "stagcrest-nightly-${PLATFORM}.zip" stagcrest-nightly
+  )
   ;;
 *)
   tar -czf "$ROOT/dist/stagcrest-nightly-${PLATFORM}.tar.gz" -C "$ROOT/dist" stagcrest-nightly
