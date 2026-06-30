@@ -234,6 +234,8 @@ pub fn prepare_render_pipelines(
             storage_buffer::<u32>(false).build(7, visibility),
             storage_buffer_read_only::<GpuChunkTintCell>(false).build(8, visibility),
             uniform_buffer::<EmitUniform>(false).build(9, visibility),
+            storage_buffer_read_only::<u32>(false).build(10, visibility),
+            storage_buffer_read_only::<u32>(false).build(11, visibility),
         ];
         let layout_descriptor =
             BindGroupLayoutDescriptor::new("voxel_compute_layout", &entries);
@@ -263,6 +265,8 @@ pub fn prepare_render_pipelines(
                 storage_buffer_read_only::<GpuBucketRegion>(false),
                 uniform_buffer::<CompactUniform>(false),
                 storage_buffer::<u32>(false),
+                storage_buffer_read_only::<u32>(false),
+                storage_buffer_read_only::<u32>(false),
             ),
         );
         let layout_descriptor =

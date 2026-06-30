@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use crate::gpu_voxel::chunk_cache::GpuChunkCache;
 use crate::gpu_voxel::chunk_feedback::{GpuChunkRenderFeedback, GpuChunkSyncState};
 use crate::gpu_voxel::chunk_gpu_pool::ChunkGpuPool;
-use crate::gpu_voxel::chunk_scratch_arena::ChunkScratchArena;
+use crate::gpu_voxel::chunk_scratch_arena::{ChunkScratchArena, ScratchFlushResult, ScratchGrowResult};
 use crate::gpu_voxel::draw_node::VoxelDrawBindCache;
 use crate::gpu_voxel::gpu_resources::{
     grow_chunk_table_buffer, grow_instance_buffers, init_render_gpu_buffers_with_config,
@@ -51,12 +51,11 @@ pub struct OverflowReadbackState {
     stage: OverflowReadbackStage,
 }
 
-const OVERFLOW_POLL_INTERVAL: u32 = 60;
-
 pub fn prepare_gpu_voxel_buffers(
     tables: Option<Res<GpuVoxelTables>>,
     memory_config: Option<Res<VoxelMemoryConfig>>,
     render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
     existing: Option<Res<GpuVoxelRenderState>>,
     mut pending: Option<ResMut<PendingChunkExtract>>,
     mut commands: Commands,
@@ -71,14 +70,18 @@ pub fn prepare_gpu_voxel_buffers(
         init_render_gpu_buffers_with_config(&render_device, tables.as_ref(), &memory_config);
     let bucket_slot_count = buffers.bucket_slot_count;
     let mut chunk_pool = ChunkGpuPool::new(&memory_config, bucket_slot_count);
-    let scratch = ChunkScratchArena::new(&render_device, &memory_config);
+    let mut scratch = ChunkScratchArena::new(&render_device, &memory_config);
     if let Some(pending) = pending.as_mut() {
         let mut feedback = GpuChunkRenderFeedback::default();
         for batch in pending.batches.drain(..) {
             chunk_pool.apply_extract_batch(&batch, &mut feedback);
         }
+        for &slot in chunk_pool.pos_to_slot.values() {
+            scratch.init_slot(slot);
+        }
+        scratch.flush_layout(&render_device, &render_queue);
         if chunk_pool.resident_count() > 0 {
-            chunk_pool.needs_full_rebuild = true;
+            chunk_pool.mark_all_dirty();
         }
     }
     commands.insert_resource(GpuVoxelRenderState { buffers });
@@ -142,7 +145,7 @@ pub fn resize_voxel_memory_if_needed(
         bytemuck::cast_slice(&pool.chunk_table),
     );
 
-    *scratch = ChunkScratchArena::new(&render_device, &memory_config);
+    scratch.grow_capacity(&render_device, &render_queue, target);
     pool.mark_all_dirty();
     allocated.max_resident_chunks = target;
 
@@ -194,9 +197,10 @@ pub fn poll_gpu_voxel_overflow(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     tables: Option<Res<GpuVoxelTables>>,
+    memory_config: Option<Res<VoxelMemoryConfig>>,
     mut state: Option<ResMut<GpuVoxelRenderState>>,
     pool: Option<ResMut<ChunkGpuPool>>,
-    scratch: Option<Res<ChunkScratchArena>>,
+    mut scratch: Option<ResMut<ChunkScratchArena>>,
     instance_pool: Option<ResMut<InstanceBufferPool>>,
     bind_cache: Option<ResMut<VoxelDrawBindCache>>,
     mut compute_bind_cache: Option<ResMut<ChunkComputeBindCache>>,
@@ -208,6 +212,7 @@ pub fn poll_gpu_voxel_overflow(
 
     let (
         Some(tables),
+        Some(memory_config),
         Some(state),
         Some(mut pool),
         Some(scratch),
@@ -216,9 +221,10 @@ pub fn poll_gpu_voxel_overflow(
         Some(mut stats),
     ) = (
         tables,
+        memory_config,
         state.as_mut(),
         pool,
-        scratch,
+        scratch.as_mut(),
         instance_pool,
         bind_cache,
         stats,
@@ -238,7 +244,12 @@ pub fn poll_gpu_voxel_overflow(
     match std::mem::take(&mut readback.stage) {
         OverflowReadbackStage::Idle => {
             readback.frames_since_poll = readback.frames_since_poll.wrapping_add(1);
-            if readback.frames_since_poll % OVERFLOW_POLL_INTERVAL != 0 {
+            let poll_interval = if stats.scratch_overflow_chunks > 0 || stats.overflow_pending {
+                memory_config.overflow_poll_interval_active
+            } else {
+                memory_config.overflow_poll_interval_idle
+            };
+            if readback.frames_since_poll % poll_interval != 0 {
                 readback.stage = OverflowReadbackStage::Idle;
                 return;
             }
@@ -353,29 +364,118 @@ pub fn poll_gpu_voxel_overflow(
                 stats.scratch_overflow_chunks =
                     scratch_overflows.iter().filter(|&&v| v > 0).count() as u32;
                 stats.scratch_overflow_instances = scratch_overflows.iter().sum();
+                stats.scratch_arena_max_slot_capacity = scratch.arena_max_capacity;
+                stats.scratch_arena_total_instances = scratch.total_instance_slots;
 
+                let mut layout_changed = false;
+                let mut budget_exceeded_chunks = 0u32;
+                let mut budget_exceeded_instances = 0u32;
                 if stats.scratch_overflow_chunks > 0 {
-                    tracing::warn!(
-                        chunks = stats.scratch_overflow_chunks,
-                        instances = stats.scratch_overflow_instances,
-                        "chunk scratch instance overflow"
-                    );
-                    if let Some(feedback) = feedback.as_mut() {
-                        for (slot, &count) in scratch_overflows.iter().enumerate() {
-                            if count > 0 {
-                                if let Some(pos) = pool.pos_for_slot(slot as u32) {
-                                    if !feedback.scratch_overflow.contains(&pos) {
-                                        feedback.scratch_overflow.push(pos);
-                                    }
+                    for (slot, &overflow_count) in scratch_overflows.iter().enumerate() {
+                        if overflow_count == 0 {
+                            continue;
+                        }
+                        let slot = slot as u32;
+                        let current_cap = scratch.slot_capacities().get(slot as usize).copied().unwrap_or(0);
+                        let needed = current_cap.saturating_add(overflow_count);
+                        match scratch.plan_grow_slot(slot, needed) {
+                            ScratchGrowResult::Grown => {
+                                tracing::debug!(
+                                    slot,
+                                    chunk = ?pool.pos_for_slot(slot),
+                                    needed,
+                                    new_cap = scratch.slot_capacities()[slot as usize],
+                                    "grew chunk scratch slot capacity"
+                                );
+                                if let Some(pos) = pool.pos_for_slot(slot) {
                                     pool.data_dirty.insert(pos);
                                 }
                             }
+                            ScratchGrowResult::AtCapacity => {
+                                if current_cap >= scratch.scratch_max_per_chunk
+                                    && needed > current_cap
+                                {
+                                    tracing::warn!(
+                                        slot,
+                                        chunk = ?pool.pos_for_slot(slot),
+                                        needed,
+                                        cap = scratch.scratch_max_per_chunk,
+                                        "chunk scratch at per-chunk max; instances dropped"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        slot,
+                                        chunk = ?pool.pos_for_slot(slot),
+                                        needed,
+                                        current_cap,
+                                        arena_allocated = scratch.allocated_instance_slots(),
+                                        arena_max = scratch.arena_max_instance_slots(),
+                                        "chunk scratch arena at instance cap; instances dropped"
+                                    );
+                                }
+                                if let Some(pos) = pool.pos_for_slot(slot) {
+                                    if let Some(feedback) = feedback.as_mut() {
+                                        if !feedback.scratch_overflow.contains(&pos) {
+                                            feedback.scratch_overflow.push(pos);
+                                        }
+                                    }
+                                }
+                            }
+                            ScratchGrowResult::BudgetExceeded => {
+                                budget_exceeded_chunks += 1;
+                                budget_exceeded_instances += overflow_count;
+                                if let Some(pos) = pool.pos_for_slot(slot) {
+                                    if let Some(feedback) = feedback.as_mut() {
+                                        if !feedback.scratch_overflow.contains(&pos) {
+                                            feedback.scratch_overflow.push(pos);
+                                        }
+                                    }
+                                }
+                            }
+                            ScratchGrowResult::Unchanged => {}
                         }
+                    }
+                    if budget_exceeded_chunks > 0 {
+                        tracing::warn!(
+                            chunks = budget_exceeded_chunks,
+                            dropped_instances = budget_exceeded_instances,
+                            budget_mb = scratch.scratch_arena_budget_bytes / (1024 * 1024),
+                            arena_used = scratch.allocated_instance_slots(),
+                            arena_max = scratch.arena_max_instance_slots(),
+                            "chunk scratch arena at budget; some instances dropped"
+                        );
+                    }
+                }
+
+                match scratch.flush_layout(&render_device, &render_queue) {
+                    ScratchFlushResult::BufferRecreated => {
+                        layout_changed = true;
+                        pool.mark_all_dirty();
+                    }
+                    ScratchFlushResult::Deferred => {
+                        pool.mark_all_dirty();
+                    }
+                    ScratchFlushResult::LayoutOnly => {}
+                    ScratchFlushResult::Unchanged => {}
+                }
+
+                if layout_changed {
+                    stats.scratch_arena_max_slot_capacity = scratch.arena_max_capacity;
+                    stats.scratch_arena_total_instances = scratch.total_instance_slots;
+                    if let Some(compute_cache) = compute_bind_cache.as_mut() {
+                        compute_cache.clear();
+                    }
+                }
+                if scratch.take_compaction_occurred() {
+                    pool.mark_all_dirty();
+                    if let Some(compute_cache) = compute_bind_cache.as_mut() {
+                        compute_cache.clear();
                     }
                 }
 
                 let total_overflow: u32 = overflow.iter().sum();
                 if total_overflow > 0 {
+                    let caps_before = instance_pool.capacities.clone();
                     let grown = grow_instance_buffers(
                         &render_device,
                         tables.as_ref(),
@@ -383,12 +483,19 @@ pub fn poll_gpu_voxel_overflow(
                         &overflow,
                         &state.buffers,
                     );
+                    let draw_caps_grew = instance_pool
+                        .capacities
+                        .iter()
+                        .zip(caps_before.iter())
+                        .any(|(after, before)| after > before);
                     instance_pool.generation = instance_pool.generation.wrapping_add(1);
                     state.buffers = grown;
-                    pool.mark_all_dirty();
-                    bind_cache.reset_for_growth(instance_pool.generation);
-                    if let Some(compute_cache) = compute_bind_cache.as_mut() {
-                        compute_cache.clear();
+                    if draw_caps_grew {
+                        pool.mark_all_dirty();
+                        bind_cache.reset_for_growth(instance_pool.generation);
+                        if let Some(compute_cache) = compute_bind_cache.as_mut() {
+                            compute_cache.clear();
+                        }
                     }
                     if let Some(overflow_buf) = state.buffers.overflow_counters_buffer.as_ref() {
                         let zeros = vec![0u32; bucket_slots];

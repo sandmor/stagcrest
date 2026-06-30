@@ -8,7 +8,7 @@ use stagcrest_protocol::ChunkPos;
 use std::collections::{HashMap, HashSet};
 
 use crate::gpu_voxel::chunk_gpu_pool::ChunkGpuPool;
-use crate::gpu_voxel::chunk_scratch_arena::ChunkScratchArena;
+use crate::gpu_voxel::chunk_scratch_arena::{ChunkScratchArena, ScratchFlushResult};
 use crate::gpu_voxel::gpu_resources::{static_buffer_bytes, GpuVoxelStats, InstanceBufferPool};
 use crate::gpu_voxel::memory_config::VoxelMemoryConfig;
 use crate::gpu_voxel::pipelines::{VoxelCompactPipeline, VoxelComputePipeline, VoxelFinalizePipeline};
@@ -37,7 +37,7 @@ pub struct VoxelRebuildFrame {
     pub chunks_emitted: usize,
     pub chunks_compacted: usize,
     pub chunk_count: usize,
-    pub scratch_capacity: u32,
+    pub scratch_max_capacity: u32,
 }
 
 /// Reused GPU buffers for rebuild passes.
@@ -139,6 +139,14 @@ impl ChunkComputeBindCache {
                     binding: 9,
                     resource: emit_uniform_buffer.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 10,
+                    resource: scratch.scratch_slot_offsets.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 11,
+                    resource: scratch.scratch_slot_capacities.as_entire_binding(),
+                },
             ],
         );
         self.emit_binds.insert(
@@ -155,7 +163,7 @@ impl ChunkComputeBindCache {
 pub fn prepare_voxel_rebuild(
     state: Option<Res<GpuVoxelRenderState>>,
     mut pool: Option<ResMut<ChunkGpuPool>>,
-    scratch: Option<Res<ChunkScratchArena>>,
+    mut scratch: Option<ResMut<ChunkScratchArena>>,
     memory_config: Option<Res<VoxelMemoryConfig>>,
     camera: Option<Res<crate::plugin::VoxelCamera>>,
     render_config: Option<Res<crate::plugin::VoxelRenderConfig>>,
@@ -186,7 +194,7 @@ pub fn prepare_voxel_rebuild(
     ) = (
         state,
         pool.as_mut(),
-        scratch,
+        scratch.as_mut(),
         memory_config,
         camera,
         compute_pipeline,
@@ -213,6 +221,35 @@ pub fn prepare_voxel_rebuild(
 
     let _uploaded_slots = pool.upload_pending(&render_device, &render_queue);
 
+    let init_pending: Vec<u32> = pool.take_scratch_init_pending().into_iter().collect();
+    let release_slots: Vec<u32> = pool.take_scratch_clear_slots().into_iter().collect();
+    for &slot in &release_slots {
+        scratch.release_slot(slot);
+        scratch.clear_slot(&render_queue, slot);
+    }
+    for slot in &init_pending {
+        if !scratch.init_slot(*slot) {
+            pool.scratch_init_pending.insert(*slot);
+            if let Some(pos) = pool.pos_for_slot(*slot) {
+                pool.data_dirty.insert(pos);
+            }
+        }
+    }
+    if scratch.take_compaction_occurred() {
+        pool.mark_all_dirty();
+    }
+    let flush_result = scratch.flush_layout(&render_device, &render_queue);
+    match flush_result {
+        ScratchFlushResult::BufferRecreated => {
+            bind_cache.clear();
+            pool.mark_all_dirty();
+        }
+        ScratchFlushResult::Deferred => {
+            pool.mark_all_dirty();
+        }
+        ScratchFlushResult::LayoutOnly | ScratchFlushResult::Unchanged => {}
+    }
+
     let cam_chunk = stagcrest_protocol::BlockPos::new(
         camera.position.x.floor() as i32,
         camera.position.y.floor() as i32,
@@ -224,29 +261,27 @@ pub fn prepare_voxel_rebuild(
         render_config.horizontal,
         render_config.vertical,
     );
+    pool.refresh_staggered_queue_visibility();
 
-    let full_rebuild = pool.needs_full_rebuild;
-    if full_rebuild {
-        pool.needs_full_rebuild = false;
-    }
-
-    let data_dirty_slots = pool.data_dirty_slots();
-    let dispatch_list = if full_rebuild {
-        pool.visible_slots.clone()
+    let batch_size = memory_config.emit_batch_size;
+    let dispatch_list = if pool.staggered_rebuild_active() {
+        pool.take_staggered_emit_batch(batch_size)
     } else {
-        data_dirty_slots
+        pool.data_dirty_slots()
             .into_iter()
             .filter(|slot| pool.slot_has_assets(*slot))
             .collect()
     };
     pool.clear_data_dirty_for_slots(&dispatch_list);
 
+    let defer_compact = pool.staggered_rebuild_active();
+
     frame.visible = pool.visible_slots.clone();
 
     pool.upload_dirty_chunk_table(
         &render_queue,
         &gpu_buffers.chunk_table_buffer,
-        full_rebuild,
+        false,
     );
     pool.clear_dirty_table_slots();
 
@@ -268,8 +303,8 @@ pub fn prepare_voxel_rebuild(
     let emit_uniform = EmitUniform {
         dispatch_count: 1,
         bucket_slot_count: gpu_buffers.bucket_slot_count,
-        chunk_scratch_capacity: scratch.scratch_capacity,
-        _pad: 0,
+        _pad0: 0,
+        _pad1: 0,
     };
     let emit_uniform_buffer = ensure_uniform_buffer(
         &render_device,
@@ -305,7 +340,7 @@ pub fn prepare_voxel_rebuild(
         .as_ref()
         .unwrap_or(&gpu_buffers.counters_buffer);
 
-    if !frame.visible.is_empty() {
+    if !frame.visible.is_empty() && !defer_compact {
         let visible_len = frame.visible.len();
         if persistent.visible_capacity < visible_len {
             persistent.visible_capacity = visible_len.next_power_of_two().max(64);
@@ -322,7 +357,7 @@ pub fn prepare_voxel_rebuild(
         let compact_uniform = CompactUniform {
             visible_count: visible_len as u32,
             bucket_slot_count: gpu_buffers.bucket_slot_count,
-            chunk_scratch_capacity: scratch.scratch_capacity,
+            max_scratch_slot_capacity: scratch.arena_max_capacity,
             _pad: 0,
         };
         let compact_uniform_buffer = ensure_uniform_buffer(
@@ -372,12 +407,21 @@ pub fn prepare_voxel_rebuild(
                     binding: 8,
                     resource: overflow_binding.as_entire_binding(),
                 },
+                BindGroupEntry {
+                    binding: 9,
+                    resource: scratch.scratch_slot_offsets.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 10,
+                    resource: scratch.scratch_slot_capacities.as_entire_binding(),
+                },
             ],
         ));
         frame.compact_uniform_buffer = Some(compact_uniform_buffer);
         frame.emit_uniform_buffer = Some(emit_uniform_buffer);
     }
 
+    if !defer_compact {
     let finalize_uniform = FinalizeUniform {
         bucket_count: gpu_buffers.bucket_slot_count,
         _pad: [0; 3],
@@ -424,11 +468,12 @@ pub fn prepare_voxel_rebuild(
         ],
     ));
     frame.finalize_uniform_buffer = Some(finalize_uniform_buffer);
+    }
 
     frame.chunks_emitted = frame.emit_jobs.len();
     frame.chunks_compacted = frame.visible.len();
     frame.chunk_count = pool.resident_count();
-    frame.scratch_capacity = scratch.scratch_capacity;
+    frame.scratch_max_capacity = scratch.arena_max_capacity;
 
     stats.chunks_emitted = frame.chunks_emitted;
     stats.chunks_compacted = frame.chunks_compacted;
@@ -437,6 +482,8 @@ pub fn prepare_voxel_rebuild(
     stats.chunk_gpu_bytes = pool.chunk_gpu_bytes();
     stats.scratch_arena_bytes = scratch.total_bytes();
     stats.scratch_bytes = stats.scratch_arena_bytes;
+    stats.scratch_arena_max_slot_capacity = scratch.arena_max_capacity;
+    stats.scratch_arena_total_instances = scratch.total_instance_slots;
     stats.draw_arena_bytes = gpu_buffers.instances_buffer.size();
     stats.instance_buffer_bytes = stats.draw_arena_bytes;
     stats.total_voxel_bytes = stats.chunk_gpu_bytes
@@ -444,6 +491,7 @@ pub fn prepare_voxel_rebuild(
         + stats.draw_arena_bytes
         + static_buffer_bytes(gpu_buffers);
     stats.peak_instances.clone_from(&instance_pool.peak);
+    stats.staggered_rebuild_pending = pool.staggered_rebuild_pending();
 
     if pool.resident_count() as u32 >= memory_config.max_resident_chunks.saturating_sub(8) {
         tracing::warn!(
@@ -519,7 +567,7 @@ pub fn voxel_rebuild_pass(world: &World, mut ctx: RenderContext) {
         pipeline_cache.get_compute_pipeline(compact_pipeline.pipeline_id),
     ) {
         if !frame.visible.is_empty() {
-            let compact_wg_y = (frame.scratch_capacity + 63) / 64;
+            let compact_wg_y = (frame.scratch_max_capacity + 63) / 64;
             let mut compact_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("voxel_compact_pass"),
                 timestamp_writes: None,

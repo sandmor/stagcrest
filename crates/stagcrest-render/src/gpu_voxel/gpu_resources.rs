@@ -60,6 +60,8 @@ pub struct GpuVoxelStats {
     pub chunks_compacted: usize,
     pub scratch_overflow_chunks: u32,
     pub scratch_overflow_instances: u32,
+    pub scratch_arena_max_slot_capacity: u32,
+    pub scratch_arena_total_instances: u32,
     pub global_overflow_buckets: u32,
     pub instance_buffer_bytes: u64,
     pub chunk_gpu_bytes: u64,
@@ -71,6 +73,7 @@ pub struct GpuVoxelStats {
     pub upload_failures: usize,
     pub evictions: usize,
     pub peak_instances: Vec<u32>,
+    pub staggered_rebuild_pending: u32,
 }
 
 /// Render-world GPU buffers for voxel pipeline.

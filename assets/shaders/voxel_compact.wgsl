@@ -18,7 +18,7 @@ struct BucketRegion {
 struct CompactParams {
     visible_count: u32,
     bucket_slot_count: u32,
-    chunk_scratch_capacity: u32,
+    max_scratch_slot_capacity: u32,
     _pad: u32,
 }
 
@@ -31,6 +31,8 @@ struct CompactParams {
 @group(0) @binding(6) var<storage, read> bucket_regions: array<BucketRegion>;
 @group(0) @binding(7) var<uniform> params: CompactParams;
 @group(0) @binding(8) var<storage, read_write> global_overflow: array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read> scratch_slot_offsets: array<u32>;
+@group(0) @binding(10) var<storage, read> scratch_slot_capacities: array<u32>;
 
 struct GpuChunkTableEntry {
     origin_x: i32,
@@ -51,9 +53,10 @@ fn main(
         return;
     }
     let slot = visible_list[vis_idx];
-    let scratch_base = slot * params.chunk_scratch_capacity;
+    let cap = scratch_slot_capacities[slot];
+    let scratch_base = scratch_slot_offsets[slot];
     let inst_idx = wid.y * 64u + lid.x;
-    if inst_idx >= params.chunk_scratch_capacity {
+    if inst_idx >= cap || inst_idx >= params.max_scratch_slot_capacity {
         return;
     }
     let count = atomicLoad(&scratch_counters[slot]);

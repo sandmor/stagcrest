@@ -49,8 +49,8 @@ struct GpuChunkTableEntry {
 struct EmitParams {
     dispatch_count: u32,
     bucket_slot_count: u32,
-    chunk_scratch_capacity: u32,
-    _pad: u32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 const BLOCK_FLAG_OPAQUE: u32 = 1u;
@@ -98,6 +98,8 @@ const WIRE_UP: u32 = 2u;
 @group(0) @binding(7) var<storage, read_write> scratch_overflow: array<atomic<u32>>;
 @group(0) @binding(8) var<storage, read> chunk_tint_cells: array<ChunkTintCell>;
 @group(0) @binding(9) var<uniform> emit_params: EmitParams;
+@group(0) @binding(10) var<storage, read> scratch_slot_offsets: array<u32>;
+@group(0) @binding(11) var<storage, read> scratch_slot_capacities: array<u32>;
 
 var<private> chunk_entry: GpuChunkTableEntry;
 var<private> chunk_slot: u32;
@@ -161,10 +163,11 @@ fn cube_bucket_for_layer(layer: u32) -> u32 {
 }
 
 fn push_instance(bucket_id: u32, inst: VoxelInstance) {
-    let scratch_base = chunk_slot * emit_params.chunk_scratch_capacity;
+    let cap = scratch_slot_capacities[chunk_slot];
+    let scratch_base = scratch_slot_offsets[chunk_slot];
     loop {
         let prev = atomicLoad(&scratch_counters[chunk_slot]);
-        if prev >= emit_params.chunk_scratch_capacity {
+        if prev >= cap {
             atomicAdd(&scratch_overflow[chunk_slot], 1u);
             return;
         }

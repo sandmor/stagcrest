@@ -75,6 +75,12 @@ fn alloc_chunk_assets(render_device: &RenderDevice, upload: &GpuChunkUpload) -> 
     }
 }
 
+/// Pending slots for a staggered full scratch rebuild (visible chunks first).
+#[derive(Debug, Default)]
+pub struct StaggeredFullRebuild {
+    pub pending_slots: Vec<u32>,
+}
+
 /// Render-world chunk pool with lifecycle-scoped GPU memory.
 #[derive(Resource)]
 pub struct ChunkGpuPool {
@@ -87,10 +93,11 @@ pub struct ChunkGpuPool {
     pub bucket_slot_count: u32,
     pub data_dirty: HashSet<ChunkPos>,
     pub visible_slots: Vec<u32>,
-    pub needs_full_rebuild: bool,
+    pub staggered_rebuild: Option<StaggeredFullRebuild>,
     pub pending_gpu_uploads: Vec<GpuChunkUpload>,
     pub dirty_table_slots: HashSet<u32>,
     pub slots_needing_scratch_clear: HashSet<u32>,
+    pub scratch_init_pending: HashSet<u32>,
     frame_evicted: Vec<ChunkPos>,
 }
 
@@ -107,10 +114,11 @@ impl ChunkGpuPool {
             bucket_slot_count,
             data_dirty: HashSet::new(),
             visible_slots: Vec::new(),
-            needs_full_rebuild: false,
+            staggered_rebuild: None,
             pending_gpu_uploads: Vec::new(),
             dirty_table_slots: HashSet::new(),
             slots_needing_scratch_clear: HashSet::new(),
+            scratch_init_pending: HashSet::new(),
             frame_evicted: Vec::new(),
         }
     }
@@ -180,7 +188,60 @@ impl ChunkGpuPool {
     pub fn mark_all_dirty(&mut self) {
         self.data_dirty.extend(self.pos_to_slot.keys().copied());
         self.dirty_table_slots.extend(self.pos_to_slot.values().copied());
-        self.needs_full_rebuild = true;
+        self.schedule_staggered_full_rebuild();
+    }
+
+    fn schedule_staggered_full_rebuild(&mut self) {
+        let residents = self.resident_slots_with_assets();
+        if residents.is_empty() {
+            return;
+        }
+        let visible: HashSet<u32> = self.visible_slots.iter().copied().collect();
+        self.staggered_rebuild = Some(StaggeredFullRebuild {
+            pending_slots: stagger_queue_visible_first(&residents, &visible),
+        });
+    }
+
+    pub fn staggered_rebuild_pending(&self) -> u32 {
+        self.staggered_rebuild
+            .as_ref()
+            .map(|s| s.pending_slots.len() as u32)
+            .unwrap_or(0)
+    }
+
+    pub fn staggered_rebuild_active(&self) -> bool {
+        self.staggered_rebuild
+            .as_ref()
+            .is_some_and(|s| !s.pending_slots.is_empty())
+    }
+
+    /// Re-sort remaining stagger queue so visible slots are emitted first.
+    pub fn refresh_staggered_queue_visibility(&mut self) {
+        let Some(stagger) = self.staggered_rebuild.as_mut() else {
+            return;
+        };
+        if stagger.pending_slots.is_empty() {
+            return;
+        }
+        let visible: HashSet<u32> = self.visible_slots.iter().copied().collect();
+        let pending = std::mem::take(&mut stagger.pending_slots);
+        stagger.pending_slots = stagger_queue_visible_first(&pending, &visible);
+    }
+
+    pub fn take_staggered_emit_batch(&mut self, batch_size: u32) -> Vec<u32> {
+        let Some(stagger) = self.staggered_rebuild.as_mut() else {
+            return Vec::new();
+        };
+        if stagger.pending_slots.is_empty() {
+            self.staggered_rebuild = None;
+            return Vec::new();
+        }
+        let take = (batch_size as usize).min(stagger.pending_slots.len());
+        let batch: Vec<u32> = stagger.pending_slots.drain(..take).collect();
+        if stagger.pending_slots.is_empty() {
+            self.staggered_rebuild = None;
+        }
+        batch
     }
 
     pub fn upsert_chunk(&mut self, upload: &GpuChunkUpload) -> bool {
@@ -221,6 +282,8 @@ impl ChunkGpuPool {
                 pos,
                 table_index: slot,
             });
+            self.slots_needing_scratch_clear.insert(slot);
+            self.scratch_init_pending.insert(slot);
             return Some(slot);
         }
         let evict_pos = self
@@ -246,6 +309,7 @@ impl ChunkGpuPool {
             pos,
             table_index: slot,
         });
+        self.scratch_init_pending.insert(slot);
         Some(slot)
     }
 
@@ -271,6 +335,19 @@ impl ChunkGpuPool {
                 self.visible_slots.push(slot);
             }
         }
+    }
+
+    /// Slots that currently have GPU assets (for full scratch rebuilds).
+    pub fn resident_slots_with_assets(&self) -> Vec<u32> {
+        let mut slots: Vec<u32> = self
+            .pos_to_slot
+            .iter()
+            .filter(|(pos, _)| self.assets.contains_key(pos))
+            .map(|(_, &slot)| slot)
+            .collect();
+        slots.sort_unstable();
+        slots.dedup();
+        slots
     }
 
     pub fn data_dirty_slots(&self) -> Vec<u32> {
@@ -299,6 +376,10 @@ impl ChunkGpuPool {
 
     pub fn take_scratch_clear_slots(&mut self) -> HashSet<u32> {
         std::mem::take(&mut self.slots_needing_scratch_clear)
+    }
+
+    pub fn take_scratch_init_pending(&mut self) -> HashSet<u32> {
+        std::mem::take(&mut self.scratch_init_pending)
     }
 
     pub fn upload_pending(
@@ -357,6 +438,21 @@ impl ChunkGpuPool {
     }
 }
 
+fn stagger_queue_visible_first(residents: &[u32], visible: &HashSet<u32>) -> Vec<u32> {
+    let mut pending: Vec<u32> = residents
+        .iter()
+        .filter(|slot| visible.contains(slot))
+        .copied()
+        .collect();
+    pending.extend(
+        residents
+            .iter()
+            .filter(|slot| !visible.contains(slot))
+            .copied(),
+    );
+    pending
+}
+
 fn chunk_table_entry(upload: &GpuChunkUpload) -> GpuChunkTableEntry {
     GpuChunkTableEntry {
         origin_x: upload.pos.x * CHUNK_SIZE,
@@ -411,6 +507,30 @@ mod tests {
         assert_eq!(pool.max_resident_chunks, initial + 16);
         assert_eq!(pool.slots.len(), (initial + 16) as usize);
         assert!(pool.free_slots.len() >= 16);
+    }
+
+    #[test]
+    fn stagger_queue_orders_visible_first() {
+        let residents = vec![0, 1, 2, 3, 4];
+        let visible: HashSet<u32> = [3, 1].into_iter().collect();
+        assert_eq!(
+            stagger_queue_visible_first(&residents, &visible),
+            vec![1, 3, 0, 2, 4]
+        );
+    }
+
+    #[test]
+    fn staggered_emit_batch_drains_queue() {
+        let cfg = VoxelMemoryConfig::from_render_distance(4, 2);
+        let mut pool = ChunkGpuPool::new(&cfg, 8);
+        pool.staggered_rebuild = Some(StaggeredFullRebuild {
+            pending_slots: vec![1, 2, 3, 4, 5],
+        });
+        assert_eq!(pool.take_staggered_emit_batch(2), vec![1, 2]);
+        assert_eq!(pool.staggered_rebuild_pending(), 3);
+        assert_eq!(pool.take_staggered_emit_batch(10), vec![3, 4, 5]);
+        assert_eq!(pool.staggered_rebuild_pending(), 0);
+        assert!(!pool.staggered_rebuild_active());
     }
 
     fn test_upload(pos: ChunkPos) -> GpuChunkUpload {

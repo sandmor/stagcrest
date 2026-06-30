@@ -18,7 +18,7 @@ use stagcrest_net::ServerMessage;
 use stagcrest_render::{
     spawn_block_outline, BlockAtlasResource, GpuChunkCache, GpuChunkSyncState, GpuVoxelPlugin,
     GpuVoxelStats, GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage,
-    VoxelCamera, VoxelMaterialSource, VoxelMemoryConfig, VoxelRenderConfig, VoxelRenderPlugin,
+    VoxelCamera, VoxelGpuMemoryTier, VoxelMaterialSource, VoxelMemoryConfig, VoxelRenderConfig, VoxelRenderPlugin,
 };
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -44,6 +44,7 @@ pub struct GameConfig {
     pub render_distance: i32,
     pub vertical_render_distance: i32,
     pub world_seed: u64,
+    pub gpu_memory_tier: VoxelGpuMemoryTier,
 }
 
 impl Default for GameConfig {
@@ -52,6 +53,7 @@ impl Default for GameConfig {
             render_distance: 8,
             vertical_render_distance: 4,
             world_seed: 42,
+            gpu_memory_tier: VoxelGpuMemoryTier::High,
         }
     }
 }
@@ -255,8 +257,11 @@ fn sync_voxel_memory_config(
     config: Res<GameConfig>,
     mut memory_config: ResMut<VoxelMemoryConfig>,
 ) {
-    *memory_config =
-        VoxelMemoryConfig::from_render_distance(config.render_distance, config.vertical_render_distance);
+    *memory_config = VoxelMemoryConfig::from_render_distance_and_tier(
+        config.render_distance,
+        config.vertical_render_distance,
+        config.gpu_memory_tier,
+    );
 }
 
 fn update_voxel_camera(

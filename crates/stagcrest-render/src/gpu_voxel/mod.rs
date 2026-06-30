@@ -21,6 +21,7 @@ pub mod memory_config;
 pub mod model_library;
 pub mod pipelines;
 pub mod prepare;
+pub mod scratch_region_allocator;
 pub mod chunk_scratch_arena;
 pub mod rebuild_node;
 pub mod types;
@@ -29,7 +30,7 @@ pub use chunk_cache::GpuChunkCache;
 pub use chunk_data::{capture_gpu_chunk_upload, pack_gpu_chunk_upload, pack_halo_from_world};
 pub use chunk_feedback::{GpuChunkRenderFeedback, GpuChunkSyncState};
 pub use gpu_resources::{GpuVoxelStats, GpuVoxelTables};
-pub use memory_config::VoxelMemoryConfig;
+pub use memory_config::{VoxelGpuMemoryTier, VoxelMemoryConfig};
 pub use pipelines::load_voxel_shaders;
 
 use crate::gpu_voxel::draw_node::{prepare_voxel_draw_binds, prepare_voxel_draw_pipelines, voxel_draw_pass, VoxelDrawBindCache, VoxelSpecializedPipelineCache};

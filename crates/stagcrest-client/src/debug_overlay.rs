@@ -273,17 +273,21 @@ fn format_debug_text(
         fps
     ));
     lines.push(format!(
-        "{} emit {}  compact {}  draw {:.1} MB{overflow_warn}",
+        "{} emit {}  compact {}  draw {:.1} MB  stagger {}{overflow_warn}",
         pad_label("GPU"),
         chunks_emitted,
         chunks_compacted,
         buffer_mb,
+        gpu_stats.map(|s| s.staggered_rebuild_pending).unwrap_or(0),
     ));
     lines.push(format!(
-        "{} chunk {:.1} MB  scratch {:.1} MB  total {:.1} MB",
+        "{} tier {}  chunk {:.1} MB  scratch {:.1} MB ({} inst, max {})  total {:.1} MB",
         pad_label("VRAM"),
+        config.gpu_memory_tier.label(),
         chunk_gpu_mb,
         scratch_mb,
+        gpu_stats.map(|s| s.scratch_arena_total_instances).unwrap_or(0),
+        gpu_stats.map(|s| s.scratch_arena_max_slot_capacity).unwrap_or(0),
         total_vram_mb,
     ));
     if upload_failures > 0 || evictions > 0 || scratch_overflow > 0 {

@@ -220,8 +220,8 @@ pub const CHUNK_TABLE_VALID: u32 = 1;
 pub struct EmitUniform {
     pub dispatch_count: u32,
     pub bucket_slot_count: u32,
-    pub chunk_scratch_capacity: u32,
-    pub _pad: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
 }
 
 #[repr(C)]
@@ -229,7 +229,7 @@ pub struct EmitUniform {
 pub struct CompactUniform {
     pub visible_count: u32,
     pub bucket_slot_count: u32,
-    pub chunk_scratch_capacity: u32,
+    pub max_scratch_slot_capacity: u32,
     pub _pad: u32,
 }
 
