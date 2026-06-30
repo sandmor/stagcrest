@@ -39,10 +39,6 @@ struct ChunkTintCell {
 }
 
 struct GpuChunkTableEntry {
-    blocks_offset: u32,
-    power_offset: u32,
-    scratch_offset: u32,
-    tint_cells_offset: u32,
     origin_x: i32,
     origin_y: i32,
     origin_z: i32,
@@ -111,7 +107,7 @@ fn halo_index(lx: i32, ly: i32, lz: i32) -> u32 {
 }
 
 fn block_at(lx: i32, ly: i32, lz: i32) -> GpuBlockCell {
-    return chunk_blocks[chunk_entry.blocks_offset + halo_index(lx, ly, lz)];
+    return chunk_blocks[halo_index(lx, ly, lz)];
 }
 
 fn meta_for(id: u32) -> GpuBlockMeta {
@@ -133,7 +129,7 @@ fn power_at(lx: i32, ly: i32, lz: i32) -> u32 {
         return 0u;
     }
     let idx = u32(lx + lz * CHUNK_SIZE + ly * CHUNK_SIZE * CHUNK_SIZE);
-    return power_byte_at(chunk_entry.power_offset + idx);
+    return power_byte_at(idx);
 }
 
 fn encode_power_tint(power: u32) -> f32 {
@@ -165,6 +161,7 @@ fn cube_bucket_for_layer(layer: u32) -> u32 {
 }
 
 fn push_instance(bucket_id: u32, inst: VoxelInstance) {
+    let scratch_base = chunk_slot * emit_params.chunk_scratch_capacity;
     loop {
         let prev = atomicLoad(&scratch_counters[chunk_slot]);
         if prev >= emit_params.chunk_scratch_capacity {
@@ -177,7 +174,7 @@ fn push_instance(bucket_id: u32, inst: VoxelInstance) {
             prev + 1u,
         );
         if exchanged.exchanged {
-            scratch_instances[chunk_entry.scratch_offset + prev] = inst;
+            scratch_instances[scratch_base + prev] = inst;
             return;
         }
     }
@@ -210,7 +207,7 @@ fn biome_grid_index(lx: i32, ly: i32, lz: i32) -> u32 {
 }
 
 fn tint_mul_for_kind(lx: i32, ly: i32, lz: i32, kind: u32) -> vec3<f32> {
-    let idx = chunk_entry.tint_cells_offset + biome_grid_index(lx, ly, lz);
+    let idx = biome_grid_index(lx, ly, lz);
     if idx >= arrayLength(&chunk_tint_cells) {
         return vec3<f32>(1.0, 1.0, 1.0);
     }

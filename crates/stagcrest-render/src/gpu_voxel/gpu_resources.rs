@@ -9,11 +9,12 @@ use std::sync::Arc;
 
 use crate::gpu_voxel::block_meta::GpuBlockTables;
 use crate::gpu_voxel::bucket::DrawBucketRegistry;
+use crate::gpu_voxel::memory_config::VoxelMemoryConfig;
 use crate::gpu_voxel::model_library::GpuMeshLibrary;
 use crate::gpu_voxel::types::{
-    bucket_capacity_slots, build_bucket_regions, max_chunk_store_slots, BucketFinalizeMeta,
-    BucketRegion, GpuBucketRegion, GpuChunkTableEntry, BUCKET_FINALIZE_INVALID,
-    DrawIndexedIndirectArgs, GpuRenderLayer, VoxelInstance,
+    build_bucket_regions, initial_bucket_capacity, BucketFinalizeMeta, BucketRegion,
+    GpuBucketRegion, GpuChunkTableEntry, BUCKET_FINALIZE_INVALID, DrawIndexedIndirectArgs,
+    GpuRenderLayer, VoxelInstance,
 };
 
 /// CPU-side voxel GPU tables built at content load.
@@ -55,14 +56,21 @@ pub struct GpuVoxelStats {
     pub instance_counts: Vec<u32>,
     pub total_instances: u32,
     pub chunks_rebuilt: usize,
+    pub chunks_emitted: usize,
     pub chunks_compacted: usize,
     pub scratch_overflow_chunks: u32,
     pub scratch_overflow_instances: u32,
     pub global_overflow_buckets: u32,
     pub instance_buffer_bytes: u64,
+    pub chunk_gpu_bytes: u64,
+    pub scratch_arena_bytes: u64,
+    pub scratch_bytes: u64,
+    pub draw_arena_bytes: u64,
+    pub total_voxel_bytes: u64,
     pub overflow_pending: bool,
     pub upload_failures: usize,
     pub evictions: usize,
+    pub peak_instances: Vec<u32>,
 }
 
 /// Render-world GPU buffers for voxel pipeline.
@@ -75,9 +83,7 @@ pub struct RenderGpuVoxelBuffers {
     pub instances_buffer: Buffer,
     pub counters_buffer: Buffer,
     pub overflow_counters_buffer: Option<Buffer>,
-    /// CPU readback staging for overflow_counters (MAP_READ cannot share usage with STORAGE).
     pub overflow_readback_buffer: Option<Buffer>,
-    /// CPU readback staging for per-bucket instance counters after compact.
     pub counters_readback_buffer: Option<Buffer>,
     pub bucket_regions_buffer: Buffer,
     pub bucket_finalize_meta_buffer: Buffer,
@@ -95,20 +101,63 @@ pub struct InstanceBufferPool {
     pub capacities: Vec<u32>,
     pub peak: Vec<u32>,
     pub generation: u32,
+    pub max_draw_instances: u32,
 }
 
 impl InstanceBufferPool {
-    pub fn new(bucket_slot_count: u32) -> Self {
+    pub fn new(bucket_slot_count: u32, config: &VoxelMemoryConfig) -> Self {
         let n = bucket_slot_count as usize;
-        let capacities: Vec<u32> = (0..bucket_slot_count)
-            .map(bucket_capacity_slots)
-            .collect();
+        let capacities = scaled_bucket_capacities(bucket_slot_count, config);
         Self {
             capacities,
             peak: vec![0; n],
             generation: 0,
+            max_draw_instances: config.max_draw_instances,
         }
     }
+
+    pub fn total_instance_slots(&self) -> u64 {
+        self.capacities.iter().map(|&c| c as u64).sum()
+    }
+}
+
+/// Per-bucket draw arena capacities scaled to [`VoxelMemoryConfig::max_draw_instances`].
+pub fn scaled_bucket_capacities(bucket_slot_count: u32, config: &VoxelMemoryConfig) -> Vec<u32> {
+    let mut capacities: Vec<u32> = (0..bucket_slot_count)
+        .map(|id| {
+            initial_bucket_capacity(id, config.max_resident_chunks, config.instance_budget_per_chunk)
+        })
+        .collect();
+    let raw_total: u64 = capacities.iter().map(|&c| c as u64).sum();
+    let max_total = config.max_draw_instances as u64;
+    if raw_total > max_total && raw_total > 0 {
+        for cap in &mut capacities {
+            let scaled = (*cap as u64 * max_total / raw_total) as u32;
+            *cap = scaled.max(4) & !3;
+        }
+    }
+    capacities
+}
+
+pub fn chunk_table_buffer_size(max_resident_chunks: u32) -> u64 {
+    std::mem::size_of::<GpuChunkTableEntry>() as u64 * max_resident_chunks as u64
+}
+
+pub fn grow_chunk_table_buffer(
+    render_device: &RenderDevice,
+    existing: &Buffer,
+    new_max_resident_chunks: u32,
+) -> Buffer {
+    let new_size = chunk_table_buffer_size(new_max_resident_chunks);
+    if existing.size() >= new_size {
+        return existing.clone();
+    }
+    render_device.create_buffer(&BufferDescriptor {
+        label: Some("gpu_chunk_table_grown"),
+        size: new_size,
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }
 
 pub fn grow_instance_buffers(
@@ -116,21 +165,19 @@ pub fn grow_instance_buffers(
     tables: &GpuVoxelTables,
     pool: &mut InstanceBufferPool,
     overflows: &[u32],
+    existing: &RenderGpuVoxelBuffers,
 ) -> RenderGpuVoxelBuffers {
     for (id, &overflow) in overflows.iter().enumerate() {
         if overflow > 0 && id < pool.capacities.len() {
             let old = pool.capacities[id];
-            pool.capacities[id] = old.saturating_mul(2).max(old + 1);
+            let doubled = old.saturating_mul(2).max(old + 4);
+            let cap = pool.max_draw_instances.min(doubled);
+            pool.capacities[id] = if cap & 3 != 0 { (cap + 3) & !3 } else { cap };
         }
     }
 
     let bucket_slot_count = pool.capacities.len() as u32;
-    let mut offset: u64 = 0;
-    let mut bucket_regions = Vec::with_capacity(pool.capacities.len());
-    for &capacity in &pool.capacities {
-        bucket_regions.push(BucketRegion { offset: offset as u32, capacity });
-        offset += capacity as u64;
-    }
+    let (bucket_regions, offset) = build_bucket_regions(bucket_slot_count, &pool.capacities);
 
     let instances_buffer = render_device.create_buffer(&BufferDescriptor {
         label: Some("gpu_instances_grown"),
@@ -152,27 +199,31 @@ pub fn grow_instance_buffers(
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
     });
 
-    let mut bucket_finalize_meta = build_bucket_finalize_meta(tables);
-    for (id, meta) in bucket_finalize_meta.iter_mut().enumerate() {
-        if id < pool.capacities.len() {
-            meta.capacity = pool.capacities[id];
-        }
-    }
+    let bucket_finalize_meta = build_bucket_finalize_meta(tables, &pool.capacities);
     let bucket_finalize_meta_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
         label: Some("gpu_bucket_finalize_meta_grown"),
         contents: bytemuck::cast_slice(&bucket_finalize_meta),
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
     });
 
-    // Re-init static buffers from tables; instance-related buffers use grown layout.
-    let base = init_render_gpu_buffers(render_device, tables);
     RenderGpuVoxelBuffers {
+        block_meta_buffer: existing.block_meta_buffer.clone(),
+        atlas_rects_buffer: existing.atlas_rects_buffer.clone(),
+        mesh_vertex_buffer: existing.mesh_vertex_buffer.clone(),
+        mesh_index_buffer: existing.mesh_index_buffer.clone(),
         instances_buffer,
+        counters_buffer: existing.counters_buffer.clone(),
+        overflow_counters_buffer: existing.overflow_counters_buffer.clone(),
+        overflow_readback_buffer: existing.overflow_readback_buffer.clone(),
+        counters_readback_buffer: existing.counters_readback_buffer.clone(),
         bucket_regions_buffer,
         bucket_finalize_meta_buffer,
+        chunk_table_buffer: existing.chunk_table_buffer.clone(),
+        indirect_buffers: existing.indirect_buffers.clone(),
+        layer_bucket_ids: existing.layer_bucket_ids.clone(),
         bucket_regions,
+        max_bucket_id: existing.max_bucket_id,
         bucket_slot_count,
-        ..base
     }
 }
 
@@ -199,7 +250,10 @@ fn build_layer_indirect(
     (args, bucket_ids)
 }
 
-fn build_bucket_finalize_meta(tables: &GpuVoxelTables) -> Vec<BucketFinalizeMeta> {
+fn build_bucket_finalize_meta(
+    tables: &GpuVoxelTables,
+    capacities: &[u32],
+) -> Vec<BucketFinalizeMeta> {
     let slot_count = tables.max_bucket_id + 1;
     let mut meta = vec![
         BucketFinalizeMeta {
@@ -219,7 +273,7 @@ fn build_bucket_finalize_meta(tables: &GpuVoxelTables) -> Vec<BucketFinalizeMeta
         meta[bucket.id as usize] = BucketFinalizeMeta {
             layer: bucket.layer as u32,
             indirect_index: idx,
-            capacity: bucket_capacity_slots(bucket.id),
+            capacity: capacities.get(bucket.id as usize).copied().unwrap_or(4096),
             _pad: 0,
         };
     }
@@ -229,6 +283,10 @@ fn build_bucket_finalize_meta(tables: &GpuVoxelTables) -> Vec<BucketFinalizeMeta
 pub fn init_render_gpu_buffers(
     render_device: &RenderDevice,
     tables: &GpuVoxelTables,
+    pool: &InstanceBufferPool,
+    bucket_regions: &[BucketRegion],
+    total_slots: u64,
+    chunk_table_size: u64,
 ) -> RenderGpuVoxelBuffers {
     let block_meta_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
         label: Some("gpu_block_meta"),
@@ -256,7 +314,6 @@ pub fn init_render_gpu_buffers(
 
     let bucket_slot_count = tables.max_bucket_id + 1;
 
-    let (bucket_regions, total_slots) = build_bucket_regions(bucket_slot_count);
     let instances_buffer = render_device.create_buffer(&BufferDescriptor {
         label: Some("gpu_instances"),
         size: total_slots * std::mem::size_of::<VoxelInstance>() as u64,
@@ -307,12 +364,12 @@ pub fn init_render_gpu_buffers(
 
     let chunk_table_buffer = render_device.create_buffer(&BufferDescriptor {
         label: Some("gpu_chunk_table"),
-        size: (std::mem::size_of::<GpuChunkTableEntry>() * max_chunk_store_slots() as usize) as u64,
+        size: chunk_table_size,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
-    let bucket_finalize_meta = build_bucket_finalize_meta(tables);
+    let bucket_finalize_meta = build_bucket_finalize_meta(tables, &pool.capacities);
     let bucket_finalize_meta_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
         label: Some("gpu_bucket_finalize_meta"),
         contents: bytemuck::cast_slice(&bucket_finalize_meta),
@@ -350,8 +407,45 @@ pub fn init_render_gpu_buffers(
             make_indirect(&blend_args),
         ],
         layer_bucket_ids: [opaque_ids, cutout_ids, blend_ids],
-        bucket_regions,
+        bucket_regions: bucket_regions.to_vec(),
         max_bucket_id: tables.max_bucket_id,
         bucket_slot_count,
     }
+}
+
+pub fn init_render_gpu_buffers_with_config(
+    render_device: &RenderDevice,
+    tables: &GpuVoxelTables,
+    config: &VoxelMemoryConfig,
+) -> (RenderGpuVoxelBuffers, InstanceBufferPool) {
+    let pool = InstanceBufferPool::new(tables.max_bucket_id + 1, config);
+    let (bucket_regions, total_slots) =
+        build_bucket_regions(tables.max_bucket_id + 1, &pool.capacities);
+    let table_size = chunk_table_buffer_size(config.max_resident_chunks);
+    let buffers = init_render_gpu_buffers(
+        render_device,
+        tables,
+        &pool,
+        &bucket_regions,
+        total_slots,
+        table_size,
+    );
+    (buffers, pool)
+}
+
+pub fn static_buffer_bytes(buffers: &RenderGpuVoxelBuffers) -> u64 {
+    buffers.block_meta_buffer.size()
+        + buffers.atlas_rects_buffer.size()
+        + buffers.mesh_vertex_buffer.size()
+        + buffers.mesh_index_buffer.size()
+        + buffers.bucket_regions_buffer.size()
+        + buffers.bucket_finalize_meta_buffer.size()
+        + buffers.chunk_table_buffer.size()
+        + buffers.counters_buffer.size()
+        + buffers
+            .overflow_counters_buffer
+            .as_ref()
+            .map(|b| b.size())
+            .unwrap_or(0)
+        + buffers.indirect_buffers.iter().map(|b| b.size()).sum::<u64>()
 }

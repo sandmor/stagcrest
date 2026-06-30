@@ -10,6 +10,8 @@ pub struct GpuChunkExtractBatch {
     pub uploads: Vec<GpuChunkUpload>,
     pub removals: Vec<ChunkPos>,
     pub rebuild_dirty: HashSet<ChunkPos>,
+    /// When set, the render pool should rebuild every resident chunk (e.g. tint pass).
+    pub full_pool_rebuild: bool,
 }
 
 /// Main-world chunk index. Bulk block data is queued for extract, not cloned every frame.
@@ -62,8 +64,13 @@ impl GpuChunkCache {
         rendered: &HashSet<ChunkPos>,
         failed: &[ChunkPos],
         evicted: &[ChunkPos],
+        scratch_overflow: &[ChunkPos],
     ) {
-        for pos in failed.iter().chain(evicted.iter()) {
+        for pos in failed
+            .iter()
+            .chain(evicted.iter())
+            .chain(scratch_overflow.iter())
+        {
             self.render_synced.remove(pos);
         }
         self.render_synced = rendered
@@ -77,6 +84,7 @@ impl GpuChunkCache {
         self.extract
             .rebuild_dirty
             .extend(self.loaded.iter().copied());
+        self.extract.full_pool_rebuild = true;
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -88,6 +96,7 @@ impl GpuChunkCache {
             uploads: std::mem::take(&mut self.extract.uploads),
             removals: std::mem::take(&mut self.extract.removals),
             rebuild_dirty: std::mem::take(&mut self.extract.rebuild_dirty),
+            full_pool_rebuild: std::mem::take(&mut self.extract.full_pool_rebuild),
         }
     }
 }

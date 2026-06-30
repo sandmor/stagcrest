@@ -6,17 +6,26 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 use crate::gpu_voxel::chunk_cache::GpuChunkCache;
 use crate::gpu_voxel::chunk_feedback::{GpuChunkRenderFeedback, GpuChunkSyncState};
+use crate::gpu_voxel::chunk_gpu_pool::ChunkGpuPool;
+use crate::gpu_voxel::chunk_scratch_arena::ChunkScratchArena;
 use crate::gpu_voxel::draw_node::VoxelDrawBindCache;
 use crate::gpu_voxel::gpu_resources::{
-    grow_instance_buffers, GpuVoxelStats, GpuVoxelTables, InstanceBufferPool,
+    grow_chunk_table_buffer, grow_instance_buffers, init_render_gpu_buffers_with_config,
+    GpuVoxelStats, GpuVoxelTables, InstanceBufferPool, RenderGpuVoxelBuffers,
 };
-use crate::gpu_voxel::gpu_resources::{init_render_gpu_buffers, RenderGpuVoxelBuffers};
 use crate::gpu_voxel::extract_chunk::PendingChunkExtract;
-use crate::gpu_voxel::render_chunk_store::RenderChunkStore;
+use crate::gpu_voxel::memory_config::VoxelMemoryConfig;
+use crate::gpu_voxel::rebuild_node::ChunkComputeBindCache;
 
 #[derive(Resource)]
 pub struct GpuVoxelRenderState {
     pub buffers: RenderGpuVoxelBuffers,
+}
+
+/// Tracks the render-distance capacity used for pool/scratch/table allocation.
+#[derive(Resource)]
+pub struct VoxelGpuAllocatedConfig {
+    pub max_resident_chunks: u32,
 }
 
 #[derive(Default)]
@@ -46,6 +55,7 @@ const OVERFLOW_POLL_INTERVAL: u32 = 60;
 
 pub fn prepare_gpu_voxel_buffers(
     tables: Option<Res<GpuVoxelTables>>,
+    memory_config: Option<Res<VoxelMemoryConfig>>,
     render_device: Res<RenderDevice>,
     existing: Option<Res<GpuVoxelRenderState>>,
     mut pending: Option<ResMut<PendingChunkExtract>>,
@@ -54,21 +64,94 @@ pub fn prepare_gpu_voxel_buffers(
     if existing.is_some() {
         return;
     }
-    let Some(tables) = tables else {
+    let (Some(tables), Some(memory_config)) = (tables, memory_config) else {
         return;
     };
-    let buffers = init_render_gpu_buffers(&render_device, tables.as_ref());
+    let (buffers, pool) =
+        init_render_gpu_buffers_with_config(&render_device, tables.as_ref(), &memory_config);
     let bucket_slot_count = buffers.bucket_slot_count;
-    let mut store = RenderChunkStore::new(&render_device, bucket_slot_count);
+    let mut chunk_pool = ChunkGpuPool::new(&memory_config, bucket_slot_count);
+    let scratch = ChunkScratchArena::new(&render_device, &memory_config);
     if let Some(pending) = pending.as_mut() {
         let mut feedback = GpuChunkRenderFeedback::default();
         for batch in pending.batches.drain(..) {
-            store.apply_extract_batch(&batch, &mut feedback);
+            chunk_pool.apply_extract_batch(&batch, &mut feedback);
+        }
+        if chunk_pool.resident_count() > 0 {
+            chunk_pool.needs_full_rebuild = true;
         }
     }
     commands.insert_resource(GpuVoxelRenderState { buffers });
-    commands.insert_resource(store);
-    commands.insert_resource(InstanceBufferPool::new(bucket_slot_count));
+    commands.insert_resource(chunk_pool);
+    commands.insert_resource(scratch);
+    commands.insert_resource(pool);
+    commands.insert_resource(VoxelGpuAllocatedConfig {
+        max_resident_chunks: memory_config.max_resident_chunks,
+    });
+    commands.init_resource::<ChunkComputeBindCache>();
+}
+
+/// Grows pool/scratch/table when render distance increases at runtime (no shrink).
+pub fn resize_voxel_memory_if_needed(
+    memory_config: Option<Res<VoxelMemoryConfig>>,
+    allocated: Option<ResMut<VoxelGpuAllocatedConfig>>,
+    state: Option<ResMut<GpuVoxelRenderState>>,
+    pool: Option<ResMut<ChunkGpuPool>>,
+    scratch: Option<ResMut<ChunkScratchArena>>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    mut compute_bind_cache: Option<ResMut<ChunkComputeBindCache>>,
+    mut draw_bind_cache: Option<ResMut<VoxelDrawBindCache>>,
+) {
+    let (
+        Some(memory_config),
+        Some(mut allocated),
+        Some(mut state),
+        Some(mut pool),
+        Some(mut scratch),
+    ) = (
+        memory_config,
+        allocated,
+        state,
+        pool,
+        scratch,
+    ) else {
+        return;
+    };
+
+    let target = memory_config.max_resident_chunks;
+    if target <= allocated.max_resident_chunks {
+        return;
+    }
+
+    tracing::info!(
+        old = allocated.max_resident_chunks,
+        new = target,
+        "growing voxel GPU resident capacity"
+    );
+
+    pool.grow_capacity(target);
+    state.buffers.chunk_table_buffer = grow_chunk_table_buffer(
+        &render_device,
+        &state.buffers.chunk_table_buffer,
+        target,
+    );
+    render_queue.write_buffer(
+        &state.buffers.chunk_table_buffer,
+        0,
+        bytemuck::cast_slice(&pool.chunk_table),
+    );
+
+    *scratch = ChunkScratchArena::new(&render_device, &memory_config);
+    pool.mark_all_dirty();
+    allocated.max_resident_chunks = target;
+
+    if let Some(cache) = compute_bind_cache.as_mut() {
+        cache.clear();
+    }
+    if let Some(cache) = draw_bind_cache.as_mut() {
+        cache.invalidate();
+    }
 }
 
 pub fn sync_gpu_voxel_stats(
@@ -94,6 +177,7 @@ pub fn publish_gpu_chunk_feedback(
             &feedback.rendered,
             &feedback.failed_uploads,
             &feedback.evicted,
+            &feedback.scratch_overflow,
         );
     }
     if let Some(mut sync) = main.get_resource_mut::<GpuChunkSyncState>() {
@@ -111,17 +195,34 @@ pub fn poll_gpu_voxel_overflow(
     render_queue: Res<RenderQueue>,
     tables: Option<Res<GpuVoxelTables>>,
     mut state: Option<ResMut<GpuVoxelRenderState>>,
-    store: Option<ResMut<RenderChunkStore>>,
-    pool: Option<ResMut<InstanceBufferPool>>,
+    pool: Option<ResMut<ChunkGpuPool>>,
+    scratch: Option<Res<ChunkScratchArena>>,
+    instance_pool: Option<ResMut<InstanceBufferPool>>,
     bind_cache: Option<ResMut<VoxelDrawBindCache>>,
+    mut compute_bind_cache: Option<ResMut<ChunkComputeBindCache>>,
     stats: Option<ResMut<GpuVoxelStats>>,
     mut feedback: Option<ResMut<GpuChunkRenderFeedback>>,
     mut readback: Local<OverflowReadbackState>,
 ) {
     render_device.poll(Maintain::Poll);
 
-    let (Some(tables), Some(state), Some(mut store), Some(mut pool), Some(mut bind_cache), Some(mut stats)) =
-        (tables, state.as_mut(), store, pool, bind_cache, stats)
+    let (
+        Some(tables),
+        Some(state),
+        Some(mut pool),
+        Some(scratch),
+        Some(mut instance_pool),
+        Some(mut bind_cache),
+        Some(mut stats),
+    ) = (
+        tables,
+        state.as_mut(),
+        pool,
+        scratch,
+        instance_pool,
+        bind_cache,
+        stats,
+    )
     else {
         return;
     };
@@ -146,18 +247,16 @@ pub fn poll_gpu_voxel_overflow(
             let byte_size = crate::gpu_voxel::gpu_resources::counters_buffer_size(
                 state.buffers.bucket_slot_count,
             );
-            let scratch_byte_size =
-                store.chunk_capacity as u64 * std::mem::size_of::<u32>() as u64;
             let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("voxel_overflow_readback_copy"),
             });
             encoder.copy_buffer_to_buffer(overflow_buf, 0, readback_buf, 0, byte_size);
             encoder.copy_buffer_to_buffer(
-                &store.scratch_overflow_buffer,
+                &scratch.scratch_overflow,
                 0,
-                &store.scratch_overflow_readback_buffer,
+                &scratch.scratch_overflow_readback,
                 0,
-                scratch_byte_size,
+                scratch.meta_byte_size,
             );
             if let Some(counters_readback) = state.buffers.counters_readback_buffer.as_ref() {
                 encoder.copy_buffer_to_buffer(
@@ -191,6 +290,13 @@ pub fn poll_gpu_voxel_overflow(
                     overflows.iter().filter(|&&v| v > 0).count() as u32;
                 stats.overflow_pending = overflows.iter().sum::<u32>() > 0;
 
+                for (id, &count) in overflows.iter().enumerate() {
+                    if id < instance_pool.peak.len() && count > 0 {
+                        instance_pool.peak[id] =
+                            instance_pool.peak[id].max(instance_pool.capacities[id]);
+                    }
+                }
+
                 if let Some(counters_readback) = state.buffers.counters_readback_buffer.as_ref() {
                     let (tx, counters_rx) = std::sync::mpsc::channel();
                     let counters_clone = counters_readback.clone();
@@ -211,7 +317,7 @@ pub fn poll_gpu_voxel_overflow(
                     };
                 } else {
                     start_scratch_readback(
-                        &store.scratch_overflow_readback_buffer,
+                        &scratch.scratch_overflow_readback,
                         overflows,
                         &mut readback.stage,
                     );
@@ -227,9 +333,9 @@ pub fn poll_gpu_voxel_overflow(
         },
         OverflowReadbackStage::PendingCounters { overflow, rx } => match rx.try_recv() {
             Ok(counters) => {
-                stats_from_counters(&counters, &mut stats);
+                stats_from_counters(&counters, &mut stats, Some(&mut instance_pool.peak));
                 start_scratch_readback(
-                    &store.scratch_overflow_readback_buffer,
+                    &scratch.scratch_overflow_readback,
                     overflow,
                     &mut readback.stage,
                 );
@@ -257,11 +363,11 @@ pub fn poll_gpu_voxel_overflow(
                     if let Some(feedback) = feedback.as_mut() {
                         for (slot, &count) in scratch_overflows.iter().enumerate() {
                             if count > 0 {
-                                if let Some(pos) = store.pos_for_slot(slot as u32) {
+                                if let Some(pos) = pool.pos_for_slot(slot as u32) {
                                     if !feedback.scratch_overflow.contains(&pos) {
                                         feedback.scratch_overflow.push(pos);
                                     }
-                                    store.data_dirty.insert(pos);
+                                    pool.data_dirty.insert(pos);
                                 }
                             }
                         }
@@ -270,12 +376,20 @@ pub fn poll_gpu_voxel_overflow(
 
                 let total_overflow: u32 = overflow.iter().sum();
                 if total_overflow > 0 {
-                    let grown =
-                        grow_instance_buffers(&render_device, tables.as_ref(), &mut pool, &overflow);
-                    pool.generation = pool.generation.wrapping_add(1);
+                    let grown = grow_instance_buffers(
+                        &render_device,
+                        tables.as_ref(),
+                        &mut instance_pool,
+                        &overflow,
+                        &state.buffers,
+                    );
+                    instance_pool.generation = instance_pool.generation.wrapping_add(1);
                     state.buffers = grown;
-                    store.mark_all_dirty();
-                    bind_cache.reset_for_growth(pool.generation);
+                    pool.mark_all_dirty();
+                    bind_cache.reset_for_growth(instance_pool.generation);
+                    if let Some(compute_cache) = compute_bind_cache.as_mut() {
+                        compute_cache.clear();
+                    }
                     if let Some(overflow_buf) = state.buffers.overflow_counters_buffer.as_ref() {
                         let zeros = vec![0u32; bucket_slots];
                         render_queue.write_buffer(overflow_buf, 0, bytemuck::cast_slice(&zeros));
@@ -295,9 +409,17 @@ pub fn poll_gpu_voxel_overflow(
     }
 }
 
-fn stats_from_counters(counters: &[u32], stats: &mut GpuVoxelStats) {
+fn stats_from_counters(counters: &[u32], stats: &mut GpuVoxelStats, peak: Option<&mut [u32]>) {
     stats.total_instances = counters.iter().sum();
     stats.instance_counts = counters.to_vec();
+    if let Some(peak) = peak {
+        for (id, &count) in counters.iter().enumerate() {
+            if id < peak.len() {
+                peak[id] = peak[id].max(count);
+            }
+        }
+        stats.peak_instances = peak.to_vec();
+    }
 }
 
 fn start_scratch_readback(

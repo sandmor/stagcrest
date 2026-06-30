@@ -18,7 +18,7 @@ use stagcrest_net::ServerMessage;
 use stagcrest_render::{
     spawn_block_outline, BlockAtlasResource, GpuChunkCache, GpuChunkSyncState, GpuVoxelPlugin,
     GpuVoxelStats, GpuVoxelTables, OutlineMaterial, UnderwaterEffect, VoxelAtlasImage, VoxelCamera,
-    VoxelMaterialSource, VoxelRenderConfig, VoxelRenderPlugin,
+    VoxelMaterialSource, VoxelMemoryConfig, VoxelRenderConfig, VoxelRenderPlugin,
 };
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -68,6 +68,7 @@ impl Plugin for GamePlugin {
             .init_resource::<GpuVoxelStats>()
             .init_resource::<VoxelCamera>()
             .init_resource::<VoxelRenderConfig>()
+            .init_resource::<VoxelMemoryConfig>()
             .init_resource::<targeting::BlockTarget>()
             .init_resource::<CircuitPowerOverlay>()
             .init_resource::<BiomeGridCache>()
@@ -101,6 +102,7 @@ impl Plugin for GamePlugin {
                         .before(gpu_chunk_upload)
                         .run_if(in_state(AppState::InGame)),
                     sync_voxel_render_config.run_if(in_state(AppState::InGame)),
+                    sync_voxel_memory_config.run_if(in_state(AppState::InGame)),
                     update_voxel_camera.run_if(in_state(AppState::InGame)),
                     update_fluid_anim.run_if(in_state(AppState::InGame)),
                     environment::update_player_environment
@@ -248,6 +250,14 @@ fn sync_voxel_render_config(
 ) {
     render_config.horizontal = config.render_distance;
     render_config.vertical = config.vertical_render_distance;
+}
+
+fn sync_voxel_memory_config(
+    config: Res<GameConfig>,
+    mut memory_config: ResMut<VoxelMemoryConfig>,
+) {
+    *memory_config =
+        VoxelMemoryConfig::from_render_distance(config.render_distance, config.vertical_render_distance);
 }
 
 fn update_voxel_camera(

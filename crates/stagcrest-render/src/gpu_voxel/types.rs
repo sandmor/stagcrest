@@ -11,17 +11,8 @@ pub const HALO_VOLUME: usize = (HALO_SIZE * HALO_SIZE * HALO_SIZE) as usize;
 pub const CHUNK_BLOCKS: usize = 4096;
 pub const BIOME_GRID_CELLS: usize = 64;
 
-/// Max instances a single chunk may emit into its scratch region (all buckets).
-pub const CHUNK_SCRATCH_CAPACITY: u32 = 8192;
-
-/// wgpu `max_storage_buffer_binding_size` on common backends (2 GiB − 1).
-pub const MAX_STORAGE_BUFFER_BINDING: u64 = 2147483647;
-
-/// Largest chunk slot count such that the concatenated scratch SSBO stays bindable.
-pub fn max_chunk_store_slots() -> u32 {
-    let per_chunk = chunk_scratch_instance_bytes();
-    (MAX_STORAGE_BUFFER_BINDING / per_chunk) as u32
-}
+/// Default scratch instances per chunk when no [`crate::gpu_voxel::memory_config::VoxelMemoryConfig`] is available.
+pub const DEFAULT_SCRATCH_INSTANCES_PER_CHUNK: u32 = 4096;
 
 /// Bytes per chunk in the concatenated blocks SSBO (16 bytes per GpuBlockCell).
 pub const CHUNK_BLOCKS_BYTES: u64 = (HALO_VOLUME * 16) as u64;
@@ -31,18 +22,21 @@ pub const CHUNK_POWER_BYTES: u64 = CHUNK_BLOCKS as u64;
 pub const CHUNK_TINT_CELLS_BYTES: u64 =
     (BIOME_GRID_CELLS * std::mem::size_of::<GpuChunkTintCell>()) as u64;
 
-/// Per-bucket instance region capacity (in instances) in the partitioned
-/// instances SSBO. Cube/cross/wire buckets are shared across every chunk and
-/// need huge regions, while per-model buckets are sparse and need very little.
-/// Capacities must be multiples of 4 so that `offset * sizeof(VoxelInstance)`
-/// stays aligned to the 256-byte dynamic storage-buffer offset requirement.
-pub fn bucket_capacity_slots(bucket_id: u32) -> u32 {
-    match bucket_id {
-        0 => 1 << 21,       // cube opaque (largest by far)
-        1 | 2 | 3 => 1 << 19, // cube cutout/blend, cross cutout
-        4 => 1 << 18,       // wire cutout
-        _ => 1 << 12,       // per-model buckets (sparse)
-    }
+/// Per-bucket instance region capacity from memory budget.
+/// Capacities must be multiples of 4 for dynamic storage-buffer offset alignment.
+pub fn initial_bucket_capacity(
+    bucket_id: u32,
+    max_resident_chunks: u32,
+    instance_budget_per_chunk: u32,
+) -> u32 {
+    let base = max_resident_chunks.saturating_mul(instance_budget_per_chunk);
+    let cap = match bucket_id {
+        0 => base / 2,
+        1 | 2 | 3 => base / 8,
+        4 => base / 16,
+        _ => 4096,
+    };
+    cap.max(4) & !3
 }
 
 /// Prefix-summed instance region for a single bucket.
@@ -56,11 +50,14 @@ pub struct BucketRegion {
 
 /// Builds the per-bucket region table (offset/capacity in instances) and
 /// returns it together with the total slot count across all buckets.
-pub fn build_bucket_regions(bucket_slot_count: u32) -> (Vec<BucketRegion>, u64) {
+pub fn build_bucket_regions(
+    bucket_slot_count: u32,
+    capacities: &[u32],
+) -> (Vec<BucketRegion>, u64) {
     let mut regions = Vec::with_capacity(bucket_slot_count as usize);
     let mut offset: u64 = 0;
     for id in 0..bucket_slot_count {
-        let capacity = bucket_capacity_slots(id);
+        let capacity = capacities.get(id as usize).copied().unwrap_or(4096);
         regions.push(BucketRegion {
             offset: offset as u32,
             capacity,
@@ -68,6 +65,11 @@ pub fn build_bucket_regions(bucket_slot_count: u32) -> (Vec<BucketRegion>, u64) 
         offset += capacity as u64;
     }
     (regions, offset)
+}
+
+/// Per-chunk GPU buffer footprint (blocks + power + tint).
+pub fn chunk_gpu_asset_bytes() -> u64 {
+    CHUNK_BLOCKS_BYTES + CHUNK_POWER_BYTES + CHUNK_TINT_CELLS_BYTES
 }
 
 /// GPU-side bucket region descriptor uploaded to the compute shader.
@@ -200,14 +202,10 @@ pub struct GpuChunkUniform {
     pub _pad: [u32; 3],
 }
 
-/// Render-world chunk slot descriptor for batched compute / compaction.
+/// Render-world chunk slot descriptor for compute emit (per-chunk buffers bound separately).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable, bevy::render::render_resource::ShaderType)]
 pub struct GpuChunkTableEntry {
-    pub blocks_offset: u32,
-    pub power_offset: u32,
-    pub scratch_offset: u32,
-    pub tint_cells_offset: u32,
     pub origin_x: i32,
     pub origin_y: i32,
     pub origin_z: i32,
@@ -293,6 +291,6 @@ pub fn instance_slot_byte_size() -> u64 {
     std::mem::size_of::<VoxelInstance>() as u64
 }
 
-pub fn chunk_scratch_instance_bytes() -> u64 {
-    CHUNK_SCRATCH_CAPACITY as u64 * instance_slot_byte_size()
+pub fn scratch_buffer_bytes(scratch_instances_per_chunk: u32) -> u64 {
+    scratch_instances_per_chunk as u64 * instance_slot_byte_size()
 }

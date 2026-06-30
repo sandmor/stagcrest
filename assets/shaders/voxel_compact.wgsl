@@ -10,18 +10,6 @@ struct VoxelInstance {
     bucket_id: u32,
 }
 
-struct GpuChunkTableEntry {
-    blocks_offset: u32,
-    power_offset: u32,
-    scratch_offset: u32,
-    tint_cells_offset: u32,
-    origin_x: i32,
-    origin_y: i32,
-    origin_z: i32,
-    air_id: u32,
-    flags: u32,
-}
-
 struct BucketRegion {
     offset: u32,
     capacity: u32,
@@ -44,7 +32,15 @@ struct CompactParams {
 @group(0) @binding(7) var<uniform> params: CompactParams;
 @group(0) @binding(8) var<storage, read_write> global_overflow: array<atomic<u32>>;
 
-// 2D dispatch: workgroup_id.x = visible chunk index, workgroup_id.y = instance batch.
+struct GpuChunkTableEntry {
+    origin_x: i32,
+    origin_y: i32,
+    origin_z: i32,
+    air_id: u32,
+    flags: u32,
+}
+
+// Batched compact: workgroup_id.x = visible chunk, workgroup_id.y = instance batch.
 @compute @workgroup_size(64, 1, 1)
 fn main(
     @builtin(workgroup_id) wid: vec3<u32>,
@@ -54,26 +50,26 @@ fn main(
     if vis_idx >= params.visible_count {
         return;
     }
+    let slot = visible_list[vis_idx];
+    let scratch_base = slot * params.chunk_scratch_capacity;
     let inst_idx = wid.y * 64u + lid.x;
     if inst_idx >= params.chunk_scratch_capacity {
         return;
     }
-    let chunk_slot = visible_list[vis_idx];
-    let count = atomicLoad(&scratch_counters[chunk_slot]);
+    let count = atomicLoad(&scratch_counters[slot]);
     if inst_idx >= count {
         return;
     }
-    let entry = chunk_table[chunk_slot];
-    let inst = scratch_instances[entry.scratch_offset + inst_idx];
+    let inst = scratch_instances[scratch_base + inst_idx];
     let bucket_id = inst.bucket_id;
     if bucket_id >= arrayLength(&bucket_regions) {
         return;
     }
     let region = bucket_regions[bucket_id];
-    let slot = atomicAdd(&global_counters[bucket_id], 1u);
-    if slot >= region.capacity {
+    let draw_slot = atomicAdd(&global_counters[bucket_id], 1u);
+    if draw_slot >= region.capacity {
         atomicAdd(&global_overflow[bucket_id], 1u);
         return;
     }
-    draw_instances[region.offset + slot] = inst;
+    draw_instances[region.offset + draw_slot] = inst;
 }

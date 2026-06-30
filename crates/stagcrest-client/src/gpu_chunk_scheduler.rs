@@ -318,7 +318,7 @@ mod recover_tests {
             climate: None,
             tint_cells: [Default::default(); stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
         });
-        cache.apply_render_feedback(&std::iter::once(pos).collect(), &[], &[]);
+        cache.apply_render_feedback(&std::iter::once(pos).collect(), &[], &[], &[]);
         assert!(cache.is_render_synced(pos));
         assert!(!scheduler.is_pending(pos));
     }
