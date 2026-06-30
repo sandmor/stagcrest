@@ -5,8 +5,11 @@ use crate::block_icons::BlockIconCache;
 use crate::game::ModContext;
 use crate::ui::UiTheme;
 use bevy::prelude::*;
+use bevy::picking::hover::Hovered;
 use bevy::text::{EditableText, TextCursorStyle, TextEditChange, TextLayout};
 use bevy::ui::widget::NodeImageMode;
+use bevy::ui::{FocusPolicy, RelativeCursorPosition};
+use bevy::ui_widgets::{ControlOrientation, Scrollbar, ScrollbarDragState, ScrollbarThumb};
 use stagcrest_protocol::BlockId;
 
 #[derive(Component)]
@@ -14,6 +17,9 @@ pub struct InventoryScreenRoot;
 
 #[derive(Component)]
 pub struct CatalogGrid;
+
+#[derive(Component)]
+pub struct CatalogScrollArea;
 
 #[derive(Component)]
 pub struct CatalogCell {
@@ -84,23 +90,71 @@ pub fn spawn_inventory_screen(
                         .insert(BorderColor::all(theme.slot_border));
 
                     panel
-                        .spawn((
-                            CatalogGrid,
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                flex_wrap: FlexWrap::Wrap,
-                                column_gap: Val::Px(6.0),
-                                row_gap: Val::Px(6.0),
-                                max_width: Val::Px(540.0),
-                                max_height: Val::Px(280.0),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                        ))
-                        .with_children(|grid| {
-                            for &block_id in &blocks {
-                                spawn_catalog_cell(grid, ctx, icons, block_id, theme);
-                            }
+                        .spawn(Node {
+                            display: Display::Grid,
+                            grid_template_columns: vec![RepeatedGridTrack::px(1, 572.0), RepeatedGridTrack::px(1, 8.0)],
+                            column_gap: Val::Px(8.0),
+                            align_self: AlignSelf::Center,
+                            height: Val::Px(280.0),
+                            ..default()
+                        })
+                        .with_children(|scroll_container| {
+                            let scroll_area_id = scroll_container
+                                .spawn((
+                                    CatalogScrollArea,
+                                    RelativeCursorPosition::default(),
+                                    FocusPolicy::Pass,
+                                    Node {
+                                        display: Display::Flex,
+                                        flex_direction: FlexDirection::Column,
+                                        overflow: Overflow::scroll_y(),
+                                        height: Val::Percent(100.0),
+                                        ..default()
+                                    },
+                                    ScrollPosition::default(),
+                                ))
+                                .with_children(|scroll_area| {
+                                    scroll_area.spawn((
+                                        CatalogGrid,
+                                        Node {
+                                            display: Display::Grid,
+                                            grid_template_columns: vec![RepeatedGridTrack::px(9, 60.0)],
+                                            column_gap: Val::Px(4.0),
+                                            row_gap: Val::Px(4.0),
+                                            ..default()
+                                        },
+                                    ))
+                                    .with_children(|grid| {
+                                        for &block_id in &blocks {
+                                            spawn_catalog_cell(grid, ctx, icons, block_id, theme);
+                                        }
+                                    });
+                                })
+                                .id();
+
+                            scroll_container
+                                .spawn((
+                                    Node {
+                                        width: Val::Px(8.0),
+                                        grid_column: GridPlacement::start(2),
+                                        ..default()
+                                    },
+                                    Scrollbar {
+                                        orientation: ControlOrientation::Vertical,
+                                        target: scroll_area_id,
+                                        min_thumb_length: 16.0,
+                                    },
+                                ))
+                                .with_children(|thumb_parent| {
+                                    thumb_parent.spawn((
+                                        Hovered::default(),
+                                        ScrollbarThumb {
+                                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                                            border: UiRect::default(),
+                                        },
+                                        BackgroundColor(theme.slot_border),
+                                    ));
+                                });
                         });
 
                     panel.spawn(Node {
@@ -114,31 +168,30 @@ pub fn spawn_inventory_screen(
 
                     panel
                         .spawn(Node {
-                            flex_direction: FlexDirection::Column,
+                            display: Display::Grid,
+                            grid_template_columns: vec![RepeatedGridTrack::px(9, 60.0)],
+                            column_gap: Val::Px(4.0),
                             row_gap: Val::Px(4.0),
+                            align_self: AlignSelf::Center,
+                            margin: UiRect::right(Val::Px(16.0)),
                             ..default()
                         })
                         .with_children(|main_area| {
                             for row in 0..3 {
-                                main_area
-                                    .spawn(Node {
-                                        flex_direction: FlexDirection::Row,
-                                        column_gap: Val::Px(4.0),
-                                        ..default()
-                                    })
-                                    .with_children(|row_node| {
-                                        for col in 0..9 {
-                                            let index = row * 9 + col;
-                                            spawn_main_slot(row_node, index, theme);
-                                        }
-                                    });
+                                for col in 0..9 {
+                                    let index = row * 9 + col;
+                                    spawn_main_slot(main_area, index, theme);
+                                }
                             }
                         });
 
                     panel
                         .spawn(Node {
-                            flex_direction: FlexDirection::Row,
+                            display: Display::Grid,
+                            grid_template_columns: vec![RepeatedGridTrack::px(9, 60.0)],
                             column_gap: Val::Px(4.0),
+                            align_self: AlignSelf::Center,
+                            margin: UiRect::right(Val::Px(16.0)),
                             ..default()
                         })
                         .with_children(|hotbar_row| {
@@ -176,7 +229,7 @@ fn spawn_catalog_cell(
             CatalogCell { block: block_id },
             Button,
             Node {
-                width: Val::Px(64.0),
+                width: Val::Px(60.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 row_gap: Val::Px(2.0),
@@ -220,8 +273,8 @@ fn spawn_main_slot(parent: &mut ChildSpawnerCommands, index: usize, theme: &UiTh
             InventoryScreenSlot { kind, index },
             Button,
             Node {
-                width: Val::Px(52.0),
-                height: Val::Px(52.0),
+                width: Val::Px(60.0),
+                height: Val::Px(60.0),
                 padding: UiRect::all(Val::Px(2.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -266,8 +319,8 @@ fn spawn_screen_hotbar_slot(parent: &mut ChildSpawnerCommands, index: usize, the
             InventoryScreenSlot { kind, index },
             Button,
             Node {
-                width: Val::Px(52.0),
-                height: Val::Px(52.0),
+                width: Val::Px(60.0),
+                height: Val::Px(60.0),
                 padding: UiRect::all(Val::Px(2.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
@@ -366,5 +419,28 @@ pub fn cleanup_inventory_screen(
 ) {
     for e in &query {
         commands.entity(e).despawn();
+    }
+}
+
+pub fn update_scrollbar_thumb(
+    mut q_thumb: Query<
+        (&mut BackgroundColor, &Hovered, &ScrollbarDragState),
+        (
+            With<ScrollbarThumb>,
+            Or<(Changed<Hovered>, Changed<ScrollbarDragState>)>,
+        ),
+    >,
+    theme: Res<UiTheme>,
+) {
+    for (mut thumb_bg, Hovered(is_hovering), drag) in q_thumb.iter_mut() {
+        let color = if *is_hovering || drag.dragging {
+            theme.text_muted
+        } else {
+            theme.slot_border
+        };
+
+        if thumb_bg.0 != color {
+            thumb_bg.0 = color;
+        }
     }
 }

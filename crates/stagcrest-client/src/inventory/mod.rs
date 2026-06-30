@@ -20,7 +20,7 @@ use input::{
     clear_search_on_escape, inventory_click, inventory_cursor_ghost, sync_selected_block,
     toggle_inventory_screen,
 };
-use screen::{cleanup_inventory_screen, on_search_text_changed};
+use screen::{cleanup_inventory_screen, on_search_text_changed, update_scrollbar_thumb};
 
 pub struct InventoryPlugin;
 
@@ -51,6 +51,7 @@ impl Plugin for InventoryPlugin {
                     sync_selected_block,
                     update_hotbar_visibility,
                     update_hotbar_highlight,
+                    update_scrollbar_thumb,
                     capture_cursor
                         .run_if(in_state(AppState::InGame))
                         .run_if(not(inventory_open)),

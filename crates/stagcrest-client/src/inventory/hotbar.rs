@@ -6,6 +6,7 @@ use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::widget::NodeImageMode;
+use bevy::ui::RelativeCursorPosition;
 
 #[derive(Component)]
 pub struct HotbarRoot;
@@ -124,18 +125,32 @@ pub fn hotbar_keyboard(
 
 pub fn hotbar_scroll(
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut query: Query<(&RelativeCursorPosition, &mut ScrollPosition), With<crate::inventory::screen::CatalogScrollArea>>,
     mut inventory: ResMut<CreativeInventory>,
 ) {
-    let delta: f32 = wheel.read().map(|e| e.y).sum();
-    if delta == 0.0 {
+    let delta_y: f32 = wheel.read().map(|e| e.y).sum();
+    if delta_y == 0.0 {
         return;
     }
 
-    let len = HOTBAR_SLOTS;
-    if delta > 0.0 {
-        inventory.selected_index = (inventory.selected_index + len - 1) % len;
-    } else {
-        inventory.selected_index = (inventory.selected_index + 1) % len;
+    let mut scrolled_catalog = false;
+    for (cursor_pos, mut scroll_pos) in &mut query {
+        if cursor_pos.cursor_over() {
+            scrolled_catalog = true;
+            scroll_pos.y -= delta_y * 40.0;
+            if scroll_pos.y < 0.0 {
+                scroll_pos.y = 0.0;
+            }
+        }
+    }
+
+    if !scrolled_catalog {
+        let len = HOTBAR_SLOTS;
+        if delta_y > 0.0 {
+            inventory.selected_index = (inventory.selected_index + len - 1) % len;
+        } else {
+            inventory.selected_index = (inventory.selected_index + 1) % len;
+        }
     }
 }
 
