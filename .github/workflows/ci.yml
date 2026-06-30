@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libudev-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libudev-dev libasound2-dev libfontconfig-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
