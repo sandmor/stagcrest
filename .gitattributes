@@ -1,0 +1,6 @@
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.rs text diff=rust
+*.toml text
+*.md text
+*.yml text

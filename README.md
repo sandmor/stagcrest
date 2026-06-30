@@ -19,11 +19,14 @@ Single-player embeds the server in-process (no second terminal). Remote play: ru
 - Native world persistence (redb) on the server
 - Basic circuits (wire, inverter, source, switch, repeater) via an event-driven circuit graph (default 10 Hz)
 - Main menu → connect / load → in-game flow (Bevy UI)
-- Native desktop only (no web/WASM host)
+- Linux, macOS, and Windows desktop (no web/WASM host)
 
 ## Requirements
 
-- Rust 1.78+
+- Rust 1.95+
+- **Linux**: system packages for Bevy (see CI workflow for the full list)
+- **macOS**: Xcode Command Line Tools (includes Metal support)
+- **Windows**: Visual Studio Build Tools or MSVC toolchain (DirectX 12 support)
 
 ## Build core mod (required)
 
@@ -31,7 +34,9 @@ Mods are built artifacts (not committed). Build before running:
 
 ```bash
 rustup target add wasm32-unknown-unknown
-bash scripts/build-core-mod.sh
+bash scripts/build-core-mod.sh      # Linux/macOS
+# or on Windows PowerShell:
+# .\scripts\build-core-mod.ps1
 ```
 
 This produces `mods/stagcrest-core/stagcrest-core.wasm`.
