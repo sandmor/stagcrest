@@ -1,20 +1,15 @@
 mod outline;
 mod plugin;
 mod underwater;
+mod voxel_material;
 
-pub mod gpu_voxel;
-
-pub use gpu_voxel::{
-    capture_gpu_chunk_upload, pack_gpu_chunk_upload, pack_halo_from_world, GpuChunkCache,
-    GpuChunkSyncState, GpuVoxelPlugin, GpuVoxelStats, GpuVoxelTables, VoxelGpuMemoryTier,
-    VoxelMemoryConfig,
-};
 pub use outline::{
     block_outline_mesh, spawn_block_outline, BlockOutlineMarker, OutlineMaterial,
     OutlineMaterialPlugin,
 };
 pub use plugin::{
-    atlas_pixels_to_image, BlockAtlasResource, VoxelAtlasImage, VoxelMaterialSource, VoxelCamera,
-    VoxelRenderConfig, VoxelRenderPlugin,
+    atlas_pixels_to_image, despawn_chunk_entities, sync_chunk_meshes, BlockAtlasResource,
+    ChunkEntityMarker, MeshCacheResource, PendingMeshRebuild, VoxelRenderPlugin,
 };
 pub use underwater::{UnderwaterEffect, UnderwaterPlugin};
+pub use voxel_material::{VoxelMaterial, VoxelMaterialPlugin};

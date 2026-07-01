@@ -3,10 +3,10 @@
 use bevy::prelude::*;
 use stagcrest_protocol::manifest::{BIOME_GRID_SIZE, BIOME_GRID_VOLUME};
 use stagcrest_protocol::{BlockPos, ChunkPos};
-use stagcrest_render::GpuChunkCache;
+use stagcrest_render::MeshCacheResource;
 use std::collections::HashMap;
 
-use crate::gpu_chunk_scheduler::GpuChunkScheduler;
+use crate::mesh_scheduler::MeshScheduler;
 use crate::world_replica::{CircuitPowerOverlay, WorldReplica};
 
 #[derive(Event)]
@@ -54,13 +54,13 @@ pub fn on_chunk_unloaded_remove_biome(
 
 pub fn drop_chunk_assets(
     pos: ChunkPos,
-    gpu_scheduler: &mut GpuChunkScheduler,
-    gpu_cache: &mut GpuChunkCache,
+    mesh_scheduler: &mut MeshScheduler,
+    mesh_cache: &mut MeshCacheResource,
     power: &mut CircuitPowerOverlay,
     commands: &mut Commands,
 ) {
-    gpu_scheduler.cancel(pos);
-    gpu_cache.remove(pos);
+    mesh_scheduler.cancel(pos);
+    mesh_cache.0.remove(pos);
     power.0.retain(|block_pos, _| block_pos.chunk_pos() != pos);
     commands.trigger(ChunkUnloaded(pos));
 }
@@ -68,45 +68,36 @@ pub fn drop_chunk_assets(
 pub fn unload_chunk(
     pos: ChunkPos,
     world: &mut WorldReplica,
-    gpu_scheduler: &mut GpuChunkScheduler,
-    gpu_cache: &mut GpuChunkCache,
+    mesh_scheduler: &mut MeshScheduler,
+    mesh_cache: &mut MeshCacheResource,
     power: &mut CircuitPowerOverlay,
     commands: &mut Commands,
 ) {
     world.world.remove_chunk(pos);
-    drop_chunk_assets(pos, gpu_scheduler, gpu_cache, power, commands);
+    drop_chunk_assets(pos, mesh_scheduler, mesh_cache, power, commands);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu_chunk_scheduler::RemeshUrgency;
+    use crate::mesh_scheduler::RemeshUrgency;
 
     #[test]
-    fn unload_drops_gpu_cache_and_triggers_event() {
+    fn unload_drops_mesh_cache_and_triggers_event() {
         use bevy::ecs::world::CommandQueue;
 
-        let mut scheduler = GpuChunkScheduler::default();
-        let mut cache = GpuChunkCache::default();
+        let mut scheduler = MeshScheduler::default();
+        let mut cache = MeshCacheResource::default();
         let mut power = CircuitPowerOverlay::default();
         let mut bevy_world = World::new();
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &bevy_world);
         let pos = ChunkPos { x: 0, y: 0, z: 0 };
-        cache.commit(stagcrest_render::gpu_voxel::types::GpuChunkUpload {
-            pos,
-            air: stagcrest_protocol::BlockId(0),
-            blocks: [Default::default(); stagcrest_render::gpu_voxel::types::HALO_VOLUME],
-            power: [0; stagcrest_render::gpu_voxel::types::CHUNK_BLOCKS],
-            biome: [0; stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
-            climate: None,
-            tint_cells: [stagcrest_render::gpu_voxel::types::GpuChunkTintCell::default();
-                stagcrest_render::gpu_voxel::types::BIOME_GRID_CELLS],
-        });
+        cache.0.commit_mesh(pos, stagcrest_mesh::ChunkMesh::default());
         scheduler.request(pos, RemeshUrgency::Visible, 0);
         drop_chunk_assets(pos, &mut scheduler, &mut cache, &mut power, &mut commands);
         queue.apply(&mut bevy_world);
-        assert!(!cache.contains(pos));
+        assert!(cache.0.get(pos).is_none());
         assert!(!scheduler.is_pending(pos));
     }
 }

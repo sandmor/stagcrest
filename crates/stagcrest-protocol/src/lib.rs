@@ -1,5 +1,6 @@
 pub mod block_model;
 pub mod manifest;
+pub mod tints;
 
 pub use manifest::{
     AtlasTransfer, ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot,

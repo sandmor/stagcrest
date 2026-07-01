@@ -11,7 +11,7 @@ pub mod chunk_streaming;
 pub mod debug_overlay;
 pub mod environment;
 pub mod game;
-pub mod gpu_chunk_scheduler;
+pub mod mesh_scheduler;
 pub mod inventory;
 pub mod loading;
 pub mod logging;
@@ -49,6 +49,7 @@ pub fn run_app(launch: LaunchConfig) {
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
         .add_plugins(UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
+        .add_plugins(MaterialPlugin::<stagcrest_render::VoxelMaterial>::default())
         .add_plugins((
             menu::MenuPlugin,
             loading::LoadingPlugin,

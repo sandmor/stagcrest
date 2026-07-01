@@ -14,7 +14,7 @@ use crate::player::{FlyCamera, SelectedBlock};
 use crate::targeting::BlockTarget;
 use crate::ui::UiTheme;
 use crate::world_replica::WorldReplica;
-use stagcrest_render::{GpuChunkCache, GpuVoxelStats};
+use stagcrest_render::MeshCacheResource;
 
 const LABEL_WIDTH: usize = 7;
 
@@ -104,8 +104,7 @@ fn update_debug_overlay(
     target: Res<BlockTarget>,
     selected: Res<SelectedBlock>,
     camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
-    gpu_cache: Option<Res<GpuChunkCache>>,
-    gpu_stats: Option<Res<GpuVoxelStats>>,
+    mesh_cache: Option<Res<MeshCacheResource>>,
     mut text: Query<&mut Text, With<DebugOverlayText>>,
     mut fps_smooth: Local<f32>,
 ) {
@@ -142,8 +141,7 @@ fn update_debug_overlay(
         &target,
         selected.0,
         *fps_smooth,
-        gpu_cache.as_deref(),
-        gpu_stats.as_deref(),
+        mesh_cache.as_deref(),
     );
 }
 
@@ -159,8 +157,7 @@ fn format_debug_text(
     target: &BlockTarget,
     selected_id: stagcrest_protocol::BlockId,
     fps: f32,
-    gpu_cache: Option<&GpuChunkCache>,
-    gpu_stats: Option<&GpuVoxelStats>,
+    mesh_cache: Option<&MeshCacheResource>,
 ) -> String {
     let pos = transform.translation;
     let block_pos = BlockPos::new(
@@ -227,78 +224,16 @@ fn format_debug_text(
         .and_then(|ctx| ctx.registry.block(selected_id))
         .map(|def| def.namespaced_id.as_str())
         .unwrap_or("-");
-    let gpu_chunks = gpu_cache.map(|c| c.chunk_count()).unwrap_or(0);
-    let total_instances = gpu_stats.map(|s| s.total_instances).unwrap_or(0);
-    let chunks_emitted = gpu_stats
-        .map(|s| s.chunks_emitted)
-        .unwrap_or_else(|| gpu_stats.map(|s| s.chunks_rebuilt).unwrap_or(0));
-    let chunks_compacted = gpu_stats.map(|s| s.chunks_compacted).unwrap_or(0);
-    let buffer_mb = gpu_stats
-        .map(|s| s.draw_arena_bytes as f64 / (1024.0 * 1024.0))
-        .unwrap_or(0.0);
-    let chunk_gpu_mb = gpu_stats
-        .map(|s| s.chunk_gpu_bytes as f64 / (1024.0 * 1024.0))
-        .unwrap_or(0.0);
-    let scratch_mb = gpu_stats
-        .map(|s| s.scratch_arena_bytes as f64 / (1024.0 * 1024.0))
-        .unwrap_or_else(|| gpu_stats.map(|s| s.scratch_bytes as f64 / (1024.0 * 1024.0)).unwrap_or(0.0));
-    let total_vram_mb = gpu_stats
-        .map(|s| s.total_voxel_bytes as f64 / (1024.0 * 1024.0))
-        .unwrap_or(0.0);
-    let overflow_warn = gpu_stats
-        .map(|s| {
-            if s.overflow_pending
-                || s.global_overflow_buckets > 0
-                || s.scratch_overflow_chunks > 0
-                || s.upload_failures > 0
-                || s.evictions > 0
-            {
-                "  OVERFLOW"
-            } else {
-                ""
-            }
-        })
-        .unwrap_or("");
-    let upload_failures = gpu_stats.map(|s| s.upload_failures).unwrap_or(0);
-    let evictions = gpu_stats.map(|s| s.evictions).unwrap_or(0);
-    let scratch_overflow = gpu_stats.map(|s| s.scratch_overflow_instances).unwrap_or(0);
+    let mesh_chunks = mesh_cache.map(|c| c.0.meshes().len()).unwrap_or(0);
 
     lines.push(format!("{} {selected_name}", pad_label("Selected")));
     lines.push(format!(
-        "{} render {}  gpu {}  inst {}  fps {:.0}",
+        "{} render {}  meshed {}  fps {:.0}",
         pad_label("World"),
         config.render_distance,
-        gpu_chunks,
-        total_instances,
+        mesh_chunks,
         fps
     ));
-    lines.push(format!(
-        "{} emit {}  compact {}  draw {:.1} MB  stagger {}{overflow_warn}",
-        pad_label("GPU"),
-        chunks_emitted,
-        chunks_compacted,
-        buffer_mb,
-        gpu_stats.map(|s| s.staggered_rebuild_pending).unwrap_or(0),
-    ));
-    lines.push(format!(
-        "{} tier {}  chunk {:.1} MB  scratch {:.1} MB ({} inst, max {})  total {:.1} MB",
-        pad_label("VRAM"),
-        config.gpu_memory_tier.label(),
-        chunk_gpu_mb,
-        scratch_mb,
-        gpu_stats.map(|s| s.scratch_arena_total_instances).unwrap_or(0),
-        gpu_stats.map(|s| s.scratch_arena_max_slot_capacity).unwrap_or(0),
-        total_vram_mb,
-    ));
-    if upload_failures > 0 || evictions > 0 || scratch_overflow > 0 {
-        lines.push(format!(
-            "{} fail {}  evict {}  scratch_ov {}",
-            pad_label("GPU err"),
-            upload_failures,
-            evictions,
-            scratch_overflow,
-        ));
-    }
 
     lines.join("\n")
 }

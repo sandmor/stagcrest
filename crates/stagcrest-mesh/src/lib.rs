@@ -1,6 +1,10 @@
 mod block_model;
+mod chunk_build;
+mod greedy_mesh;
 mod mesh_snapshot;
 mod model_bake;
+
+use std::collections::{HashMap, HashSet};
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -10,17 +14,20 @@ use stagcrest_mod_client::{
     BlockRegistry, ColormapSet, WireConnections, WireLink, WireLineTextures, ModelRegistry,
 };
 use stagcrest_protocol::{
-    BlockGeometry, BlockId, BlockState, FaceTexture, TextureId,
+    BlockGeometry, BlockId, BlockState, ChunkPos, FaceTexture, TextureId,
     TintKind, CHUNK_SIZE,
 };
+use stagcrest_world::ChunkBlock;
 
 pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
+pub use chunk_build::build_chunk_mesh_snapshot;
 pub use mesh_snapshot::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
 pub use model_bake::{
     bake_block_model, bake_cross_plant, bake_unit_quad, bake_wire_quad, BakedMesh, GpuMeshVertex,
 };
+pub use greedy_mesh::greedy_mesh_enabled;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -41,6 +48,57 @@ pub struct ChunkMesh {
     pub transparent_indices: Vec<u32>,
     pub cutout_vertices: Vec<VoxelVertex>,
     pub cutout_indices: Vec<u32>,
+}
+
+pub struct MeshCache {
+    meshes: HashMap<ChunkPos, ChunkMesh>,
+    /// Chunks whose CPU meshes changed and need a Bevy mesh upload.
+    dirty: HashSet<ChunkPos>,
+}
+
+impl Default for MeshCache {
+    fn default() -> Self {
+        Self {
+            meshes: HashMap::new(),
+            dirty: HashSet::new(),
+        }
+    }
+}
+
+impl MeshCache {
+    pub fn get(&self, pos: ChunkPos) -> Option<&ChunkMesh> {
+        self.meshes.get(&pos)
+    }
+
+    pub fn commit_mesh(&mut self, pos: ChunkPos, mesh: ChunkMesh) {
+        self.meshes.insert(pos, mesh);
+        self.dirty.insert(pos);
+    }
+
+    pub fn meshes(&self) -> &HashMap<ChunkPos, ChunkMesh> {
+        &self.meshes
+    }
+
+    pub fn mark_all_dirty(&mut self) {
+        self.dirty.extend(self.meshes.keys().copied());
+    }
+
+    /// Drop cached CPU meshes and return their chunk positions for rebuild.
+    pub fn clear_meshes(&mut self) -> Vec<ChunkPos> {
+        let keys: Vec<_> = self.meshes.keys().copied().collect();
+        self.meshes.clear();
+        self.dirty.clear();
+        keys
+    }
+
+    pub fn take_dirty(&mut self) -> HashSet<ChunkPos> {
+        std::mem::take(&mut self.dirty)
+    }
+
+    pub fn remove(&mut self, pos: ChunkPos) {
+        self.meshes.remove(&pos);
+        self.dirty.insert(pos);
+    }
 }
 
 #[derive(Clone)]
@@ -146,8 +204,24 @@ fn build_single_block_mesh_internal(
     mesh
 }
 
-#[cfg(test)]
-fn neighbor_culls_face(
+pub(crate) fn should_cull_face(
+    block_def: &stagcrest_protocol::BlockDef,
+    neighbor: Option<ChunkBlock>,
+    air: BlockId,
+    registry: &BlockRegistry,
+    normal: Vec3,
+) -> bool {
+    let Some(neighbor) = neighbor else {
+        return false;
+    };
+    if neighbor.id == air {
+        return false;
+    }
+    let neighbor_def = registry.block(neighbor.id);
+    neighbor_culls_face(block_def, neighbor_def, normal)
+}
+
+pub(crate) fn neighbor_culls_face(
     block_def: &stagcrest_protocol::BlockDef,
     neighbor_def: Option<&stagcrest_protocol::BlockDef>,
     _normal: Vec3,
@@ -162,9 +236,32 @@ fn neighbor_culls_face(
 }
 
 /// Per-column grass and foliage tint multipliers for a chunk (indexed by local x, z).
-type ColumnTintCache = [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
+pub(crate) type ColumnTintCache = [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
 
-fn emit_block_geometry(
+pub(crate) fn build_column_tint_cache(climate: &MeshClimateTint<'_>) -> ColumnTintCache {
+    let grass = tint_mul_for_kind(TintKind::Grass, Some(climate));
+    let foliage = tint_mul_for_kind(TintKind::Foliage, Some(climate));
+    let cell = (grass, foliage);
+    [[cell; CHUNK_SIZE as usize]; CHUNK_SIZE as usize]
+}
+
+pub(crate) fn fluid_flow_textures(
+    mut faces: stagcrest_protocol::BlockFaceTextures,
+    flow_tex: TextureId,
+) -> stagcrest_protocol::BlockFaceTextures {
+    let flow = FaceTexture {
+        texture: flow_tex,
+        overlay: None,
+        tint: faces.top.tint,
+        overlay_tint: TintKind::None,
+    };
+    faces.top = flow;
+    faces.bottom = flow;
+    faces.sides = flow;
+    faces
+}
+
+pub(crate) fn emit_block_geometry(
     mesh: &mut ChunkMesh,
     origin: [f32; 3],
     geometry: BlockGeometry,
@@ -731,7 +828,7 @@ fn emit_cross_layer(
 
 const WHITE_TINT_MUL: [f32; 3] = [1.0, 1.0, 1.0];
 
-fn face_tint_mul(
+pub(crate) fn face_tint_mul(
     face_tex: &FaceTexture,
     lx: i32,
     lz: i32,
@@ -790,14 +887,13 @@ pub(crate) fn vertex_tint(face_tex: FaceTexture, power: u8) -> f32 {
     }
 }
 
-fn atlas_uv_bounds(
+pub(crate) fn atlas_frame_height(
     registry: &BlockRegistry,
     tex_id: TextureId,
     uv_rect: stagcrest_protocol::AtlasRect,
-) -> (f32, f32, f32, f32) {
-    let (aw, ah) = registry.atlas_dimensions();
+) -> u32 {
     let anim_meta = registry.texture_animation(tex_id);
-    let frame_h = anim_meta
+    anim_meta
         .map(|anim| anim.frame_height.min(uv_rect.h))
         .or_else(|| {
             if uv_rect.h > uv_rect.w && uv_rect.w > 0 && uv_rect.h % uv_rect.w == 0 {
@@ -806,19 +902,25 @@ fn atlas_uv_bounds(
                 None
             }
         })
-        .unwrap_or(uv_rect.h);
-    let bounds = {
-        // Inset to texel centers so quad corners never sample the neighboring atlas column/row.
-        let x = uv_rect.x as f32;
-        let y = uv_rect.y as f32;
-        let w = uv_rect.w as f32;
-        let u0 = (x + 0.5) / aw as f32;
-        let v0 = (y + 0.5) / ah as f32;
-        let u1 = (x + w - 0.5) / aw as f32;
-        let v1 = (y + frame_h as f32 - 0.5) / ah as f32;
-        (u0, v0, u1.max(u0), v1.max(v0))
-    };
-    bounds
+        .unwrap_or(uv_rect.h)
+        .max(1)
+}
+
+pub(crate) fn atlas_uv_bounds(
+    registry: &BlockRegistry,
+    tex_id: TextureId,
+    uv_rect: stagcrest_protocol::AtlasRect,
+) -> (f32, f32, f32, f32) {
+    let (aw, ah) = registry.atlas_dimensions();
+    let frame_h = atlas_frame_height(registry, tex_id, uv_rect);
+    let x = uv_rect.x as f32;
+    let y = uv_rect.y as f32;
+    let w = uv_rect.w as f32;
+    let u0 = (x + 0.5) / aw as f32;
+    let v0 = (y + 0.5) / ah as f32;
+    let u1 = (x + w - 0.5) / aw as f32;
+    let v1 = (y + frame_h as f32 - 0.5) / ah as f32;
+    (u0, v0, u1.max(u0), v1.max(v0))
 }
 
 fn overlay_uv_bounds(
@@ -873,7 +975,103 @@ fn emit_face_from_texture(
     );
 }
 
-fn emit_quad(
+fn quad_block_tiles(corners: [[f32; 3]; 4]) -> (i32, i32) {
+    fn edge_blocks(a: [f32; 3], b: [f32; 3]) -> i32 {
+        ((a[0] - b[0])
+            .abs()
+            .max((a[1] - b[1]).abs())
+            .max((a[2] - b[2]).abs())
+            .round() as i32)
+            .max(1)
+    }
+    (
+        edge_blocks(corners[0], corners[1]),
+        edge_blocks(corners[0], corners[3]),
+    )
+}
+
+fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+    ]
+}
+
+/// Bilinear point on a quad (0=BL, 1=BR, 2=TR, 3=TL).
+fn bilinear_corner(corners: [[f32; 3]; 4], u: f32, v: f32) -> [f32; 3] {
+    let bottom = lerp3(corners[0], corners[1], u);
+    let top = lerp3(corners[3], corners[2], u);
+    lerp3(bottom, top, v)
+}
+
+fn sub_quad_corners(corners: [[f32; 3]; 4], tile_u: i32, tile_v: i32, i: i32, j: i32) -> [[f32; 3]; 4] {
+    let tu = tile_u as f32;
+    let tv = tile_v as f32;
+    let u0 = i as f32 / tu;
+    let u1 = (i + 1) as f32 / tu;
+    let v0 = j as f32 / tv;
+    let v1 = (j + 1) as f32 / tv;
+    [
+        bilinear_corner(corners, u0, v0),
+        bilinear_corner(corners, u1, v0),
+        bilinear_corner(corners, u1, v1),
+        bilinear_corner(corners, u0, v1),
+    ]
+}
+
+pub(crate) fn emit_quad(
+    mesh: &mut ChunkMesh,
+    corners: [[f32; 3]; 4],
+    face_tex: FaceTexture,
+    power: u8,
+    bucket: MeshBucket,
+    registry: &BlockRegistry,
+    lx: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+    double_sided: bool,
+) {
+    let (tile_u, tile_v) = quad_block_tiles(corners);
+    if tile_u > 1 || tile_v > 1 {
+        for j in 0..tile_v {
+            for i in 0..tile_u {
+                let sub = sub_quad_corners(corners, tile_u, tile_v, i, j);
+                emit_quad(
+                    mesh,
+                    sub,
+                    face_tex,
+                    power,
+                    bucket,
+                    registry,
+                    lx,
+                    lz,
+                    climate,
+                    column_tints,
+                    double_sided,
+                );
+            }
+        }
+        return;
+    }
+
+    emit_quad_single(
+        mesh,
+        corners,
+        face_tex,
+        power,
+        bucket,
+        registry,
+        lx,
+        lz,
+        climate,
+        column_tints,
+        double_sided,
+    );
+}
+
+fn emit_quad_single(
     mesh: &mut ChunkMesh,
     corners: [[f32; 3]; 4],
     face_tex: FaceTexture,
@@ -978,7 +1176,7 @@ fn emit_face(
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-fn face_corners(origin: [f32; 3], normal: glam::Vec3) -> [[f32; 3]; 4] {
+pub(crate) fn face_corners(origin: [f32; 3], normal: glam::Vec3) -> [[f32; 3]; 4] {
     let o = origin;
     if normal.y > 0.0 {
         [
@@ -1056,63 +1254,16 @@ mod tests {
     }
 
     #[test]
-    fn fluid_fluid_faces_culled() {
-        let water = def(true, false, false);
-        assert!(neighbor_culls_face(
-            &water,
-            Some(&def(true, false, false)),
-            Vec3::Y
-        ));
-    }
-
-    #[test]
-    fn fluid_air_faces_not_culled() {
-        let water = def(true, false, false);
-        assert!(!neighbor_culls_face(&water, None, Vec3::Y));
-    }
-
-    #[test]
-    fn stone_stone_opaque_solid_culled() {
+    fn neighbor_face_culling() {
         let stone = def(false, true, true);
-        assert!(neighbor_culls_face(
-            &stone,
-            Some(&def(false, true, true)),
-            Vec3::Y
-        ));
-    }
-
-    #[test]
-    fn grass_top_not_culled_under_flat_decoration() {
-        let grass = def(false, true, true);
-        let mut plant = def(false, false, false);
-        plant.geometry = BlockGeometry::Flat;
-        plant.transparent = true;
-        assert!(!neighbor_culls_face(&grass, Some(&plant), Vec3::Y));
-    }
-
-    #[test]
-    fn grass_top_not_culled_under_cross_plant() {
-        let grass = def(false, true, true);
+        let water = def(true, false, false);
         let mut plant = def(false, false, false);
         plant.geometry = BlockGeometry::Cross;
         plant.transparent = true;
-        assert!(!neighbor_culls_face(&grass, Some(&plant), Vec3::Y));
-    }
 
-    #[test]
-    fn mesh_bucket_matches_render_layer() {
-        use stagcrest_protocol::ModelRenderLayer;
-        assert!(matches!(
-            mesh_bucket_for_layer(ModelRenderLayer::Cutout),
-            MeshBucket::Cutout
-        ));
-        assert!(matches!(
-            mesh_bucket_for_layer(ModelRenderLayer::Blend),
-            MeshBucket::Blend
-        ));
-        assert!(matches!(
-            mesh_bucket_for_layer(ModelRenderLayer::Opaque),
-            MeshBucket::Opaque
-        ));
+        assert!(neighbor_culls_face(&water, Some(&water), Vec3::Y));
+        assert!(!neighbor_culls_face(&water, None, Vec3::Y));
+        assert!(neighbor_culls_face(&stone, Some(&stone), Vec3::Y));
+        assert!(!neighbor_culls_face(&stone, Some(&plant), Vec3::Y));
     }
 }

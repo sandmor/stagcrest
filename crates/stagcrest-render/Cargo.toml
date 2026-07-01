@@ -20,7 +20,3 @@ default = []
 
 [dev-dependencies]
 naga = "29.0.3"
-
-[[test]]
-name = "gpu_block_meta"
-path = "tests/gpu_block_meta.rs"

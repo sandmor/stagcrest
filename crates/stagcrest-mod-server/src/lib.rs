@@ -15,7 +15,8 @@ mod worldgen;
 
 pub use assets::{AssetError, AssetReader, FsAssetReader};
 pub use atlas::TextureAtlas;
-pub use block_tints::{apply_block_face_tints, face_texture_for};
+pub use block_tints::apply_block_face_tints;
+pub use stagcrest_protocol::tints::face_texture_for;
 pub use colormap::{sample_colormap_rgb, ColormapSet};
 pub use host::{load_mods, ModError, ModHost};
 pub use mount_placement::{mount_can_attach, validate_mount_placement};

@@ -4,12 +4,11 @@ use bevy::prelude::*;
 use bevy::tasks::{block_on, IoTaskPool, Task};
 use futures_lite::future;
 use stagcrest_mod_client::content::ContentRuntime;
-use stagcrest_render::{atlas_pixels_to_image, BlockAtlasResource, VoxelAtlasImage};
 use crate::net_client::{connect_tcp, GameNetClient};
 use crate::world_replica::WorldReplica;
 use stagcrest_protocol::manifest::{AtlasTransfer, ContentManifest};
 use stagcrest_protocol::BlockId;
-use stagcrest_render::{GpuChunkCache, GpuVoxelTables};
+use stagcrest_render::{BlockAtlasResource, MeshCacheResource};
 
 pub struct LoadingPlugin;
 
@@ -119,7 +118,7 @@ fn poll_connection_system(
     mut commands: Commands,
     config: Res<GameConfig>,
     mut next_state: ResMut<NextState<AppState>>,
-    mut images: ResMut<Assets<Image>>,
+    _images: ResMut<Assets<Image>>,
 ) {
     if state.done {
         if state.error.is_none() {
@@ -169,8 +168,6 @@ fn poll_connection_system(
         let world = WorldReplica::new(stagcrest_world::World::with_lru_capacity(lru_cap, air));
 
         let fluid_anim = fluid_anim_uniform(&runtime.registry, runtime.atlas.height);
-        let gpu_tables = GpuVoxelTables::build(&runtime.registry, &runtime.models);
-        let atlas_image = images.add(atlas_pixels_to_image(&runtime.atlas));
 
         commands.insert_resource(ModContext {
             registry: runtime.registry,
@@ -188,9 +185,7 @@ fn poll_connection_system(
             water_tint: Color::srgb(water_rgb[0], water_rgb[1], water_rgb[2]),
             fluid_anim,
         });
-        commands.insert_resource(VoxelAtlasImage(atlas_image));
-        commands.insert_resource(GpuChunkCache::default());
-        commands.insert_resource(gpu_tables);
+        commands.insert_resource(MeshCacheResource::default());
         net.handshake_done = true;
     }
 

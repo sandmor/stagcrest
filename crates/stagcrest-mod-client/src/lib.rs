@@ -9,7 +9,8 @@ mod registry;
 
 pub use atlas::TextureAtlas;
 pub use biome::{BiomeRegistryClient, InterpolatedEnvironment};
-pub use block_tints::{apply_block_face_tints, face_texture_for};
+pub use block_tints::apply_block_face_tints;
+pub use stagcrest_protocol::tints::face_texture_for;
 pub use chunk_tint::{build_chunk_tint_cells, ChunkTintCell};
 pub use colormap::{infer_vertical_strip_animation, sample_colormap_rgb, ColormapSet};
 pub use wire_visual::{

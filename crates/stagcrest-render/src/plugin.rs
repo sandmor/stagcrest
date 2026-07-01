@@ -1,8 +1,21 @@
+use bevy::asset::RenderAssetUsages;
 use bevy::image::{Image, ImageSampler};
 use bevy::prelude::*;
-use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use stagcrest_mesh::{ChunkMesh, MeshCache};
 use stagcrest_mod_client::TextureAtlas;
+use stagcrest_protocol::ChunkPos;
+
+use crate::voxel_material::{VoxelMaterial, VoxelMaterialPlugin};
+
+#[derive(Resource, Default)]
+pub struct MeshCacheResource(pub MeshCache);
+
+/// Chunks that must be remeshed after atlas/tint changes invalidate cached geometry.
+#[derive(Resource, Default)]
+pub struct PendingMeshRebuild {
+    pub chunks: Vec<ChunkPos>,
+}
 
 #[derive(Resource)]
 pub struct BlockAtlasResource {
@@ -12,48 +25,6 @@ pub struct BlockAtlasResource {
     pub water_tint: Color,
     /// (frame_count, frame_uv_step, frametime_secs, elapsed_secs) — `.w` updated each frame
     pub fluid_anim: Vec4,
-}
-
-#[derive(Resource, Clone, ExtractResource)]
-pub struct VoxelAtlasImage(pub Handle<Image>);
-
-#[derive(Resource, Clone, ExtractResource, Default)]
-pub struct VoxelMaterialSource {
-    pub grass_tint: Color,
-    pub foliage_tint: Color,
-    pub water_tint: Color,
-    pub fluid_anim: Vec4,
-    pub atlas_width: f32,
-    pub atlas_height: f32,
-}
-
-impl VoxelMaterialSource {
-    pub fn from_atlas(atlas: &BlockAtlasResource) -> Self {
-        Self {
-            grass_tint: atlas.grass_tint,
-            foliage_tint: atlas.foliage_tint,
-            water_tint: atlas.water_tint,
-            fluid_anim: atlas.fluid_anim,
-            atlas_width: atlas.atlas.width as f32,
-            atlas_height: atlas.atlas.height as f32,
-        }
-    }
-}
-
-fn sync_voxel_material_source(
-    atlas: Option<Res<BlockAtlasResource>>,
-    material: Option<ResMut<VoxelMaterialSource>>,
-    mut commands: Commands,
-) {
-    let Some(atlas) = atlas else {
-        return;
-    };
-    let next = VoxelMaterialSource::from_atlas(atlas.as_ref());
-    if let Some(mut material) = material {
-        *material = next;
-    } else {
-        commands.insert_resource(next);
-    }
 }
 
 pub fn atlas_pixels_to_image(atlas: &TextureAtlas) -> Image {
@@ -72,35 +43,300 @@ pub fn atlas_pixels_to_image(atlas: &TextureAtlas) -> Image {
     image
 }
 
-#[derive(Resource, Default, Clone, ExtractResource)]
-pub struct VoxelCamera {
-    pub view_proj: glam::Mat4,
-    pub position: glam::Vec3,
+/// Render bucket: 0 = opaque, 1 = blend, 2 = cutout.
+#[derive(Component)]
+pub struct ChunkEntityMarker {
+    pub pos: ChunkPos,
+    pub bucket: u8,
 }
 
-/// Horizontal / vertical chunk visibility radius for GPU rebuild passes.
-#[derive(Resource, Clone, ExtractResource)]
-pub struct VoxelRenderConfig {
-    pub horizontal: i32,
-    pub vertical: i32,
-}
-
-impl Default for VoxelRenderConfig {
-    fn default() -> Self {
-        Self {
-            horizontal: 8,
-            vertical: 4,
-        }
-    }
-}
+type AtlasKey = [u32; 14];
 
 pub struct VoxelRenderPlugin;
 
 impl Plugin for VoxelRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<VoxelCamera>()
-            .init_resource::<VoxelRenderConfig>()
-            .init_resource::<VoxelMaterialSource>()
-            .add_systems(PostUpdate, sync_voxel_material_source);
+        app.add_plugins(VoxelMaterialPlugin)
+            .init_resource::<MeshCacheResource>()
+            .add_systems(Update, sync_chunk_meshes);
+    }
+}
+
+fn block_atlas_image(atlas: &TextureAtlas) -> Image {
+    atlas_pixels_to_image(atlas)
+}
+
+pub fn sync_chunk_meshes(
+    mut commands: Commands,
+    mut cache: ResMut<MeshCacheResource>,
+    atlas: Option<Res<BlockAtlasResource>>,
+    time: Res<Time>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<VoxelMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut opaque_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut blend_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut cutout_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut last_atlas_key: Local<Option<AtlasKey>>,
+    mut atlas_image: Local<Option<(AtlasKey, Handle<Image>)>>,
+    existing: Query<(Entity, &ChunkEntityMarker)>,
+) {
+    let Some(atlas_res) = atlas else {
+        return;
+    };
+
+    let grass = atlas_res.grass_tint.to_linear();
+    let foliage = atlas_res.foliage_tint.to_linear();
+    let water = atlas_res.water_tint.to_linear();
+    let fluid_time = time.elapsed_secs();
+    let mut fluid_anim = atlas_res.fluid_anim;
+    fluid_anim.w = fluid_time;
+    let atlas_key = [
+        atlas_res.atlas.width,
+        atlas_res.atlas.height,
+        grass.red.to_bits(),
+        grass.green.to_bits(),
+        grass.blue.to_bits(),
+        foliage.red.to_bits(),
+        foliage.green.to_bits(),
+        foliage.blue.to_bits(),
+        water.red.to_bits(),
+        water.green.to_bits(),
+        water.blue.to_bits(),
+        fluid_anim.x.to_bits(),
+        fluid_anim.y.to_bits(),
+        fluid_anim.z.to_bits(),
+    ];
+
+    let atlas_changed = *last_atlas_key != Some(atlas_key);
+    if atlas_changed {
+        *opaque_mat = None;
+        *blend_mat = None;
+        *cutout_mat = None;
+        *last_atlas_key = Some(atlas_key);
+        let stale = cache.0.clear_meshes();
+        if !stale.is_empty() {
+            commands.insert_resource(PendingMeshRebuild { chunks: stale });
+        }
+    }
+
+    if let Some(handle) = opaque_mat.as_ref() {
+        if let Some(mut mat) = materials.get_mut(handle) {
+            mat.fluid_anim.w = fluid_time;
+        }
+    }
+    if let Some(handle) = blend_mat.as_ref() {
+        if let Some(mut mat) = materials.get_mut(handle) {
+            mat.fluid_anim.w = fluid_time;
+        }
+    }
+    if let Some(handle) = cutout_mat.as_ref() {
+        if let Some(mut mat) = materials.get_mut(handle) {
+            mat.fluid_anim.w = fluid_time;
+        }
+    }
+
+    let dirty = cache.0.take_dirty();
+    if dirty.is_empty() {
+        return;
+    }
+
+    let image_handle = match atlas_image.as_ref() {
+        Some((key, handle)) if *key == atlas_key => handle.clone(),
+        _ => {
+            let handle = images.add(block_atlas_image(&atlas_res.atlas));
+            *atlas_image = Some((atlas_key, handle.clone()));
+            handle
+        }
+    };
+
+    let base_tints = || VoxelMaterial {
+        atlas: image_handle.clone(),
+        grass_tint: grass,
+        foliage_tint: foliage,
+        power_tint_dark: LinearRgba::new(0.4, 0.0, 0.0, 1.0),
+        power_tint_bright: LinearRgba::new(1.0, 0.0, 0.0, 1.0),
+        material_flags: Vec4::ZERO,
+        water_tint: water,
+        fluid_anim,
+        alpha_mode: AlphaMode::Opaque,
+    };
+
+    let opaque_handle = opaque_mat.get_or_insert_with(|| materials.add(base_tints()));
+    let blend_handle = blend_mat.get_or_insert_with(|| {
+        materials.add(VoxelMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..base_tints()
+        })
+    });
+    let cutout_handle = cutout_mat.get_or_insert_with(|| {
+        materials.add(VoxelMaterial {
+            material_flags: Vec4::new(1.0, 0.0, 0.0, 0.0),
+            alpha_mode: AlphaMode::Mask(0.5),
+            ..base_tints()
+        })
+    });
+
+    for pos in &dirty {
+        let Some(mesh) = cache.0.get(*pos) else {
+            for (entity, chunk) in &existing {
+                if chunk.pos == *pos {
+                    commands.entity(entity).despawn();
+                }
+            }
+            continue;
+        };
+
+        sync_bucket(
+            &mut commands,
+            &mut meshes,
+            &existing,
+            *pos,
+            0,
+            bucket_has_vertices(&mesh, 0),
+            &mesh,
+            opaque_handle.clone(),
+        );
+        sync_bucket(
+            &mut commands,
+            &mut meshes,
+            &existing,
+            *pos,
+            1,
+            bucket_has_vertices(&mesh, 1),
+            &mesh,
+            blend_handle.clone(),
+        );
+        sync_bucket(
+            &mut commands,
+            &mut meshes,
+            &existing,
+            *pos,
+            2,
+            bucket_has_vertices(&mesh, 2),
+            &mesh,
+            cutout_handle.clone(),
+        );
+    }
+}
+
+fn bucket_has_vertices(mesh: &ChunkMesh, bucket: u8) -> bool {
+    match bucket {
+        1 => !mesh.transparent_vertices.is_empty(),
+        2 => !mesh.cutout_vertices.is_empty(),
+        _ => !mesh.opaque_vertices.is_empty(),
+    }
+}
+
+fn sync_bucket(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    existing: &Query<(Entity, &ChunkEntityMarker)>,
+    pos: ChunkPos,
+    bucket: u8,
+    has_vertices: bool,
+    mesh: &ChunkMesh,
+    mat: Handle<VoxelMaterial>,
+) {
+    if !has_vertices {
+        despawn_bucket(commands, existing, pos, bucket);
+        return;
+    }
+
+    sync_one(
+        commands,
+        meshes,
+        existing,
+        pos,
+        bucket,
+        chunk_to_mesh(mesh, bucket),
+        mat,
+    );
+}
+
+fn despawn_bucket(
+    commands: &mut Commands,
+    existing: &Query<(Entity, &ChunkEntityMarker)>,
+    pos: ChunkPos,
+    bucket: u8,
+) {
+    for (entity, chunk) in existing {
+        if chunk.pos == pos && chunk.bucket == bucket {
+            commands.entity(entity).despawn();
+            return;
+        }
+    }
+}
+
+fn sync_one(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    existing: &Query<(Entity, &ChunkEntityMarker)>,
+    pos: ChunkPos,
+    bucket: u8,
+    mesh_data: Mesh,
+    mat: Handle<VoxelMaterial>,
+) {
+    let mesh_handle = meshes.add(mesh_data);
+    for (entity, chunk) in existing {
+        if chunk.pos == pos && chunk.bucket == bucket {
+            commands
+                .entity(entity)
+                .insert((Mesh3d(mesh_handle.clone()), MeshMaterial3d(mat.clone())));
+            return;
+        }
+    }
+    commands.spawn((
+        ChunkEntityMarker { pos, bucket },
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(mat),
+    ));
+}
+
+fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
+    use bevy::mesh::{Indices, PrimitiveTopology};
+
+    let (vertices, indices) = match bucket {
+        1 => (&chunk.transparent_vertices, &chunk.transparent_indices),
+        2 => (&chunk.cutout_vertices, &chunk.cutout_indices),
+        _ => (&chunk.opaque_vertices, &chunk.opaque_indices),
+    };
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all());
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_OVERLAY_UV,
+        vertices.iter().map(|v| v.overlay_uv).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_BLOCK_TINT,
+        vertices.iter().map(|v| v.tint).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_OVERLAY_TINT,
+        vertices.iter().map(|v| v.overlay_tint).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_TINT_MUL,
+        vertices.iter().map(|v| v.tint_mul).collect::<Vec<_>>(),
+    );
+    mesh.insert_indices(Indices::U32(indices.clone()));
+
+    mesh
+}
+
+pub fn despawn_chunk_entities(
+    commands: &mut Commands,
+    query: &Query<Entity, With<ChunkEntityMarker>>,
+) {
+    for entity in query {
+        commands.entity(entity).despawn();
     }
 }
