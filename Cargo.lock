@@ -4452,6 +4452,8 @@ dependencies = [
  "clap",
  "futures-lite",
  "glam 0.29.3",
+ "serde",
+ "serde_json",
  "stagcrest-circuit",
  "stagcrest-mesh",
  "stagcrest-minimap",

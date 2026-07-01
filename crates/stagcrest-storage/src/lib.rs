@@ -13,3 +13,5 @@ pub use port::{
     encode_chunk_key, load_inactive_chunk, store_inactive_chunk, ChunkStorage, StorageError,
 };
 pub use redb::RedbChunkStorage;
+
+pub const DATA_DIR: &str = "data";

@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use stagcrest_protocol::ChunkPos;
-use stagcrest_storage::{RedbChunkStorage, StorageError, WorldMeta};
+use stagcrest_storage::{RedbChunkStorage, StorageError, WorldMeta, DATA_DIR};
 
 use crate::persistence::ChunkPersistence;
 
@@ -18,7 +18,7 @@ pub struct WorldSession {
 impl WorldSession {
     pub fn open(world_name: impl Into<String>, world_seed: u64) -> Result<Self, StorageError> {
         let world_name = world_name.into();
-        let path = Path::new("worlds").join(&world_name).join("world.redb");
+        let path = Path::new(DATA_DIR).join("worlds").join(&world_name).join("world.redb");
         let storage = Arc::new(RedbChunkStorage::open(path)?);
         let mut meta = WorldMeta::load(storage.as_ref())?;
         meta.world_seed = world_seed;

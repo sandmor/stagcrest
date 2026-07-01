@@ -25,6 +25,7 @@ pub enum AppState {
     #[default]
     MainMenu,
     WorldSelect,
+    Connect,
     Loading,
     InGame,
     Paused,
@@ -114,7 +115,8 @@ impl Plugin for GamePlugin {
                 (setup_game_camera, setup_block_outline),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session)
-            .add_systems(OnEnter(AppState::WorldSelect), cleanup_game_session);
+            .add_systems(OnEnter(AppState::WorldSelect), cleanup_game_session)
+            .add_systems(OnEnter(AppState::Connect), cleanup_game_session);
     }
 }
 

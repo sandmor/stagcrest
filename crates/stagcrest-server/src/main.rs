@@ -13,7 +13,7 @@ struct Args {
     #[arg(long, default_value = "0.0.0.0:4242")]
     bind: String,
 
-    /// World name (storage folder under worlds/).
+    /// World name (storage folder under data/worlds/).
     #[arg(long, default_value = "default")]
     world: String,
 
@@ -34,7 +34,7 @@ struct Args {
 enum Command {
     /// Export a PNG minimap of all saved chunks in a world.
     ExportMinimap {
-        /// World name (storage folder under worlds/).
+        /// World name (storage folder under data/worlds/).
         #[arg(long, default_value = "default")]
         world: String,
 

@@ -8,6 +8,7 @@ pub mod block_icons;
 pub mod block_outline;
 pub mod camera;
 pub mod chunk_streaming;
+pub mod connect_screen;
 pub mod debug_overlay;
 pub mod environment;
 pub mod game;
@@ -54,6 +55,7 @@ pub fn run_app(launch: LaunchConfig) {
         .add_plugins(MaterialPlugin::<stagcrest_render::VoxelMaterial>::default())
         .add_plugins((
             menu::MenuPlugin,
+            connect_screen::ConnectScreenPlugin,
             world_select::WorldSelectPlugin,
             loading::LoadingPlugin,
             game::GamePlugin,

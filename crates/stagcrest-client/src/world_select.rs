@@ -1,10 +1,13 @@
 use crate::game::AppState;
+use crate::net_client::GameNetClient;
 use crate::ui::UiTheme;
 use bevy::prelude::*;
 use bevy::text::{EditableText, TextCursorStyle, TextLayout};
-use stagcrest_storage::{RedbChunkStorage, WorldMeta};
+use stagcrest_storage::{RedbChunkStorage, WorldMeta, DATA_DIR};
 
-const WORLDS_DIR: &str = "worlds";
+fn worlds_dir() -> std::path::PathBuf {
+    std::path::Path::new(DATA_DIR).join("worlds")
+}
 
 #[derive(Resource, Default)]
 pub struct SelectedWorld {
@@ -96,7 +99,7 @@ struct NewWorldNameField;
 struct NewWorldSeedField;
 
 fn scan_worlds(list: &mut Vec<WorldEntry>) {
-    let dir = std::path::Path::new(WORLDS_DIR);
+    let dir = worlds_dir();
     list.clear();
     if let Ok(read) = std::fs::read_dir(dir) {
         for entry in read.flatten() {
@@ -490,6 +493,7 @@ fn world_select_button_system(
     mut form: ResMut<CreateWorldForm>,
     mut pending_delete: ResMut<PendingDelete>,
     mut selected_entry: ResMut<SelectedEntryName>,
+    mut net: ResMut<GameNetClient>,
     theme: Res<UiTheme>,
     mut queries: ParamSet<(
         Query<
@@ -555,6 +559,8 @@ fn world_select_button_system(
                         if let Some(entry) = world_list.0.iter().find(|e| e.name == name) {
                             selected_world.world_name = entry.name.clone();
                             selected_world.world_seed = entry.seed;
+                            net.connect_addr = None;
+                            net.embedded = true;
                             next_state.set(AppState::Loading);
                         }
                     }
@@ -601,7 +607,7 @@ fn world_select_button_system(
                     let seed: u64 = seed_text.parse().unwrap_or(0);
                     let final_seed = if seed == 0 { rand_seed() } else { seed };
 
-                    let world_path = std::path::Path::new(WORLDS_DIR).join(&name);
+                    let world_path = worlds_dir().join(&name);
                     if world_path.exists() {
                         tracing::warn!("world {name} already exists");
                         continue;
@@ -628,6 +634,8 @@ fn world_select_button_system(
                     *form = CreateWorldForm;
                     selected_world.world_name = name;
                     selected_world.world_seed = final_seed;
+                    net.connect_addr = None;
+                    net.embedded = true;
                     next_state.set(AppState::Loading);
                 }
                 WorldSelectAction::Delete(name) => {
@@ -640,7 +648,7 @@ fn world_select_button_system(
                     let Some(ref name) = pending_delete.0 else {
                         return;
                     };
-                    let path = std::path::Path::new(WORLDS_DIR).join(name);
+                    let path = worlds_dir().join(name);
                     if let Err(e) = std::fs::remove_dir_all(&path) {
                         tracing::error!("failed to delete world {name}: {e}");
                     }

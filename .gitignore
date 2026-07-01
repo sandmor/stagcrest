@@ -5,8 +5,8 @@
 .DS_Store
 mods/**/*.wasm
 
-# Local world saves (native persistence)
-/worlds/
+# Local data (worlds, configs, etc.)
+/data/
 
 # Local Minecraft-format resource packs (not shipped in the repo).
 /resourcepacks/*

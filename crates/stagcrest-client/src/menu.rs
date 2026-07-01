@@ -22,6 +22,7 @@ struct MainMenuRoot;
 #[derive(Component)]
 enum MenuButton {
     Play,
+    Connect,
     Quit,
 }
 
@@ -52,6 +53,7 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
                 TextColor(theme.text_muted),
             ));
             spawn_button(parent, "Play", MenuButton::Play, &theme);
+            spawn_button(parent, "Connect", MenuButton::Connect, &theme);
             spawn_button(parent, "Quit", MenuButton::Quit, &theme);
         });
 }
@@ -97,6 +99,9 @@ fn menu_button_system(
                     } else {
                         next_state.set(AppState::WorldSelect);
                     }
+                }
+                MenuButton::Connect => {
+                    next_state.set(AppState::Connect);
                 }
                 MenuButton::Quit => {
                     exit.write(AppExit::Success);
