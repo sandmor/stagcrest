@@ -173,7 +173,8 @@ mod tests {
 
     fn stone_registry() -> BlockRegistry {
         let mut reg = BlockRegistry::new();
-        let stone_tex = reg.register_texture("stagcrest:stone".into(), 16, 16, vec![0; 16 * 16 * 4]);
+        let stone_tex =
+            reg.register_texture("stagcrest:stone".into(), 16, 16, vec![0; 16 * 16 * 4]);
         reg.register_block(BlockDef {
             id: BlockId(1),
             namespaced_id: "stagcrest:stone".into(),
@@ -208,6 +209,7 @@ mod tests {
             hardness: 1.0,
             circuit: None,
             push_reaction: stagcrest_protocol::PushReaction::Block,
+            map_color: [128, 128, 128],
         });
         reg
     }
@@ -287,6 +289,7 @@ mod tests {
             hardness: 0.0,
             circuit: None,
             push_reaction: PushReaction::Destroy,
+            map_color: [128, 128, 128],
         });
 
         let air = BlockId(0);

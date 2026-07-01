@@ -25,7 +25,9 @@ clap.workspace = true
 glam.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
-futures-lite.workspace = true
+stagcrest-minimap.workspace = true
+image.workspace = true
+indicatif.workspace = true
 
 [dev-dependencies]
 stagcrest-mod-client.workspace = true

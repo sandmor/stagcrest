@@ -13,6 +13,7 @@ members = [
     "crates/stagcrest-server",
     "crates/stagcrest-client",
     "crates/stagcrest-render",
+    "crates/stagcrest-minimap",
     "mods/stagcrest-core",
 ]
 
@@ -75,6 +76,7 @@ tokio = { version = "1", features = [
 clap = { version = "4", features = ["derive"] }
 socket2 = "0.5"
 futures-lite = "2.6"
+indicatif = "0.17"
 
 stagcrest-protocol = { path = "crates/stagcrest-protocol" }
 stagcrest-storage = { path = "crates/stagcrest-storage" }
@@ -88,6 +90,7 @@ stagcrest-net = { path = "crates/stagcrest-net" }
 stagcrest-server = { path = "crates/stagcrest-server" }
 stagcrest-client = { path = "crates/stagcrest-client" }
 stagcrest-render = { path = "crates/stagcrest-render" }
+stagcrest-minimap = { path = "crates/stagcrest-minimap" }
 
 [profile.release]
 lto = true

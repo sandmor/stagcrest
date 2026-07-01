@@ -1,6 +1,11 @@
 pub mod block_model;
+pub mod colormap;
 pub mod manifest;
+pub mod map_colors;
 pub mod tints;
+
+pub use colormap::sample_colormap_rgb;
+pub use map_colors::default_map_color;
 
 pub use manifest::{
     AtlasTransfer, ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot,
@@ -703,6 +708,7 @@ pub struct BlockDef {
     pub render_layer: ModelRenderLayer,
     #[serde(default)]
     pub push_reaction: PushReaction,
+    pub map_color: [u8; 3],
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -796,7 +802,7 @@ pub struct AtlasRect {
     pub h: u32,
 }
 
-fn floor_div(a: i32, b: i32) -> i32 {
+pub fn floor_div(a: i32, b: i32) -> i32 {
     if a >= 0 {
         a / b
     } else {

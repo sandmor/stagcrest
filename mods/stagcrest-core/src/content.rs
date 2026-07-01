@@ -1,7 +1,8 @@
 use stagcrest_mod_sdk::{
-    CircuitKindRequest, ContentRegistrar, PushReaction, RegisterBlockRequest, RegisterCircuitRequest,
-    RegisterTextureRequest, RenderLayer,
+    CircuitKindRequest, ContentRegistrar, PushReaction, RegisterBlockRequest,
+    RegisterCircuitRequest, RegisterTextureRequest, RenderLayer,
 };
+use stagcrest_protocol::default_map_color;
 
 pub fn register_content(reg: &mut impl ContentRegistrar) {
     register_textures(reg);
@@ -31,7 +32,8 @@ fn register_fluid_texture_from_pack(reg: &mut impl ContentRegistrar, id: &str, _
     fluid_mask_texture(reg, id, 180);
 }
 
-fn solid_color_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g: u8, b: u8) {
+fn solid_color_texture(reg: &mut impl ContentRegistrar, name: &str) {
+    let [r, g, b] = default_map_color(name);
     let mut rgba = Vec::with_capacity(16 * 16 * 4);
     for _ in 0..(16 * 16) {
         rgba.extend_from_slice(&[r, g, b, 255]);
@@ -44,7 +46,8 @@ fn solid_color_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g: u8
     });
 }
 
-fn cutout_fallback_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g: u8, b: u8) {
+fn cutout_fallback_texture(reg: &mut impl ContentRegistrar, name: &str) {
+    let [r, g, b] = default_map_color(name);
     let mut rgba = Vec::with_capacity(16 * 16 * 4);
     for z in 0..16u8 {
         for x in 0..16u8 {
@@ -62,12 +65,10 @@ fn cutout_fallback_texture(reg: &mut impl ContentRegistrar, name: &str, r: u8, g
     });
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
 pub(crate) fn register_plant_texture_from_pack(
     reg: &mut impl ContentRegistrar,
     id: &str,
     mc_name: &str,
-    fallback: (u8, u8, u8),
 ) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -81,17 +82,11 @@ pub(crate) fn register_plant_texture_from_pack(
             return;
         }
     }
-    let (r, g, b) = fallback;
-    cutout_fallback_texture(reg, id, r, g, b);
+    cutout_fallback_texture(reg, id);
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
-pub(crate) fn register_texture_from_pack(
-    reg: &mut impl ContentRegistrar,
-    id: &str,
-    mc_name: &str,
-    fallback: (u8, u8, u8),
-) {
+pub(crate) fn register_texture_from_pack(reg: &mut impl ContentRegistrar, id: &str, mc_name: &str) {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some((w, h, rgba)) = stagcrest_mod_sdk::load_texture_from_pack(mc_name) {
@@ -104,8 +99,7 @@ pub(crate) fn register_texture_from_pack(
             return;
         }
     }
-    let (r, g, b) = fallback;
-    solid_color_texture(reg, id, r, g, b);
+    solid_color_texture(reg, id);
 }
 
 /// Register a texture only when the resource pack provides it (no solid-color fallback).
@@ -129,131 +123,64 @@ pub(crate) fn register_optional_texture_from_pack(
 }
 
 fn register_textures(reg: &mut impl ContentRegistrar) {
-    solid_color_texture(reg, "stagcrest:air", 0, 0, 0);
-    register_texture_from_pack(reg, "stagcrest:stone", "stone", (120, 120, 120));
-    register_texture_from_pack(reg, "stagcrest:dirt", "dirt", (134, 96, 67));
-    register_texture_from_pack(reg, "stagcrest:grass_top", "grass_block_top", (95, 159, 53));
-    register_texture_from_pack(
-        reg,
-        "stagcrest:grass_side",
-        "grass_block_side",
-        (134, 96, 67),
-    );
+    solid_color_texture(reg, "stagcrest:air");
+    register_texture_from_pack(reg, "stagcrest:stone", "stone");
+    register_texture_from_pack(reg, "stagcrest:dirt", "dirt");
+    register_texture_from_pack(reg, "stagcrest:grass_top", "grass_block_top");
+    register_texture_from_pack(reg, "stagcrest:grass_side", "grass_block_side");
     register_texture_from_pack(
         reg,
         "stagcrest:grass_side_overlay",
         "grass_block_side_overlay",
-        (134, 96, 67),
     );
-    register_texture_from_pack(reg, "stagcrest:cobblestone", "cobblestone", (100, 100, 100));
-    register_texture_from_pack(reg, "stagcrest:oak_planks", "oak_planks", (162, 130, 78));
-    register_texture_from_pack(reg, "stagcrest:glass", "glass", (200, 230, 255));
+    register_texture_from_pack(reg, "stagcrest:cobblestone", "cobblestone");
+    register_texture_from_pack(reg, "stagcrest:oak_planks", "oak_planks");
+    register_texture_from_pack(reg, "stagcrest:glass", "glass");
     register_fluid_texture_from_pack(reg, "stagcrest:water_still", "water_still");
     register_fluid_texture_from_pack(reg, "stagcrest:water_flow", "water_flow");
-    register_texture_from_pack(reg, "stagcrest:bedrock", "bedrock", (40, 40, 40));
-    register_texture_from_pack(
+    register_texture_from_pack(reg, "stagcrest:bedrock", "bedrock");
+    register_texture_from_pack(reg, "stagcrest:redstone_dust_dot", "redstone_dust_dot");
+    register_texture_from_pack(reg, "stagcrest:redstone_dust_line", "redstone_dust_line0");
+    register_texture_from_pack(reg, "stagcrest:redstone_dust_line1", "redstone_dust_line1");
+    register_optional_texture_from_pack(
         reg,
-        "stagcrest:redstone_dust_dot",
-        "redstone_dust_dot",
-        (140, 0, 0),
+        "stagcrest:redstone_dust_overlay",
+        "redstone_dust_overlay",
     );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_dust_line",
-        "redstone_dust_line0",
-        (180, 0, 0),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_dust_line1",
-        "redstone_dust_line1",
-        (180, 0, 0),
-    );
-    register_optional_texture_from_pack(reg, "stagcrest:redstone_dust_overlay", "redstone_dust_overlay");
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_torch_off",
-        "redstone_torch_off",
-        (180, 80, 0),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_torch_on",
-        "redstone_torch",
-        (255, 120, 0),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:redstone_block",
-        "redstone_block",
-        (200, 0, 0),
-    );
-    register_texture_from_pack(reg, "stagcrest:lever", "lever", (100, 100, 100));
-    register_texture_from_pack(reg, "stagcrest:repeater", "repeater", (180, 160, 140));
-    register_texture_from_pack(reg, "stagcrest:repeater_on", "repeater_on", (200, 180, 160));
-    register_texture_from_pack(reg, "stagcrest:observer_front", "observer_front", (100, 100, 100));
-    register_texture_from_pack(reg, "stagcrest:observer_back", "observer_back", (80, 80, 80));
-    register_texture_from_pack(reg, "stagcrest:observer_side", "observer_side", (90, 90, 90));
-    register_texture_from_pack(reg, "stagcrest:observer_top", "observer_top", (95, 95, 95));
+    register_texture_from_pack(reg, "stagcrest:redstone_torch_off", "redstone_torch_off");
+    register_texture_from_pack(reg, "stagcrest:redstone_torch_on", "redstone_torch");
+    register_texture_from_pack(reg, "stagcrest:redstone_block", "redstone_block");
+    register_texture_from_pack(reg, "stagcrest:lever", "lever");
+    register_texture_from_pack(reg, "stagcrest:repeater", "repeater");
+    register_texture_from_pack(reg, "stagcrest:repeater_on", "repeater_on");
+    register_texture_from_pack(reg, "stagcrest:observer_front", "observer_front");
+    register_texture_from_pack(reg, "stagcrest:observer_back", "observer_back");
+    register_texture_from_pack(reg, "stagcrest:observer_side", "observer_side");
+    register_texture_from_pack(reg, "stagcrest:observer_top", "observer_top");
     register_optional_texture_from_pack(reg, "stagcrest:observer_back_on", "observer_back_on");
-    register_texture_from_pack(reg, "stagcrest:piston_top", "piston_top", (160, 160, 160));
-    register_texture_from_pack(
-        reg,
-        "stagcrest:piston_top_sticky",
-        "piston_top_sticky",
-        (160, 180, 160),
-    );
-    register_texture_from_pack(reg, "stagcrest:piston_side", "piston_side", (140, 140, 140));
-    register_texture_from_pack(reg, "stagcrest:piston_bottom", "piston_bottom", (120, 120, 120));
-    register_texture_from_pack(reg, "stagcrest:piston_inner", "piston_inner", (100, 100, 100));
-    register_texture_from_pack(reg, "stagcrest:slime_block", "slime_block", (120, 200, 120));
-    register_texture_from_pack(
-        reg,
-        "stagcrest:honey_block_top",
-        "honey_block_top",
-        (220, 160, 40),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:honey_block_side",
-        "honey_block_side",
-        (210, 150, 35),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:honey_block_bottom",
-        "honey_block_bottom",
-        (200, 140, 30),
-    );
-    register_texture_from_pack(
-        reg,
-        "stagcrest:smooth_stone",
-        "smooth_stone",
-        (160, 160, 160),
-    );
-    register_texture_from_pack(reg, "stagcrest:sand", "sand", (219, 207, 163));
-    register_texture_from_pack(reg, "stagcrest:iron_ore", "iron_ore", (136, 129, 122));
-    register_texture_from_pack(reg, "stagcrest:oak_log", "oak_log", (102, 81, 51));
-    register_texture_from_pack(reg, "stagcrest:oak_log_top", "oak_log_top", (168, 134, 84));
-    register_plant_texture_from_pack(reg, "stagcrest:oak_leaves", "oak_leaves", (60, 120, 40));
-    register_plant_texture_from_pack(reg, "stagcrest:short_grass", "short_grass", (95, 159, 53));
-    register_plant_texture_from_pack(
-        reg,
-        "stagcrest:tall_grass_bottom",
-        "tall_grass_bottom",
-        (95, 159, 53),
-    );
-    register_plant_texture_from_pack(
-        reg,
-        "stagcrest:tall_grass_top",
-        "tall_grass_top",
-        (110, 170, 60),
-    );
-    register_plant_texture_from_pack(reg, "stagcrest:dandelion", "dandelion", (255, 220, 0));
-    register_plant_texture_from_pack(reg, "stagcrest:poppy", "poppy", (200, 40, 40));
-    register_texture_from_pack(reg, "stagcrest:cactus_side", "cactus_side", (85, 140, 60));
-    register_texture_from_pack(reg, "stagcrest:cactus_top", "cactus_top", (95, 150, 65));
-    register_plant_texture_from_pack(reg, "stagcrest:dead_bush", "dead_bush", (140, 110, 70));
+    register_texture_from_pack(reg, "stagcrest:piston_top", "piston_top");
+    register_texture_from_pack(reg, "stagcrest:piston_top_sticky", "piston_top_sticky");
+    register_texture_from_pack(reg, "stagcrest:piston_side", "piston_side");
+    register_texture_from_pack(reg, "stagcrest:piston_bottom", "piston_bottom");
+    register_texture_from_pack(reg, "stagcrest:piston_inner", "piston_inner");
+    register_texture_from_pack(reg, "stagcrest:slime_block", "slime_block");
+    register_texture_from_pack(reg, "stagcrest:honey_block_top", "honey_block_top");
+    register_texture_from_pack(reg, "stagcrest:honey_block_side", "honey_block_side");
+    register_texture_from_pack(reg, "stagcrest:honey_block_bottom", "honey_block_bottom");
+    register_texture_from_pack(reg, "stagcrest:smooth_stone", "smooth_stone");
+    register_texture_from_pack(reg, "stagcrest:sand", "sand");
+    register_texture_from_pack(reg, "stagcrest:iron_ore", "iron_ore");
+    register_texture_from_pack(reg, "stagcrest:oak_log", "oak_log");
+    register_texture_from_pack(reg, "stagcrest:oak_log_top", "oak_log_top");
+    register_plant_texture_from_pack(reg, "stagcrest:oak_leaves", "oak_leaves");
+    register_plant_texture_from_pack(reg, "stagcrest:short_grass", "short_grass");
+    register_plant_texture_from_pack(reg, "stagcrest:tall_grass_bottom", "tall_grass_bottom");
+    register_plant_texture_from_pack(reg, "stagcrest:tall_grass_top", "tall_grass_top");
+    register_plant_texture_from_pack(reg, "stagcrest:dandelion", "dandelion");
+    register_plant_texture_from_pack(reg, "stagcrest:poppy", "poppy");
+    register_texture_from_pack(reg, "stagcrest:cactus_side", "cactus_side");
+    register_texture_from_pack(reg, "stagcrest:cactus_top", "cactus_top");
+    register_plant_texture_from_pack(reg, "stagcrest:dead_bush", "dead_bush");
 }
 
 fn register_layered_cross_plant(
@@ -279,6 +206,7 @@ fn register_layered_cross_plant(
         geometry: Some("cross".into()),
         circuit: None,
         push_reaction: None,
+        map_color: default_map_color(id),
     });
 }
 
@@ -311,6 +239,7 @@ pub(crate) fn register_solid_block(
         geometry: geometry.map(str::to_string),
         circuit,
         push_reaction: None,
+        map_color: default_map_color(id),
     });
 }
 
@@ -370,6 +299,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:grass_block"),
     });
     register_solid_block(
         reg,
@@ -426,6 +356,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: Some(RenderLayer::Blend),
         push_reaction: None,
+        map_color: default_map_color("stagcrest:water"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:bedrock".into(),
@@ -443,6 +374,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: None,
         push_reaction: Some(PushReaction::Block),
+        map_color: default_map_color("stagcrest:bedrock"),
     });
     register_solid_block(
         reg,
@@ -510,6 +442,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:lever"),
     });
     // Stone button: a small stone box that sinks when pressed.
     reg.register_block(RegisterBlockRequest {
@@ -530,6 +463,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:stone_button"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:repeater".into(),
@@ -549,6 +483,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:repeater"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:observer".into(),
@@ -568,6 +503,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:observer"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:piston".into(),
@@ -587,6 +523,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:piston"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:sticky_piston".into(),
@@ -606,6 +543,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:sticky_piston"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:piston_head".into(),
@@ -623,6 +561,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:piston_head"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:slime_block".into(),
@@ -640,6 +579,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: Some(RenderLayer::Blend),
         push_reaction: None,
+        map_color: default_map_color("stagcrest:slime_block"),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:honey_block".into(),
@@ -657,6 +597,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: Some(RenderLayer::Blend),
         push_reaction: None,
+        map_color: default_map_color("stagcrest:honey_block"),
     });
     register_solid_block(
         reg,
@@ -700,6 +641,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:oak_log"),
     });
     register_solid_block(
         reg,
@@ -776,6 +718,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         circuit: None,
         render_layer: None,
         push_reaction: None,
+        map_color: default_map_color("stagcrest:cactus"),
     });
     register_solid_block(
         reg,

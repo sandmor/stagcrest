@@ -76,6 +76,7 @@ pub fn test_registry() -> BlockRegistry {
             } else {
                 stagcrest_protocol::PushReaction::Normal
             },
+            map_color: [128, 128, 128],
         });
     }
     reg

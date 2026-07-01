@@ -166,10 +166,13 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
             .unwrap_or_default(),
         render_layer,
         push_reaction,
+        map_color: json.map_color,
     });
 }
 
-fn push_reaction_from_sdk(reaction: stagcrest_mod_sdk::PushReaction) -> stagcrest_protocol::PushReaction {
+fn push_reaction_from_sdk(
+    reaction: stagcrest_mod_sdk::PushReaction,
+) -> stagcrest_protocol::PushReaction {
     match reaction {
         stagcrest_mod_sdk::PushReaction::Normal => stagcrest_protocol::PushReaction::Normal,
         stagcrest_mod_sdk::PushReaction::Block => stagcrest_protocol::PushReaction::Block,

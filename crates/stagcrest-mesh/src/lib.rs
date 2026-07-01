@@ -9,13 +9,12 @@ use std::collections::{HashMap, HashSet};
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_client::{
-    wire_shows_center_junction, wire_power_vertex_tint, face_texture_for,
-    resolve_block_model, resolve_wire_line_textures, sample_colormap_rgb,
-    BlockRegistry, ColormapSet, WireConnections, WireLink, WireLineTextures, ModelRegistry,
+    face_texture_for, resolve_block_model, resolve_wire_line_textures, sample_colormap_rgb,
+    wire_power_vertex_tint, wire_shows_center_junction, BlockRegistry, ColormapSet, ModelRegistry,
+    WireConnections, WireLineTextures, WireLink,
 };
 use stagcrest_protocol::{
-    BlockGeometry, BlockId, BlockState, ChunkPos, FaceTexture, TextureId,
-    TintKind, CHUNK_SIZE,
+    BlockGeometry, BlockId, BlockState, ChunkPos, FaceTexture, TextureId, TintKind, CHUNK_SIZE,
 };
 use stagcrest_world::ChunkBlock;
 
@@ -23,11 +22,11 @@ pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
 pub use chunk_build::build_chunk_mesh_snapshot;
+pub use greedy_mesh::greedy_mesh_enabled;
 pub use mesh_snapshot::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
 pub use model_bake::{
     bake_block_model, bake_cross_plant, bake_unit_quad, bake_wire_quad, BakedMesh, GpuMeshVertex,
 };
-pub use greedy_mesh::greedy_mesh_enabled;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -236,7 +235,8 @@ pub(crate) fn neighbor_culls_face(
 }
 
 /// Per-column grass and foliage tint multipliers for a chunk (indexed by local x, z).
-pub(crate) type ColumnTintCache = [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
+pub(crate) type ColumnTintCache =
+    [[([f32; 3], [f32; 3]); CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
 
 pub(crate) fn build_column_tint_cache(climate: &MeshClimateTint<'_>) -> ColumnTintCache {
     let grass = tint_mul_for_kind(TintKind::Grass, Some(climate));
@@ -851,10 +851,7 @@ pub(crate) fn face_tint_mul(
     tint_mul_for_kind(kind, climate)
 }
 
-fn tint_mul_for_kind(
-    kind: TintKind,
-    climate: Option<&MeshClimateTint<'_>>,
-) -> [f32; 3] {
+fn tint_mul_for_kind(kind: TintKind, climate: Option<&MeshClimateTint<'_>>) -> [f32; 3] {
     let Some(ctx) = climate else {
         return WHITE_TINT_MUL;
     };
@@ -1005,7 +1002,13 @@ fn bilinear_corner(corners: [[f32; 3]; 4], u: f32, v: f32) -> [f32; 3] {
     lerp3(bottom, top, v)
 }
 
-fn sub_quad_corners(corners: [[f32; 3]; 4], tile_u: i32, tile_v: i32, i: i32, j: i32) -> [[f32; 3]; 4] {
+fn sub_quad_corners(
+    corners: [[f32; 3]; 4],
+    tile_u: i32,
+    tile_v: i32,
+    i: i32,
+    j: i32,
+) -> [[f32; 3]; 4] {
     let tu = tile_u as f32;
     let tv = tile_v as f32;
     let u0 = i as f32 / tu;
@@ -1250,6 +1253,7 @@ mod tests {
                 ModelRenderLayer::Opaque
             },
             push_reaction: stagcrest_protocol::PushReaction::Normal,
+            map_color: [128, 128, 128],
         }
     }
 

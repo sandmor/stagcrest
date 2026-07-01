@@ -31,6 +31,7 @@ pub struct RegisterBlockRequest {
     pub circuit: Option<RegisterCircuitRequest>,
     #[serde(default)]
     pub push_reaction: Option<PushReaction>,
+    pub map_color: [u8; 3],
 }
 
 #[derive(Serialize, Deserialize)]

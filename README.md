@@ -79,14 +79,25 @@ cargo run -p stagcrest-client -- --connect 127.0.0.1:4242
 
 ### CLI flags
 
-| Binary             | Flag                     | Description                                     |
-| ------------------ | ------------------------ | ----------------------------------------------- |
-| `stagcrest-client` | `--connect HOST:PORT`    | Remote server (omit for embedded single-player) |
-| `stagcrest-client` | `--net-sim-latency-ms N` | Artificial latency for localhost testing        |
-| `stagcrest-server` | `--bind HOST:PORT`       | Listen address (default `0.0.0.0:4242`)         |
-| `stagcrest-server` | `--net-sim-latency-ms N` | Artificial latency on outbound frames           |
+| Binary             | Flag                        | Description                                     |
+| ------------------ | --------------------------- | ----------------------------------------------- |
+| `stagcrest-client` | `--connect HOST:PORT`       | Remote server (omit for embedded single-player) |
+| `stagcrest-client` | `--net-sim-latency-ms N`    | Artificial latency for localhost testing        |
+| `stagcrest-server` | `--bind HOST:PORT`          | Listen address (default `0.0.0.0:4242`)         |
+| `stagcrest-server` | `--net-sim-latency-ms N`    | Artificial latency on outbound frames           |
+| `stagcrest-server` | `export-minimap` subcommand | PNG minimap of all saved chunks (see below)     |
 
-Press **F3** in-game for debug overlay (position, target block, net transport, RTT from ping).
+Export a minimap PNG from explored/saved terrain (streams chunks from disk; does not load the full world into memory):
+
+```bash
+cargo run -p stagcrest-server -- export-minimap \
+  --world default \
+  --output worlds/default/minimap.png
+```
+
+Optional: `--scale N` (blocks per pixel, default 1), `--padding N` (extra border around saved bbox, default 64).
+
+Press **F3** in-game for debug overlay (position, target block, net transport, RTT from ping). Press **M** for the minimap (top-right); **+** / **-** to zoom. The HUD minimap uses a per-column color cache with incremental framebuffer compositing (pan scrolls the buffer and resolves only new edge columns; zoom re-composites from cache).
 
 ## Networking
 
@@ -135,6 +146,7 @@ crates/
   stagcrest-net         — framing, transports, NetConfig
   stagcrest-server      — authoritative simulation (lib + bin)
   stagcrest-render      — chunk mesh → Bevy entities
+  stagcrest-minimap     — column cache, resolve/composite, strip export for PNG
   stagcrest-client      — Bevy client (menu, loading, game)
 mods/
   stagcrest-core/       — air, blocks, redstone, textures
@@ -155,6 +167,8 @@ resourcepacks/          — local MC-format packs (gitignored)
 | 1–9                  | Hotbar slot                                           |
 | Scroll wheel         | Cycle hotbar slot                                     |
 | E                    | Creative inventory (search, drag-drop, block catalog) |
+| M                    | Toggle minimap (top-right)                            |
+| + / -                | Minimap zoom in / out                                 |
 | F3                   | Debug overlay                                         |
 | Escape               | Release cursor / pause                                |
 
@@ -164,7 +178,7 @@ Mods export `_stagcrest_register()` and import from module `stagcrest_host`:
 
 | Import                   | Signature                                       | Payload                                                                          |
 | ------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------- |
-| `register_block`         | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → block definition                                                    |
+| `register_block`         | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → block definition (includes `map_color: [u8;3]`)                     |
 | `register_texture`       | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → RGBA texture                                                        |
 | `log_message`            | `(ptr: i32, len: i32)`                          | UTF-8 string                                                                     |
 | `load_texture_from_pack` | `(name_ptr, name_len, out_ptr, out_max) -> i32` | Load MC-format block PNG from host resource packs; returns bytes written or `-1` |

@@ -1,14 +1,13 @@
 use crate::content::{
     register_plant_texture_from_pack, register_solid_block, register_texture_from_pack,
 };
-use crate::fallback::fallback_color;
 use stagcrest_mod_sdk::{ContentRegistrar, RegisterBlockRequest, RenderLayer};
+use stagcrest_protocol::default_map_color;
 
 fn reg_block(reg: &mut impl ContentRegistrar, id: &str, mc: &str, cross: bool) {
     let full_id = format!("stagcrest:{id}");
-    let (r, g, b) = fallback_color(&full_id);
     if cross {
-        register_plant_texture_from_pack(reg, &full_id, mc, (r, g, b));
+        register_plant_texture_from_pack(reg, &full_id, mc);
         register_solid_block(
             reg,
             &full_id,
@@ -23,7 +22,7 @@ fn reg_block(reg: &mut impl ContentRegistrar, id: &str, mc: &str, cross: bool) {
             Some("cross"),
         );
     } else {
-        register_texture_from_pack(reg, &full_id, mc, (r, g, b));
+        register_texture_from_pack(reg, &full_id, mc);
         register_solid_block(
             reg, &full_id, id, &full_id, true, false, true, true, None, None, None,
         );
@@ -41,12 +40,11 @@ fn reg_faced_block(
     let top_id = format!("stagcrest:{id}_top");
     let side_id = format!("stagcrest:{id}_side");
     let bottom_id = format!("stagcrest:{id}_bottom");
-    let (r, g, b) = fallback_color(&full_id);
-    register_texture_from_pack(reg, &top_id, top_mc, (r, g, b));
-    register_texture_from_pack(reg, &side_id, side_mc, (r, g, b));
-    register_texture_from_pack(reg, &bottom_id, bottom_mc, (r, g, b));
+    register_texture_from_pack(reg, &top_id, top_mc);
+    register_texture_from_pack(reg, &side_id, side_mc);
+    register_texture_from_pack(reg, &bottom_id, bottom_mc);
     reg.register_block(RegisterBlockRequest {
-        namespaced_id: full_id,
+        namespaced_id: full_id.clone(),
         display_name: id.replace('_', " "),
         opaque: true,
         transparent: false,
@@ -61,6 +59,7 @@ fn reg_faced_block(
         geometry: None,
         circuit: None,
         push_reaction: None,
+        map_color: default_map_color(&full_id),
     });
 }
 
@@ -71,18 +70,15 @@ fn reg_faced_textures(
     side_mc: &str,
     bottom_mc: &str,
 ) {
-    let full_id = format!("stagcrest:{id}");
-    let (r, g, b) = fallback_color(&full_id);
-    register_texture_from_pack(reg, &format!("stagcrest:{id}_top"), top_mc, (r, g, b));
-    register_texture_from_pack(reg, &format!("stagcrest:{id}_side"), side_mc, (r, g, b));
-    register_texture_from_pack(reg, &format!("stagcrest:{id}_bottom"), bottom_mc, (r, g, b));
+    register_texture_from_pack(reg, &format!("stagcrest:{id}_top"), top_mc);
+    register_texture_from_pack(reg, &format!("stagcrest:{id}_side"), side_mc);
+    register_texture_from_pack(reg, &format!("stagcrest:{id}_bottom"), bottom_mc);
 }
 
 fn reg_leaves(reg: &mut impl ContentRegistrar, wood: &str) {
     let id = format!("stagcrest:{wood}_leaves");
     let mc = format!("{wood}_leaves");
-    let (r, g, b) = fallback_color(&id);
-    register_plant_texture_from_pack(reg, &id, &mc, (r, g, b));
+    register_plant_texture_from_pack(reg, &id, &mc);
     register_solid_block(
         reg,
         &id,
@@ -102,10 +98,9 @@ fn reg_log(reg: &mut impl ContentRegistrar, wood: &str) {
     let id = format!("stagcrest:{wood}_log");
     let mc = format!("{wood}_log");
     let top_mc = format!("{wood}_log_top");
-    let (r, g, b) = fallback_color(&id);
-    register_texture_from_pack(reg, &id, &mc, (r, g, b));
+    register_texture_from_pack(reg, &id, &mc);
     let top_id = format!("stagcrest:{wood}_log_top");
-    register_texture_from_pack(reg, &top_id, &top_mc, (r, g, b));
+    register_texture_from_pack(reg, &top_id, &top_mc);
     reg.register_block(RegisterBlockRequest {
         namespaced_id: id.clone(),
         display_name: format!("{wood} log"),
@@ -115,13 +110,14 @@ fn reg_log(reg: &mut impl ContentRegistrar, wood: &str) {
         hardness: 1.0,
         top_texture: top_id,
         bottom_texture: format!("stagcrest:{wood}_log_top"),
-        sides_texture: id,
+        sides_texture: id.clone(),
         placeable: true,
         fluid: false,
         render_layer: None,
         geometry: None,
         circuit: None,
         push_reaction: None,
+        map_color: default_map_color(&id),
     });
 }
 
@@ -154,8 +150,7 @@ pub fn register_extra_textures(reg: &mut impl ContentRegistrar) {
     ];
     for (id, mc) in terrain {
         let full = format!("stagcrest:{id}");
-        let (r, g, b) = fallback_color(&full);
-        register_texture_from_pack(reg, &full, mc, (r, g, b));
+        register_texture_from_pack(reg, &full, mc);
     }
 
     reg_faced_textures(reg, "podzol", "podzol_top", "podzol_side", "dirt");
@@ -182,8 +177,7 @@ pub fn register_extra_textures(reg: &mut impl ContentRegistrar) {
     ] {
         let planks = format!("stagcrest:{wood}_planks");
         let mc = format!("{wood}_planks");
-        let (r, g, b) = fallback_color(&planks);
-        register_texture_from_pack(reg, &planks, &mc, (r, g, b));
+        register_texture_from_pack(reg, &planks, &mc);
         reg_log(reg, wood);
         reg_leaves(reg, wood);
     }
@@ -220,8 +214,7 @@ pub fn register_extra_textures(reg: &mut impl ContentRegistrar) {
     ];
     for (id, mc) in plants {
         let full = format!("stagcrest:{id}");
-        let (r, g, b) = fallback_color(&full);
-        register_plant_texture_from_pack(reg, &full, mc, (r, g, b));
+        register_plant_texture_from_pack(reg, &full, mc);
     }
 }
 

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use redb::{Database, TableDefinition};
+use redb::{Database, ReadableTable, TableDefinition};
 use stagcrest_protocol::ChunkPos;
 
 use crate::compress::{compress_stored, decompress_stored};
@@ -87,6 +87,28 @@ impl RedbChunkStorage {
         let wire = decompress_stored(&compressed)?;
         Ok(Some(InactiveChunk::decode_wire(&wire)?))
     }
+
+    /// Iterate all stored chunk positions.
+    pub fn iter_chunk_positions(&self) -> Result<Vec<ChunkPos>, StorageError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let table = txn
+            .open_table(CHUNKS_TABLE)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let mut out = Vec::new();
+        for entry in table
+            .iter()
+            .map_err(|e| StorageError::Database(e.to_string()))?
+        {
+            let (key, _) = entry.map_err(|e| StorageError::Database(e.to_string()))?;
+            if let Some(pos) = crate::port::decode_chunk_key(key.value()) {
+                out.push(pos);
+            }
+        }
+        Ok(out)
+    }
 }
 
 impl ChunkStorage for RedbChunkStorage {
@@ -172,5 +194,24 @@ mod tests {
             .unwrap();
         assert_eq!(loaded, chunk);
         assert!(storage.contains(ChunkPos { x: 1, y: 2, z: 3 }));
+    }
+
+    #[test]
+    fn iter_chunk_positions_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("stagcrest_redb_iter_{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join("world.redb"));
+        let storage = RedbChunkStorage::open(dir.join("world.redb")).unwrap();
+        let chunk = InactiveChunk::from_indices(
+            vec![BlockId(0), BlockId(1)],
+            vec![BlockState(0), BlockState(0)],
+            &vec![1u16; CHUNK_VOLUME],
+        )
+        .unwrap();
+        storage
+            .put_chunk(ChunkPos { x: -2, y: 0, z: 5 }, &chunk)
+            .unwrap();
+        let positions = storage.iter_chunk_positions().unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0], ChunkPos { x: -2, y: 0, z: 5 });
     }
 }

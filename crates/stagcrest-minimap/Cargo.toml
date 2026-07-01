@@ -1,0 +1,12 @@
+[package]
+name = "stagcrest-minimap"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+stagcrest-protocol.workspace = true
+stagcrest-world.workspace = true
+stagcrest-storage.workspace = true
+
+[dev-dependencies]
+stagcrest-mod-server = { path = "../stagcrest-mod-server" }

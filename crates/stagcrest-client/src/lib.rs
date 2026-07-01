@@ -15,6 +15,7 @@ pub mod mesh_scheduler;
 pub mod inventory;
 pub mod loading;
 pub mod logging;
+pub mod minimap;
 pub mod menu;
 pub mod net_client;
 pub mod pause;
@@ -55,6 +56,7 @@ pub fn run_app(launch: LaunchConfig) {
             loading::LoadingPlugin,
             game::GamePlugin,
             debug_overlay::DebugPlugin,
+            minimap::MinimapPlugin,
             pause::PausePlugin,
             ui::UiPlugin,
             UiCameraPlugin,

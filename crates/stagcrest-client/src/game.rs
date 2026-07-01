@@ -1,14 +1,13 @@
-use crate::chunk_streaming::{
-    on_chunk_unloaded_remove_biome, BiomeGridCache,
-};
+use crate::chunk_streaming::{on_chunk_unloaded_remove_biome, BiomeGridCache};
 use crate::environment::{self, PlayerEnvironment};
 use crate::mesh_scheduler::{
-    mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll, mesh_recover_unmeshed,
-    mesh_rebuild_after_atlas_change, MeshScheduler,
+    mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll,
+    mesh_rebuild_after_atlas_change, mesh_recover_unmeshed, MeshScheduler,
 };
+use crate::minimap::{MinimapColumnCache, MinimapState};
 use crate::net_client::GameNetClient;
 use crate::world_replica::{apply_power_batch, CircuitPowerOverlay, WorldReplica};
-use crate::{block_outline, debug_overlay, player, targeting};
+use crate::{block_outline, debug_overlay, minimap, player, targeting};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use stagcrest_mod_client::{
@@ -123,6 +122,8 @@ fn net_poll_system(
     mut mesh_cache: ResMut<MeshCacheResource>,
     mut biome_cache: ResMut<BiomeGridCache>,
     mut power_overlay: ResMut<CircuitPowerOverlay>,
+    mut minimap: Option<ResMut<MinimapState>>,
+    mut minimap_cache: Option<ResMut<MinimapColumnCache>>,
     mut commands: Commands,
 ) {
     for msg in net.poll() {
@@ -138,6 +139,8 @@ fn net_poll_system(
                     &mut biome_cache,
                     &mut power_overlay,
                     &mut commands,
+                    minimap.as_deref_mut(),
+                    minimap_cache.as_deref_mut(),
                 );
             }
         }
@@ -170,6 +173,7 @@ fn cleanup_game_session(
     mod_ctx: Option<Res<ModContext>>,
     outline_entities: Query<Entity, With<stagcrest_render::BlockOutlineMarker>>,
     debug_roots: Query<Entity, With<debug_overlay::DebugOverlayRoot>>,
+    minimap_roots: Query<Entity, With<minimap::MinimapRoot>>,
     cameras: Query<Entity, With<player::FlyCamera>>,
     chunk_entities: Query<Entity, With<stagcrest_render::ChunkEntityMarker>>,
 ) {
@@ -180,6 +184,7 @@ fn cleanup_game_session(
     block_outline::despawn_block_outline(&mut commands, &outline_entities);
     stagcrest_render::despawn_chunk_entities(&mut commands, &chunk_entities);
     debug_overlay::cleanup_debug_overlay(&mut commands, &debug_roots);
+    minimap::cleanup_minimap(&mut commands, &minimap_roots);
     for cam in &cameras {
         commands.entity(cam).despawn();
     }

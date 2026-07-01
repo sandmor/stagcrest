@@ -86,6 +86,10 @@ impl BlockRegistry {
         self.blocks.get(&id)
     }
 
+    pub fn block_ids(&self) -> Vec<BlockId> {
+        self.blocks.keys().copied().collect()
+    }
+
     pub fn block_by_name(&self, name: &str) -> Option<BlockId> {
         self.by_namespaced.get(name).copied()
     }
@@ -196,7 +200,8 @@ impl BlockRegistry {
                 "stagcrest:observer_front",
             );
         }
-        if (def.namespaced_id == "stagcrest:piston" || def.namespaced_id == "stagcrest:sticky_piston")
+        if (def.namespaced_id == "stagcrest:piston"
+            || def.namespaced_id == "stagcrest:sticky_piston")
             && piston_extended(state)
         {
             return self.resolve_face_textures(
@@ -240,7 +245,7 @@ impl BlockRegistry {
     }
 
     pub fn from_wire_snapshot(snap: stagcrest_protocol::RegistryWireSnapshot) -> Self {
-        use stagcrest_protocol::{TextureDef, manifest::TextureWireDef};
+        use stagcrest_protocol::{manifest::TextureWireDef, TextureDef};
         let mut registry = Self {
             next_block_id: snap.next_block_id,
             next_texture_id: snap.next_texture_id,

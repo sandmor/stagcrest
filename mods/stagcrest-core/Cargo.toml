@@ -8,6 +8,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 stagcrest-mod-sdk = { path = "../../crates/stagcrest-mod-sdk" }
+stagcrest-protocol = { path = "../../crates/stagcrest-protocol" }
 
 [features]
 default = []

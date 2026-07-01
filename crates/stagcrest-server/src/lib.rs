@@ -1,3 +1,4 @@
+mod export_minimap;
 mod net;
 mod persistence;
 mod player;
@@ -20,9 +21,10 @@ use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 use tokio::net::TcpListener;
 
+pub use export_minimap::{export_minimap, ExportError, ExportMinimapConfig};
+pub use player::apply_player_action;
 pub use session::{streaming_lru_capacity, WorldSession};
 pub use streaming::{StreamingPipeline, TerrainStreamState};
-pub use player::apply_player_action;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -187,11 +189,9 @@ impl GameServer {
 
     pub(crate) fn broadcast_circuit_replication(&mut self) {
         for (pos, id, state) in self.circuit.drain_visual_updates() {
-            self.queue_priority(GameMessage::Server(ServerMessage::BlockUpdate(BlockUpdate {
-                pos,
-                id,
-                state,
-            })));
+            self.queue_priority(GameMessage::Server(ServerMessage::BlockUpdate(
+                BlockUpdate { pos, id, state },
+            )));
         }
         let updates = self.circuit.drain_power_updates();
         if !updates.is_empty() {

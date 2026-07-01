@@ -45,7 +45,10 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
 
     reg.register_block(test_block(blocks.source, CircuitKind::Source { level: 15 }));
     reg.register_block(test_block(blocks.wire, CircuitKind::Wire { falloff: 1 }));
-    reg.register_block(test_block(blocks.switch, CircuitKind::Switch { output: 15 }));
+    reg.register_block(test_block(
+        blocks.switch,
+        CircuitKind::Switch { output: 15 },
+    ));
     reg.register_block(test_block_with_geometry(
         blocks.repeater,
         CircuitKind::Repeater { output: 15 },
@@ -91,10 +94,23 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: PushReaction::Normal,
+        map_color: [128, 128, 128],
     });
-    reg.register_block(cube_block(blocks.slime, "test:slime_block", PushReaction::Normal));
-    reg.register_block(cube_block(blocks.honey, "test:honey_block", PushReaction::Normal));
-    reg.register_block(cube_block(blocks.bedrock, "test:bedrock", PushReaction::Block));
+    reg.register_block(cube_block(
+        blocks.slime,
+        "test:slime_block",
+        PushReaction::Normal,
+    ));
+    reg.register_block(cube_block(
+        blocks.honey,
+        "test:honey_block",
+        PushReaction::Normal,
+    ));
+    reg.register_block(cube_block(
+        blocks.bedrock,
+        "test:bedrock",
+        PushReaction::Block,
+    ));
     reg.register_block(BlockDef {
         id: blocks.stone,
         namespaced_id: "test:stone".into(),
@@ -110,6 +126,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: stagcrest_protocol::PushReaction::Normal,
+        map_color: [128, 128, 128],
     });
 
     (reg, blocks)
@@ -131,6 +148,7 @@ fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: PushReaction::Normal,
+        map_color: [128, 128, 128],
     }
 }
 
@@ -150,6 +168,7 @@ fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef 
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
         push_reaction,
+        map_color: [128, 128, 128],
     }
 }
 
@@ -173,6 +192,7 @@ fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeome
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: stagcrest_protocol::PushReaction::Normal,
+        map_color: [128, 128, 128],
     }
 }
 
@@ -203,11 +223,7 @@ pub fn place_wall_torch_not_gate(
     let block_pos = BlockPos::new(2, 0, 0);
     let torch_pos = BlockPos::new(3, 0, 0);
 
-    world.set_block(
-        lever_pos,
-        blocks.switch,
-        BlockState(u16::from(lever_on)),
-    );
+    world.set_block(lever_pos, blocks.switch, BlockState(u16::from(lever_on)));
     world.set_block(wire_pos, blocks.wire, BlockState(0));
     world.set_block(block_pos, blocks.stone, BlockState(0));
     world.set_block(
@@ -215,10 +231,7 @@ pub fn place_wall_torch_not_gate(
         blocks.torch,
         torch_state(false, TorchAttachment::WallEast),
     );
-    populate_chunks(
-        world,
-        &[lever_pos, wire_pos, block_pos, torch_pos],
-    );
+    populate_chunks(world, &[lever_pos, wire_pos, block_pos, torch_pos]);
 
     (torch_pos, lever_pos)
 }

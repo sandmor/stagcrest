@@ -1,6 +1,5 @@
 mod blocks_extra;
 mod content;
-mod fallback;
 mod worldgen;
 
 pub use content::register_content;
