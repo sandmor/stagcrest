@@ -18,6 +18,7 @@ pub mod logging;
 pub mod minimap;
 pub mod menu;
 pub mod net_client;
+pub mod world_select;
 pub mod pause;
 pub mod player;
 pub mod targeting;
@@ -53,6 +54,7 @@ pub fn run_app(launch: LaunchConfig) {
         .add_plugins(MaterialPlugin::<stagcrest_render::VoxelMaterial>::default())
         .add_plugins((
             menu::MenuPlugin,
+            world_select::WorldSelectPlugin,
             loading::LoadingPlugin,
             game::GamePlugin,
             debug_overlay::DebugPlugin,

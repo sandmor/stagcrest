@@ -1,5 +1,6 @@
 use crate::game::AppState;
 use crate::ui::UiTheme;
+use crate::LaunchConfig;
 use bevy::prelude::*;
 
 pub struct MenuPlugin;
@@ -83,6 +84,7 @@ fn menu_button_system(
         (&Interaction, &MenuButton, &mut BackgroundColor),
         (Changed<Interaction>, With<Button>),
     >,
+    launch: Res<LaunchConfig>,
     mut next_state: ResMut<NextState<AppState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -90,7 +92,11 @@ fn menu_button_system(
         match *interaction {
             Interaction::Pressed => match action {
                 MenuButton::Play => {
-                    next_state.set(AppState::Loading);
+                    if launch.connect.is_some() {
+                        next_state.set(AppState::Loading);
+                    } else {
+                        next_state.set(AppState::WorldSelect);
+                    }
                 }
                 MenuButton::Quit => {
                     exit.write(AppExit::Success);

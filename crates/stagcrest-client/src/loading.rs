@@ -1,5 +1,6 @@
 use crate::game::{AppState, GameConfig, ModContext};
 use crate::ui::UiTheme;
+use crate::world_select::SelectedWorld;
 use bevy::prelude::*;
 use bevy::tasks::{block_on, IoTaskPool, Task};
 use futures_lite::future;
@@ -59,16 +60,28 @@ fn start_connection_system(
     mut state: ResMut<LoadingState>,
     mut net: ResMut<GameNetClient>,
     config: Res<GameConfig>,
+    selected: Res<SelectedWorld>,
 ) {
     if state.started {
         return;
     }
     state.started = true;
 
+    let world_name = if selected.world_name.is_empty() {
+        "default".to_string()
+    } else {
+        selected.world_name.clone()
+    };
+    let world_seed = if selected.world_seed != 0 {
+        selected.world_seed
+    } else {
+        config.world_seed
+    };
+
     let server_config = stagcrest_server::ServerConfig {
         bind: None,
-        world_name: "default".to_string(),
-        world_seed: config.world_seed,
+        world_name,
+        world_seed,
         mods_root: std::path::PathBuf::from("."),
         render_distance: config.render_distance,
         vertical_render_distance: config.vertical_render_distance,
@@ -288,13 +301,18 @@ fn loading_button_system(
     mut interaction: Query<(&Interaction, &LoadingAction), (Changed<Interaction>, With<Button>)>,
     mut next_state: ResMut<NextState<AppState>>,
     mut state: ResMut<LoadingState>,
+    net: Res<crate::net_client::GameNetClient>,
 ) {
     for (interaction, action) in &mut interaction {
         if *interaction == Interaction::Pressed {
             match action {
                 LoadingAction::BackToMenu => {
                     *state = LoadingState::default();
-                    next_state.set(AppState::MainMenu);
+                    if net.embedded {
+                        next_state.set(AppState::WorldSelect);
+                    } else {
+                        next_state.set(AppState::MainMenu);
+                    }
                 }
             }
         }

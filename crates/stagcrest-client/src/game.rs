@@ -7,6 +7,7 @@ use crate::mesh_scheduler::{
 use crate::minimap::{MinimapColumnCache, MinimapState};
 use crate::net_client::GameNetClient;
 use crate::world_replica::{apply_power_batch, CircuitPowerOverlay, WorldReplica};
+use crate::world_select::SelectedWorld;
 use crate::{block_outline, debug_overlay, minimap, player, targeting};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
@@ -23,6 +24,7 @@ use stagcrest_render::{
 pub enum AppState {
     #[default]
     MainMenu,
+    WorldSelect,
     Loading,
     InGame,
     Paused,
@@ -111,7 +113,8 @@ impl Plugin for GamePlugin {
                 OnEnter(AppState::InGame),
                 (setup_game_camera, setup_block_outline),
             )
-            .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session);
+            .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session)
+            .add_systems(OnEnter(AppState::WorldSelect), cleanup_game_session);
     }
 }
 
@@ -170,6 +173,7 @@ fn send_pose_system(
 
 fn cleanup_game_session(
     mut commands: Commands,
+    mut selected_world: ResMut<SelectedWorld>,
     mod_ctx: Option<Res<ModContext>>,
     outline_entities: Query<Entity, With<stagcrest_render::BlockOutlineMarker>>,
     debug_roots: Query<Entity, With<debug_overlay::DebugOverlayRoot>>,
@@ -177,6 +181,7 @@ fn cleanup_game_session(
     cameras: Query<Entity, With<player::FlyCamera>>,
     chunk_entities: Query<Entity, With<stagcrest_render::ChunkEntityMarker>>,
 ) {
+    *selected_world = SelectedWorld::default();
     if mod_ctx.is_none() {
         return;
     }
