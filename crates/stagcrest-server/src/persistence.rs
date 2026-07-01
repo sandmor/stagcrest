@@ -49,8 +49,9 @@ impl ChunkPersistence {
         terrain: &WorldGenState,
         circuit: &CircuitWorld,
         stored_chunks: &mut HashSet<ChunkPos>,
-    ) -> usize {
+    ) -> Vec<ChunkPos> {
         let mut written = 0usize;
+        let mut persisted = Vec::new();
         let dirty: Vec<_> = self.dirty.iter().copied().collect();
         self.dirty.clear();
 
@@ -70,6 +71,7 @@ impl ChunkPersistence {
                     world.clear_modified(pos);
                     stored_chunks.insert(pos);
                     written += 1;
+                    persisted.push(pos);
                 }
                 Err(err) => {
                     tracing::error!("failed to persist chunk {pos:?}: {err}");
@@ -77,7 +79,7 @@ impl ChunkPersistence {
                 }
             }
         }
-        written
+        persisted
     }
 
     pub fn flush_all(
@@ -92,7 +94,11 @@ impl ChunkPersistence {
                 self.dirty.insert(pos);
             }
         }
-        while self.drain(usize::MAX, world, terrain, circuit, stored_chunks) > 0 {}
+        while self.drain(usize::MAX, world, terrain, circuit, stored_chunks)
+            .into_iter()
+            .next()
+            .is_some()
+        {}
     }
 }
 

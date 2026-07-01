@@ -70,6 +70,22 @@ pub fn encode_chunk_key(pos: ChunkPos) -> [u8; 12] {
     key
 }
 
+pub fn decode_map_chunk_key(key: &[u8]) -> Option<(i32, i32)> {
+    if key.len() != 8 {
+        return None;
+    }
+    let mx = i32::from_be_bytes(key[0..4].try_into().ok()?);
+    let mz = i32::from_be_bytes(key[4..8].try_into().ok()?);
+    Some((mx, mz))
+}
+
+pub fn encode_map_chunk_key(mx: i32, mz: i32) -> [u8; 8] {
+    let mut key = [0u8; 8];
+    key[0..4].copy_from_slice(&mx.to_be_bytes());
+    key[4..8].copy_from_slice(&mz.to_be_bytes());
+    key
+}
+
 pub fn decode_chunk_key(key: &[u8]) -> Option<ChunkPos> {
     if key.len() != 12 {
         return None;

@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use stagcrest_server::{export_minimap, run_standalone, ExportMinimapConfig, ServerConfig};
+use stagcrest_server::{
+    export_minimap, load_map_export_setup, open_world_session, rebuild_all_map_chunks,
+    run_standalone, ExportMinimapConfig, ServerConfig,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "stagcrest-server", about = "Stagcrest dedicated game server")]
@@ -50,9 +53,23 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         scale: u32,
 
-        /// Extra blocks padding around saved chunk bounding box.
+        /// Extra blocks padding around saved map tile bounding box.
         #[arg(long, default_value_t = 64)]
         padding: i32,
+
+        /// Rebuild map chunks from saved world data before exporting.
+        #[arg(long)]
+        rebuild_map: bool,
+    },
+    /// Rebuild map chunk tiles in world storage without exporting PNG.
+    BuildMap {
+        /// World name (storage folder under data/worlds/).
+        #[arg(long, default_value = "default")]
+        world: String,
+
+        /// Root directory containing mods/ and assets.
+        #[arg(long, default_value = ".")]
+        mods_dir: PathBuf,
     },
 }
 
@@ -70,6 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         mods_dir,
         scale,
         padding,
+        rebuild_map,
     }) = args.command
     {
         export_minimap(ExportMinimapConfig {
@@ -78,7 +96,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             mods_root: mods_dir,
             padding,
             scale: scale.max(1),
+            rebuild_map,
         })?;
+        return Ok(());
+    }
+
+    if let Some(Command::BuildMap { world, mods_dir }) = args.command {
+        let session = open_world_session(&world)?;
+        let setup = load_map_export_setup(&mods_dir)?;
+        rebuild_all_map_chunks(&session, &setup.map_ctx, &setup.y_chunks)?;
+        println!("map chunks rebuilt for world {world}");
         return Ok(());
     }
 

@@ -94,6 +94,8 @@ impl StreamingPipeline {
                         ) {
                             tracing::error!("failed to persist evicted chunk {pos:?}: {err}");
                             session.persistence.mark_dirty(pos);
+                        } else {
+                            result.map_dirty_chunks.push(pos);
                         }
                     }
                 }
@@ -138,13 +140,15 @@ impl StreamingPipeline {
             }
         }
 
-        session.persistence.drain(
+        result
+            .map_dirty_chunks
+            .extend(session.persistence.drain(
             MAX_IO_PER_TICK,
             world,
             terrain,
             circuit,
             &mut session.stored_chunks,
-        );
+        ));
 
         for _ in 0..MAX_IO_PER_TICK {
             if let Some(pos) = self.pending_load.pop_front() {
@@ -193,6 +197,7 @@ impl StreamingPipeline {
                     world.set_blocks(decorated.blocks);
                     world.finalize_generated_chunk(pos);
                 }
+                result.map_dirty_chunks.push(pos);
                 self.pass2_pending.remove(&pos);
                 if self.sent_to_client.insert(pos) {
                     if let Some(snapshot) = chunk_snapshot(world, pos, terrain, circuit) {
@@ -399,6 +404,7 @@ impl StreamingPipeline {
 pub struct StreamingTickResult {
     pub snapshots: Vec<ChunkSnapshot>,
     pub unloads: Vec<ChunkPos>,
+    pub map_dirty_chunks: Vec<ChunkPos>,
 }
 
 fn chunk_in_stream(

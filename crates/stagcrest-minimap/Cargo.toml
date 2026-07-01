@@ -7,6 +7,8 @@ edition.workspace = true
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
 stagcrest-storage.workspace = true
+zstd.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 stagcrest-mod-server = { path = "../stagcrest-mod-server" }

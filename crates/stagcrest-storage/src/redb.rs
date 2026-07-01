@@ -5,11 +5,12 @@ use stagcrest_protocol::ChunkPos;
 
 use crate::compress::{compress_stored, decompress_stored};
 use crate::format::InactiveChunk;
-use crate::port::{encode_chunk_key, ChunkStorage};
+use crate::port::{encode_chunk_key, encode_map_chunk_key, ChunkStorage};
 use crate::StorageError;
 
 const CHUNKS_TABLE: TableDefinition<&[u8; 12], &[u8]> = TableDefinition::new("chunks");
 const META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
+const MAP_CHUNKS_TABLE: TableDefinition<&[u8; 8], &[u8]> = TableDefinition::new("map_chunks");
 
 pub struct RedbChunkStorage {
     db: Database,
@@ -31,6 +32,7 @@ impl RedbChunkStorage {
             {
                 let _ = txn.open_table(CHUNKS_TABLE);
                 let _ = txn.open_table(META_TABLE);
+                let _ = txn.open_table(MAP_CHUNKS_TABLE);
             }
             txn.commit()
                 .map_err(|e| StorageError::Database(e.to_string()))?;
@@ -105,6 +107,80 @@ impl RedbChunkStorage {
             let (key, _) = entry.map_err(|e| StorageError::Database(e.to_string()))?;
             if let Some(pos) = crate::port::decode_chunk_key(key.value()) {
                 out.push(pos);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn put_map_chunk(&self, mx: i32, mz: i32, data: &[u8]) -> Result<(), StorageError> {
+        let key = encode_map_chunk_key(mx, mz);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(MAP_CHUNKS_TABLE)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            table
+                .insert(&key, data)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StorageError::Database(e.to_string()))
+    }
+
+    pub fn get_map_chunk(&self, mx: i32, mz: i32) -> Result<Option<Vec<u8>>, StorageError> {
+        let key = encode_map_chunk_key(mx, mz);
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let table = txn
+            .open_table(MAP_CHUNKS_TABLE)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        match table.get(&key) {
+            Ok(Some(value)) => Ok(Some(value.value().to_vec())),
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Database(e.to_string())),
+        }
+    }
+
+    pub fn delete_map_chunk(&self, mx: i32, mz: i32) -> Result<(), StorageError> {
+        let key = encode_map_chunk_key(mx, mz);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(MAP_CHUNKS_TABLE)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            let _ = table
+                .remove(&key)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StorageError::Database(e.to_string()))
+    }
+
+    /// Iterate all stored map chunk coordinates.
+    pub fn iter_map_chunk_coords(&self) -> Result<Vec<(i32, i32)>, StorageError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let table = txn
+            .open_table(MAP_CHUNKS_TABLE)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let mut out = Vec::new();
+        for entry in table
+            .iter()
+            .map_err(|e| StorageError::Database(e.to_string()))?
+        {
+            let (key, _) = entry.map_err(|e| StorageError::Database(e.to_string()))?;
+            if let Some(coords) = crate::port::decode_map_chunk_key(key.value()) {
+                out.push(coords);
             }
         }
         Ok(out)
@@ -213,5 +289,21 @@ mod tests {
         let positions = storage.iter_chunk_positions().unwrap();
         assert_eq!(positions.len(), 1);
         assert_eq!(positions[0], ChunkPos { x: -2, y: 0, z: 5 });
+    }
+
+    #[test]
+    fn map_chunk_roundtrip() {
+        let dir =
+            std::env::temp_dir().join(format!("stagcrest_redb_map_{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join("world.redb"));
+        let storage = RedbChunkStorage::open(dir.join("world.redb")).unwrap();
+        let data = vec![1u8, 2, 3, 4];
+        storage.put_map_chunk(-1, 2, &data).unwrap();
+        let loaded = storage.get_map_chunk(-1, 2).unwrap().unwrap();
+        assert_eq!(loaded, data);
+        let coords = storage.iter_map_chunk_coords().unwrap();
+        assert_eq!(coords, vec![(-1, 2)]);
+        storage.delete_map_chunk(-1, 2).unwrap();
+        assert!(storage.get_map_chunk(-1, 2).unwrap().is_none());
     }
 }

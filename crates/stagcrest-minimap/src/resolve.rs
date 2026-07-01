@@ -12,6 +12,7 @@ use crate::column_slice::ColumnSlice;
 use crate::raster::strip_biome_at;
 use crate::strip::StorageStripSource;
 
+#[derive(Clone)]
 pub struct BlockDefTable {
     defs: Vec<BlockDef>,
     index: HashMap<BlockId, usize>,

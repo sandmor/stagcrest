@@ -1,4 +1,5 @@
 mod export_minimap;
+mod map_generation;
 mod net;
 mod persistence;
 mod player;
@@ -6,6 +7,7 @@ mod session;
 mod streaming;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use stagcrest_circuit::{init_circuit_blocks, CircuitWorld};
@@ -17,11 +19,18 @@ use stagcrest_net::{
     send_message, spawn_tcp_session, BlockUpdate, CircuitPowerBatch, ClientMessage, GameMessage,
     GameTransport, InProcessTransport, NetConfig, ServerMessage,
 };
+use stagcrest_minimap::MapResolveContext;
 use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
+
+use crate::map_generation::MapChunkPipeline;
 use tokio::net::TcpListener;
 
-pub use export_minimap::{export_minimap, ExportError, ExportMinimapConfig};
+pub use export_minimap::{
+    export_minimap, load_map_export_setup, open_world_session, rebuild_all_map_chunks,
+    ExportError, ExportMinimapConfig, MapExportSetup,
+};
+pub use map_generation::make_map_resolve_context;
 pub use player::apply_player_action;
 pub use session::{streaming_lru_capacity, WorldSession};
 pub use streaming::{StreamingPipeline, TerrainStreamState};
@@ -77,6 +86,9 @@ pub struct GameServer {
     pub(crate) handshake_pending: bool,
     cached_manifest: stagcrest_protocol::manifest::ContentManifest,
     cached_atlas: AtlasTransfer,
+    map_pipeline: MapChunkPipeline,
+    map_ctx: Arc<MapResolveContext>,
+    map_y_chunks: Vec<i32>,
 }
 
 impl GameServer {
@@ -123,7 +135,7 @@ impl GameServer {
             spawn_chunk,
             initial_h,
             initial_v,
-            y_bounds,
+            y_bounds.clone(),
             spawn,
         );
 
@@ -140,6 +152,17 @@ impl GameServer {
             (host, reg, cached_manifest, cached_atlas)
         };
         let (mod_host, registry, cached_manifest, cached_atlas) = cached;
+
+        let map_ctx = Arc::new(map_generation::make_map_resolve_context(
+            &registry,
+            &colormaps,
+            &biomes,
+            air,
+            terrain.config(),
+        ));
+        let map_y_chunks: Vec<i32> = y_bounds.collect();
+        let map_pipeline =
+            MapChunkPipeline::new(Arc::clone(&session.storage), Arc::clone(&map_ctx), map_y_chunks.clone());
 
         Ok(Self {
             config,
@@ -167,6 +190,9 @@ impl GameServer {
             handshake_pending: false,
             cached_manifest,
             cached_atlas,
+            map_pipeline,
+            map_ctx,
+            map_y_chunks,
         })
     }
 
@@ -243,6 +269,15 @@ impl GameServer {
             for pos in stream_result.unloads {
                 self.queue_priority(GameMessage::Server(ServerMessage::ChunkUnload(pos)));
             }
+            for pos in stream_result.map_dirty_chunks {
+                self.map_pipeline.mark_dirty_from_chunk(pos);
+            }
+            self.map_pipeline.tick(
+                &self.world,
+                &self.map_y_chunks,
+                &self.map_ctx,
+                &self.session.storage,
+            );
         }
     }
 
@@ -286,6 +321,7 @@ impl GameServer {
 
     pub(crate) fn mark_chunk_dirty(&mut self, pos: ChunkPos) {
         self.session.persistence.mark_dirty(pos);
+        self.map_pipeline.mark_dirty_from_chunk(pos);
     }
 
     pub(crate) fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) {
