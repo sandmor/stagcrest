@@ -1,8 +1,9 @@
+use crate::client_content::{cleanup_screen, handle_button_hover, spawn_divider, spawn_screen_button, spawn_text_input};
 use crate::game::AppState;
 use crate::net_client::GameNetClient;
 use crate::ui::UiTheme;
 use bevy::prelude::*;
-use bevy::text::{EditableText, TextCursorStyle, TextLayout};
+use bevy::text::EditableText;
 use serde::{Deserialize, Serialize};
 use stagcrest_storage::DATA_DIR;
 
@@ -64,7 +65,7 @@ pub struct ConnectScreenPlugin;
 impl Plugin for ConnectScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Connect), spawn_connect_ui)
-            .add_systems(OnExit(AppState::Connect), cleanup_connect)
+            .add_systems(OnExit(AppState::Connect), (cleanup_screen::<ConnectRoot>, |mut commands: Commands| { commands.remove_resource::<ConnectionHistory>(); }))
             .add_systems(
                 Update,
                 connect_button_system.run_if(in_state(AppState::Connect)),
@@ -126,14 +127,7 @@ fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>) {
                     TextColor(theme.text_primary),
                 ));
 
-                menu.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(2.0),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(1.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.divider));
+                spawn_divider(menu, &theme);
 
                 menu.spawn(Node {
                     flex_direction: FlexDirection::Column,
@@ -147,36 +141,11 @@ fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>) {
                         theme.text_font(theme.caption_size),
                         TextColor(theme.text_muted),
                     ));
-                    field_row.spawn((
-                        ServerAddressField,
-                        EditableText {
-                            visible_width: Some(32.0),
-                            allow_newlines: false,
-                            ..default()
-                        },
-                        TextLayout::no_wrap(),
-                        theme.text_font(theme.body_size),
-                        TextCursorStyle::default(),
-                        Node {
-                            padding: UiRect::all(Val::Px(8.0)),
-                            min_width: Val::Px(320.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme.search_bg),
-                        BorderColor::all(theme.slot_border),
-                    ));
+                    spawn_text_input(field_row, ServerAddressField, &theme, "", 32.0, 320.0);
                 });
 
                 if !entries.is_empty() {
-                    menu.spawn(Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(2.0),
-                        margin: UiRect::vertical(Val::Px(4.0)),
-                        border_radius: BorderRadius::all(Val::Px(1.0)),
-                        ..default()
-                    })
-                    .insert(BackgroundColor(theme.divider));
+                    spawn_divider(menu, &theme);
 
                     menu.spawn((
                         Text::new("Past Connections"),
@@ -218,14 +187,7 @@ fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>) {
                     });
                 }
 
-                menu.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(2.0),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(1.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.divider));
+                spawn_divider(menu, &theme);
 
                 menu.spawn(Node {
                     flex_direction: FlexDirection::Row,
@@ -235,38 +197,11 @@ fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>) {
                     ..default()
                 })
                 .with_children(|row| {
-                    spawn_cs_button(row, "Connect", ConnectAction::Connect, &theme);
-                    spawn_cs_button(row, "Back", ConnectAction::Back, &theme);
+                    spawn_screen_button(row, "Connect", ConnectAction::Connect, &theme);
+                    spawn_screen_button(row, "Back", ConnectAction::Back, &theme);
                 });
             });
         });
-}
-
-fn spawn_cs_button(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    action: ConnectAction,
-    theme: &UiTheme,
-) {
-    parent
-        .spawn((
-            action,
-            Button,
-            Node {
-                width: Val::Px(180.0),
-                height: Val::Px(40.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(theme.button_bg),
-        ))
-        .with_child((
-            Text::new(label),
-            theme.text_font(theme.subtitle_size),
-            TextColor(theme.text_primary),
-        ));
 }
 
 fn connect_button_system(
@@ -297,13 +232,9 @@ fn connect_button_system(
                 net.connect_addr = Some(addr);
                 net.embedded = false;
                 next_state.set(AppState::Loading);
-                continue;
             }
-            Interaction::Hovered => {
-                *bg = BackgroundColor(theme.button_hover);
-            }
-            Interaction::None => {
-                *bg = BackgroundColor(theme.catalog_cell_bg);
+            Interaction::Hovered | Interaction::None => {
+                handle_button_hover(*interaction, &theme, &mut bg, theme.catalog_cell_bg);
             }
         }
     }
@@ -334,22 +265,11 @@ fn connect_button_system(
                     next_state.set(AppState::MainMenu);
                 }
             },
-            Interaction::Hovered => {
-                *bg = BackgroundColor(theme.button_hover);
-            }
-            Interaction::None => {
-                *bg = BackgroundColor(theme.button_bg);
+            Interaction::Hovered | Interaction::None => {
+                handle_button_hover(*interaction, &theme, &mut bg, theme.button_bg);
             }
         }
     }
 }
 
-fn cleanup_connect(
-    mut commands: Commands,
-    roots: Query<Entity, With<ConnectRoot>>,
-) {
-    for e in &roots {
-        commands.entity(e).despawn();
-    }
-    commands.remove_resource::<ConnectionHistory>();
-}
+

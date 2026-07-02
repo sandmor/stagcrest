@@ -1,4 +1,5 @@
 use crate::block_outline;
+use crate::client_content::{cleanup_screen, spawn_screen_button};
 use crate::game::AppState;
 use crate::player::{self, FlyCamera};
 use crate::targeting::BlockTarget;
@@ -31,7 +32,7 @@ impl Plugin for PausePlugin {
             OnEnter(AppState::Paused),
             (spawn_pause_menu, hide_block_outline_on_pause),
         )
-        .add_systems(OnExit(AppState::Paused), cleanup_pause);
+        .add_systems(OnExit(AppState::Paused), cleanup_screen::<PauseRoot>);
     }
 }
 
@@ -103,37 +104,10 @@ fn spawn_pause_menu(
                         theme.text_font(FontSize::Px(32.0)),
                         TextColor(theme.text_primary),
                     ));
-                    spawn_pause_btn(menu, "Resume", PauseAction::Resume, &theme);
-                    spawn_pause_btn(menu, "Main Menu", PauseAction::MainMenu, &theme);
+                    spawn_screen_button(menu, "Resume", PauseAction::Resume, &theme);
+                    spawn_screen_button(menu, "Main Menu", PauseAction::MainMenu, &theme);
                 });
         });
-}
-
-fn spawn_pause_btn(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    action: PauseAction,
-    theme: &UiTheme,
-) {
-    parent
-        .spawn((
-            action,
-            Button,
-            Node {
-                width: Val::Px(180.0),
-                height: Val::Px(40.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                ..default()
-            },
-        ))
-        .insert(BackgroundColor(theme.button_bg))
-        .with_child((
-            Text::new(label),
-            theme.text_font(theme.subtitle_size),
-            TextColor(theme.text_primary),
-        ));
 }
 
 fn pause_button_system(
@@ -147,12 +121,6 @@ fn pause_button_system(
                 PauseAction::MainMenu => next.set(AppState::MainMenu),
             }
         }
-    }
-}
-
-fn cleanup_pause(mut commands: Commands, query: Query<Entity, With<PauseRoot>>) {
-    for e in &query {
-        commands.entity(e).despawn();
     }
 }
 

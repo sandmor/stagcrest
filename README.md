@@ -120,14 +120,9 @@ The **server** generates/loads chunks and sends compressed `ChunkSnapshot` frame
 
 Texture packs are **not included** in the repo. A fresh clone runs with flat-color block placeholders and bundled/procedural biome colormaps.
 
-To use Minecraft-format block textures locally:
+**In the client:** use **Resource Packs** on the main menu to download packs from Modrinth. You can enable multiple packs and reorder priority.
 
-1. Drop a pack folder under `data/resourcepacks/` (must contain `pack.mcmeta`).
-2. Copy the example manifest:
-   ```bash
-   cp data/resourcepacks/resourcepacks.toml.example data/resourcepacks/resourcepacks.toml
-   ```
-3. Edit `data/resourcepacks/resourcepacks.toml`: set `path` to your pack folder name and `enabled = true`.
+**Advanced / dedicated server:** configure `data/settings.toml` (see `data/settings.toml.example`). Pack folders live under `data/resourcepacks/` and must contain `pack.mcmeta`.
 
 The server loads block PNGs from `{pack}/assets/minecraft/textures/block/` for textures referenced by `stagcrest-core`.
 
@@ -147,11 +142,14 @@ crates/
   stagcrest-server      — authoritative simulation (lib + bin)
   stagcrest-render      — chunk mesh → Bevy entities
   stagcrest-minimap     — column cache, resolve/composite, strip export for PNG
+  stagcrest-modrinth    — Modrinth API client
+  stagcrest-content     — resource pack settings and installation
   stagcrest-client      — Bevy client (menu, loading, game)
 mods/
   stagcrest-core/       — air, blocks, redstone, textures
   mods.toml             — mod manifest
 data/resourcepacks/     — local MC-format packs (gitignored)
+data/settings.toml      — content settings (see settings.toml.example)
 ```
 
 ## Controls

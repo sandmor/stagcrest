@@ -1,3 +1,4 @@
+use crate::client_content::{cleanup_screen, spawn_screen_button};
 use crate::game::{AppState, GameConfig, ModContext};
 use crate::ui::UiTheme;
 use crate::world_select::SelectedWorld;
@@ -35,7 +36,7 @@ impl Plugin for LoadingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoadingState>()
             .add_systems(OnEnter(AppState::Loading), on_enter_loading)
-            .add_systems(OnExit(AppState::Loading), cleanup_loading)
+            .add_systems(OnExit(AppState::Loading), cleanup_screen::<LoadingRoot>)
             .add_systems(
                 Update,
                 (
@@ -52,8 +53,7 @@ impl Plugin for LoadingPlugin {
 
 fn on_enter_loading(mut state: ResMut<LoadingState>, mut net: ResMut<GameNetClient>) {
     *state = LoadingState::default();
-    net.handshake_done = false;
-    net.initial_received = false;
+    net.shutdown_session();
 }
 
 fn start_connection_system(
@@ -276,25 +276,7 @@ fn loading_ui(
                 }),
             ));
             if state.error.is_some() {
-                parent
-                    .spawn((
-                        LoadingAction::BackToMenu,
-                        Button,
-                        Node {
-                            width: Val::Px(180.0),
-                            height: Val::Px(40.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(6.0)),
-                            ..default()
-                        },
-                    ))
-                    .insert(BackgroundColor(theme.button_bg))
-                    .with_child((
-                        Text::new("Main Menu"),
-                        theme.text_font(theme.subtitle_size),
-                        TextColor(theme.text_primary),
-                    ));
+                spawn_screen_button(parent, "Main Menu", LoadingAction::BackToMenu, &theme);
             }
         });
 }
@@ -321,8 +303,4 @@ fn loading_button_system(
     }
 }
 
-fn cleanup_loading(mut commands: Commands, query: Query<Entity, With<LoadingRoot>>) {
-    for e in &query {
-        commands.entity(e).despawn();
-    }
-}
+

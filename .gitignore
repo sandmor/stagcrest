@@ -8,4 +8,4 @@ mods/**/*.wasm
 # Local data (worlds, configs, resource packs, etc.)
 /data/
 !/data/resourcepacks/.gitkeep
-!/data/resourcepacks/resourcepacks.toml.example
+!/data/settings.toml.example

@@ -1,8 +1,12 @@
+use crate::client_content::{
+    cleanup_screen, handle_button_hover, spawn_confirm_delete_overlay, spawn_delete_icon_button,
+    spawn_divider, spawn_screen_button, spawn_text_input, DeleteConfirmOverlay,
+};
 use crate::game::AppState;
 use crate::net_client::GameNetClient;
 use crate::ui::UiTheme;
 use bevy::prelude::*;
-use bevy::text::{EditableText, TextCursorStyle, TextLayout};
+use bevy::text::EditableText;
 use stagcrest_storage::{RedbChunkStorage, WorldMeta, DATA_DIR};
 
 fn worlds_dir() -> std::path::PathBuf {
@@ -50,7 +54,7 @@ impl Plugin for WorldSelectPlugin {
             )
             .add_systems(
                 OnExit(AppState::WorldSelect),
-                (cleanup_world_select, cleanup_form_resources),
+                (cleanup_screen::<WorldSelectRoot>, cleanup_screen::<DeleteConfirmOverlay>, cleanup_form_resources),
             )
             .add_systems(
                 Update,
@@ -70,9 +74,6 @@ fn is_valid_world_name(name: &str) -> bool {
 
 #[derive(Component)]
 struct WorldSelectRoot;
-
-#[derive(Component)]
-struct DeleteConfirmOverlay;
 
 #[derive(Component)]
 struct WorldEntryButton;
@@ -182,14 +183,7 @@ fn spawn_world_select_ui(
                     TextColor(theme.text_primary),
                 ));
 
-                menu.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(2.0),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(1.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.divider));
+                spawn_divider(menu, theme);
 
                 if world_list.is_empty() {
                     menu.spawn((
@@ -213,16 +207,9 @@ fn spawn_world_select_ui(
                     });
                 }
 
-                menu.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(2.0),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(1.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.divider));
+                spawn_divider(menu, theme);
 
-                spawn_ws_button(
+                spawn_screen_button(
                     menu,
                     "Create New World",
                     WorldSelectAction::CreateNew,
@@ -237,8 +224,8 @@ fn spawn_world_select_ui(
                     ..default()
                 })
                 .with_children(|row| {
-                    spawn_ws_button(row, "Play", WorldSelectAction::Play, &theme);
-                    spawn_ws_button(row, "Back", WorldSelectAction::Back, &theme);
+                    spawn_screen_button(row, "Play", WorldSelectAction::Play, &theme);
+                    spawn_screen_button(row, "Back", WorldSelectAction::Back, &theme);
                 });
             });
         });
@@ -304,52 +291,8 @@ fn spawn_world_entry_inline(
                 ));
             });
 
-            row.spawn((
-                WorldSelectAction::Delete(entry.name.clone()),
-                Button,
-                Node {
-                    width: Val::Px(32.0),
-                    height: Val::Px(32.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(theme.button_bg),
-            ))
-            .with_child((
-                Text::new("X"),
-                theme.text_font(FontSize::Px(14.0)),
-                TextColor(theme.error_text),
-            ));
+            spawn_delete_icon_button(row, WorldSelectAction::Delete(entry.name.clone()), theme);
         });
-}
-
-fn spawn_ws_button(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    action: WorldSelectAction,
-    theme: &UiTheme,
-) {
-    parent
-        .spawn((
-            action,
-            Button,
-            Node {
-                width: Val::Px(180.0),
-                height: Val::Px(40.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(theme.button_bg),
-        ))
-        .with_child((
-            Text::new(label),
-            theme.text_font(theme.subtitle_size),
-            TextColor(theme.text_primary),
-        ));
 }
 
 fn spawn_create_world_ui(
@@ -386,14 +329,7 @@ fn spawn_create_world_ui(
                     TextColor(theme.text_primary),
                 ));
 
-                menu.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(2.0),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(1.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.divider));
+                spawn_divider(menu, theme);
 
                 menu.spawn(Node {
                     flex_direction: FlexDirection::Column,
@@ -407,25 +343,7 @@ fn spawn_create_world_ui(
                         theme.text_font(theme.caption_size),
                         TextColor(theme.text_muted),
                     ));
-                    field_row.spawn((
-                        NewWorldNameField,
-                        EditableText {
-                            visible_width: Some(28.0),
-                            allow_newlines: false,
-                            ..default()
-                        },
-                        TextLayout::no_wrap(),
-                        theme.text_font(theme.body_size),
-                        TextCursorStyle::default(),
-                        Node {
-                            padding: UiRect::all(Val::Px(8.0)),
-                            min_width: Val::Px(280.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme.search_bg),
-                        BorderColor::all(theme.slot_border),
-                    ));
+                    spawn_text_input(field_row, NewWorldNameField, theme, "", 28.0, 280.0);
                 });
 
                 menu.spawn(Node {
@@ -440,35 +358,10 @@ fn spawn_create_world_ui(
                         theme.text_font(theme.caption_size),
                         TextColor(theme.text_muted),
                     ));
-                    field_row.spawn((
-                        NewWorldSeedField,
-                        EditableText {
-                            visible_width: Some(28.0),
-                            allow_newlines: false,
-                            ..default()
-                        },
-                        TextLayout::no_wrap(),
-                        theme.text_font(theme.body_size),
-                        TextCursorStyle::default(),
-                        Node {
-                            padding: UiRect::all(Val::Px(8.0)),
-                            min_width: Val::Px(280.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(theme.search_bg),
-                        BorderColor::all(theme.slot_border),
-                    ));
+                    spawn_text_input(field_row, NewWorldSeedField, theme, "", 28.0, 280.0);
                 });
 
-                menu.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(2.0),
-                    margin: UiRect::vertical(Val::Px(4.0)),
-                    border_radius: BorderRadius::all(Val::Px(1.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.divider));
+                spawn_divider(menu, theme);
 
                 menu.spawn(Node {
                     flex_direction: FlexDirection::Row,
@@ -478,8 +371,8 @@ fn spawn_create_world_ui(
                     ..default()
                 })
                 .with_children(|row| {
-                    spawn_ws_button(row, "Create", WorldSelectAction::ConfirmCreate, &theme);
-                    spawn_ws_button(row, "Cancel", WorldSelectAction::CancelCreate, &theme);
+                    spawn_screen_button(row, "Create", WorldSelectAction::ConfirmCreate, &theme);
+                    spawn_screen_button(row, "Cancel", WorldSelectAction::CancelCreate, &theme);
                 });
             });
         });
@@ -641,7 +534,14 @@ fn world_select_button_system(
                 WorldSelectAction::Delete(name) => {
                     pending_delete.0 = Some(name.clone());
                     if overlays.is_empty() {
-                        spawn_delete_confirm_overlay(&mut commands, &theme, name);
+                        spawn_confirm_delete_overlay(
+                            &mut commands,
+                            &theme,
+                            name,
+                            "This cannot be undone.",
+                            WorldSelectAction::ConfirmDelete,
+                            WorldSelectAction::CancelDelete,
+                        );
                     }
                 }
                 WorldSelectAction::ConfirmDelete => {
@@ -675,114 +575,11 @@ fn world_select_button_system(
                     }
                 }
             },
-            Interaction::Hovered => {
-                *bg = BackgroundColor(theme.button_hover);
-            }
-            Interaction::None => {
-                *bg = BackgroundColor(theme.button_bg);
+            Interaction::Hovered | Interaction::None => {
+                handle_button_hover(*interaction, &theme, &mut bg, theme.button_bg);
             }
         }
     }
-}
-
-fn spawn_delete_confirm_overlay(
-    commands: &mut Commands,
-    theme: &UiTheme,
-    name: &str,
-) {
-    commands
-        .spawn((
-            DeleteConfirmOverlay,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            BackgroundColor(theme.overlay_bg),
-        ))
-        .with_children(|overlay| {
-            overlay
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(12.0),
-                    padding: UiRect::all(Val::Px(24.0)),
-                    min_width: Val::Px(320.0),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    ..default()
-                })
-                .insert(BackgroundColor(theme.panel_bg))
-                .with_children(|dialog| {
-                    dialog.spawn((
-                        Text::new(format!("Delete \"{name}\"?")),
-                        theme.text_font(FontSize::Px(22.0)),
-                        TextColor(theme.text_primary),
-                    ));
-                    dialog.spawn((
-                        Text::new("This cannot be undone."),
-                        theme.text_font(theme.caption_size),
-                        TextColor(theme.text_muted),
-                    ));
-
-                    dialog.spawn(Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(2.0),
-                        margin: UiRect::vertical(Val::Px(4.0)),
-                        border_radius: BorderRadius::all(Val::Px(1.0)),
-                        ..default()
-                    })
-                    .insert(BackgroundColor(theme.divider));
-
-                    dialog.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(12.0),
-                        justify_content: JustifyContent::Center,
-                        width: Val::Percent(100.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn((
-                            WorldSelectAction::ConfirmDelete,
-                            Button,
-                            Node {
-                                width: Val::Px(140.0),
-                                height: Val::Px(40.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Px(6.0)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.button_bg),
-                        ))
-                        .with_child((
-                            Text::new("Delete"),
-                            theme.text_font(theme.subtitle_size),
-                            TextColor(theme.error_text),
-                        ));
-
-                        row.spawn((
-                            WorldSelectAction::CancelDelete,
-                            Button,
-                            Node {
-                                width: Val::Px(140.0),
-                                height: Val::Px(40.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Px(6.0)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.button_bg),
-                        ))
-                        .with_child((
-                            Text::new("Cancel"),
-                            theme.text_font(theme.subtitle_size),
-                            TextColor(theme.text_primary),
-                        ));
-                    });
-                });
-        });
 }
 
 fn rand_seed() -> u64 {
@@ -792,19 +589,6 @@ fn rand_seed() -> u64 {
         .unwrap_or_default()
         .as_nanos();
     (nanos ^ (nanos >> 32)) as u64
-}
-
-fn cleanup_world_select(
-    mut commands: Commands,
-    roots: Query<Entity, With<WorldSelectRoot>>,
-    overlays: Query<Entity, With<DeleteConfirmOverlay>>,
-) {
-    for e in &roots {
-        commands.entity(e).despawn();
-    }
-    for e in &overlays {
-        commands.entity(e).despawn();
-    }
 }
 
 fn cleanup_form_resources(mut form: ResMut<CreateWorldForm>) {

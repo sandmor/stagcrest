@@ -14,6 +14,8 @@ members = [
     "crates/stagcrest-client",
     "crates/stagcrest-render",
     "crates/stagcrest-minimap",
+    "crates/stagcrest-modrinth",
+    "crates/stagcrest-content",
     "mods/stagcrest-core",
 ]
 
@@ -78,6 +80,14 @@ clap = { version = "4", features = ["derive"] }
 socket2 = "0.5"
 futures-lite = "2.6"
 indicatif = "0.17"
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "json",
+    "blocking",
+] }
+zip = "8.6"
+sha1 = "0.10"
+percent-encoding = "2"
 
 stagcrest-protocol = { path = "crates/stagcrest-protocol" }
 stagcrest-storage = { path = "crates/stagcrest-storage" }
@@ -92,6 +102,8 @@ stagcrest-server = { path = "crates/stagcrest-server" }
 stagcrest-client = { path = "crates/stagcrest-client" }
 stagcrest-render = { path = "crates/stagcrest-render" }
 stagcrest-minimap = { path = "crates/stagcrest-minimap" }
+stagcrest-modrinth = { path = "crates/stagcrest-modrinth" }
+stagcrest-content = { path = "crates/stagcrest-content" }
 
 [profile.release]
 lto = true

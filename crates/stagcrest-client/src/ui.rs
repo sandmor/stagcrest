@@ -8,7 +8,8 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiTheme>()
-            .add_plugins(InventoryPlugin);
+            .add_plugins(InventoryPlugin)
+            .add_systems(Update, crate::client_content::update_scrollbar_thumb);
     }
 }
 

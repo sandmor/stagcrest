@@ -1,5 +1,5 @@
 use crate::assets::{AssetError, AssetReader, FsAssetReader};
-use serde::Deserialize;
+use stagcrest_content::ContentSettings;
 use stagcrest_protocol::TextureAnimation;
 use stagcrest_storage::DATA_DIR;
 use std::cell::RefCell;
@@ -59,18 +59,6 @@ pub const DEFAULT_MC_BLOCK_TEXTURES: &[&str] = &[
     "dead_bush",
 ];
 
-#[derive(Debug, Deserialize)]
-struct ResourcePacksManifest {
-    packs: Vec<PackEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PackEntry {
-    id: String,
-    path: String,
-    enabled: bool,
-}
-
 #[derive(Debug, Clone)]
 struct BlockTextureEntry {
     width: u32,
@@ -79,12 +67,12 @@ struct BlockTextureEntry {
     animation: Option<TextureAnimation>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct McMetaRoot {
     animation: Option<McMetaAnimation>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 struct McMetaAnimation {
     #[serde(default)]
     frametime: u32,
@@ -92,7 +80,7 @@ struct McMetaAnimation {
     frames: Vec<McMetaFrame>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 #[serde(untagged)]
 #[allow(dead_code)]
 enum McMetaFrame {
@@ -107,8 +95,8 @@ pub struct ResourcePackLoader {
 }
 
 impl ResourcePackLoader {
-    pub fn load(repo_root: impl AsRef<Path>, reader: &dyn AssetReader) -> Result<Self, AssetError> {
-        let pack_roots = Self::read_manifest(reader)?;
+    pub fn load(repo_root: impl AsRef<Path>, _reader: &dyn AssetReader) -> Result<Self, AssetError> {
+        let pack_roots = Self::read_pack_roots(repo_root.as_ref())?;
         Ok(Self {
             repo_root: repo_root.as_ref().to_path_buf(),
             pack_roots,
@@ -116,31 +104,18 @@ impl ResourcePackLoader {
         })
     }
 
-    fn read_manifest(reader: &dyn AssetReader) -> Result<Vec<String>, AssetError> {
-        let manifest_path = &format!("{DATA_DIR}/resourcepacks/resourcepacks.toml");
-        let mut pack_roots = Vec::new();
-
-        if reader.exists(manifest_path) {
-            let content = reader.read_bytes(manifest_path)?;
-            pack_roots = Self::parse_manifest(&content)?;
-        }
-
-        Ok(pack_roots)
-    }
-
-    fn parse_manifest(content: &[u8]) -> Result<Vec<String>, AssetError> {
-        let manifest: ResourcePacksManifest =
-            toml::from_str(std::str::from_utf8(content).map_err(|e| {
-                AssetError::Io(format!("resourcepacks.toml is not valid UTF-8: {e}"))
-            })?)
-            .map_err(|e| AssetError::Io(format!("invalid resourcepacks.toml: {e}")))?;
-        let mut pack_roots = Vec::new();
-        for entry in manifest.packs {
-            if !entry.enabled {
-                continue;
+    fn read_pack_roots(repo_root: &Path) -> Result<Vec<String>, AssetError> {
+        let data_dir = repo_root.join(DATA_DIR);
+        let settings = match ContentSettings::load(&data_dir) {
+            Ok(settings) => settings,
+            Err(e) => {
+                tracing::warn!("failed to load content settings, using no resource packs: {e}");
+                return Ok(Vec::new());
             }
-            pack_roots.push(format!("{DATA_DIR}/resourcepacks/{}", entry.path));
-            tracing::info!("resource pack enabled: {}", entry.id);
+        };
+        let pack_roots = settings.enabled_pack_asset_paths();
+        for path in &pack_roots {
+            tracing::info!("resource pack enabled: {path}");
         }
         Ok(pack_roots)
     }

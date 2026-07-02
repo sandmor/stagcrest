@@ -1,3 +1,4 @@
+use crate::client_content::{cleanup_screen, handle_button_hover, spawn_primary_button, ClientContentSettings};
 use crate::game::AppState;
 use crate::ui::UiTheme;
 use crate::LaunchConfig;
@@ -7,8 +8,8 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::MainMenu), spawn_main_menu)
-            .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
+        app.add_systems(OnEnter(AppState::MainMenu), on_enter_main_menu)
+            .add_systems(OnExit(AppState::MainMenu), cleanup_screen::<MainMenuRoot>)
             .add_systems(
                 Update,
                 menu_button_system.run_if(in_state(AppState::MainMenu)),
@@ -22,11 +23,30 @@ struct MainMenuRoot;
 #[derive(Component)]
 enum MenuButton {
     Play,
+    ResourcePacks,
     Connect,
     Quit,
 }
 
-fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
+fn on_enter_main_menu(
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<AppState>>,
+    theme: Res<UiTheme>,
+) {
+    let settings = ClientContentSettings::reload();
+    let needs_setup =
+        !settings.0.has_enabled_pack() && !settings.0.resource_pack_setup_dismissed();
+    commands.insert_resource(settings);
+
+    if needs_setup {
+        next_state.set(AppState::ResourcePackSetup);
+        return;
+    }
+
+    spawn_main_menu_ui(&mut commands, &theme);
+}
+
+fn spawn_main_menu_ui(commands: &mut Commands, theme: &UiTheme) {
     commands
         .spawn((
             MainMenuRoot,
@@ -52,32 +72,11 @@ fn spawn_main_menu(mut commands: Commands, theme: Res<UiTheme>) {
                 theme.text_font(theme.subtitle_size),
                 TextColor(theme.text_muted),
             ));
-            spawn_button(parent, "Play", MenuButton::Play, &theme);
-            spawn_button(parent, "Connect", MenuButton::Connect, &theme);
-            spawn_button(parent, "Quit", MenuButton::Quit, &theme);
+            spawn_primary_button(parent, "Play", MenuButton::Play, theme);
+            spawn_primary_button(parent, "Resource Packs", MenuButton::ResourcePacks, theme);
+            spawn_primary_button(parent, "Connect", MenuButton::Connect, theme);
+            spawn_primary_button(parent, "Quit", MenuButton::Quit, theme);
         });
-}
-
-fn spawn_button(parent: &mut ChildSpawnerCommands, label: &str, action: MenuButton, theme: &UiTheme) {
-    parent
-        .spawn((
-            action,
-            Button,
-            Node {
-                width: Val::Px(220.0),
-                height: Val::Px(48.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                ..default()
-            },
-        ))
-        .insert(BackgroundColor(theme.button_bg))
-        .with_child((
-            Text::new(label),
-            theme.text_font(theme.body_size),
-            TextColor(theme.text_primary),
-        ));
 }
 
 fn menu_button_system(
@@ -100,6 +99,9 @@ fn menu_button_system(
                         next_state.set(AppState::WorldSelect);
                     }
                 }
+                MenuButton::ResourcePacks => {
+                    next_state.set(AppState::ResourcePacks);
+                }
                 MenuButton::Connect => {
                     next_state.set(AppState::Connect);
                 }
@@ -107,18 +109,9 @@ fn menu_button_system(
                     exit.write(AppExit::Success);
                 }
             },
-            Interaction::Hovered => {
-                *bg = BackgroundColor(theme.button_hover);
-            }
-            Interaction::None => {
-                *bg = BackgroundColor(theme.button_bg);
+            Interaction::Hovered | Interaction::None => {
+                handle_button_hover(*interaction, &theme, &mut bg, theme.button_bg);
             }
         }
-    }
-}
-
-fn cleanup_menu(mut commands: Commands, query: Query<Entity, With<MainMenuRoot>>) {
-    for e in &query {
-        commands.entity(e).despawn();
     }
 }

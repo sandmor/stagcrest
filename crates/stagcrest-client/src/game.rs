@@ -24,6 +24,8 @@ use stagcrest_render::{
 pub enum AppState {
     #[default]
     MainMenu,
+    ResourcePackSetup,
+    ResourcePacks,
     WorldSelect,
     Connect,
     Loading,

@@ -21,8 +21,8 @@ Run from this directory:
   ./stagcrest-client          single-player (embedded server)
   ./stagcrest-server        dedicated multiplayer server
 
-Optional: add Minecraft-format resource packs under data/resourcepacks/
-(see data/resourcepacks/resourcepacks.toml.example in the source repo).
+Optional: use Resource Packs in the client menu, or edit data/settings.toml
+(see data/settings.toml.example in the source repo).
 EOF
 
 mkdir -p "$ROOT/dist"

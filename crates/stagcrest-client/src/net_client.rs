@@ -103,7 +103,18 @@ impl GameNetClient {
             self.last_rtt_ms = Some(sent.elapsed().as_secs_f32() * 1000.0);
         }
     }
+    pub fn shutdown_session(&mut self) {
+        self.transport = None;
+        if let Some(handle) = self._server_handle.take() {
+            let _ = handle.join();
+        }
+        self.handshake_done = false;
+        self.manifest = None;
+        self.initial_received = false;
+    }
+
     pub fn start_embedded(&mut self, config: ServerConfig) -> Result<(), String> {
+        self.shutdown_session();
         let (handle, client_transport) = spawn_local(config).map_err(|e| e.to_string())?;
         self.transport = Some(Box::new(client_transport));
         self.embedded = true;
