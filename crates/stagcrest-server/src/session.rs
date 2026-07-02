@@ -42,8 +42,16 @@ impl WorldSession {
     }
 }
 
-pub fn streaming_lru_capacity(render_distance: i32, vertical_render_distance: i32) -> usize {
+pub const MAX_WORLD_LRU_CHUNKS: usize = 65_536;
+
+pub fn streaming_lru_capacity(
+    render_distance: i32,
+    vertical_render_distance: i32,
+    active_clients: usize,
+) -> usize {
     let footprint_h = 2 * (render_distance + 2) + 1;
     let footprint_v = 2 * (vertical_render_distance + 2) + 1;
-    (footprint_h * footprint_h * footprint_v) as usize + 64
+    let single = (footprint_h * footprint_h * footprint_v) as usize + 64;
+    let clients = active_clients.max(1);
+    (single * clients).min(MAX_WORLD_LRU_CHUNKS)
 }

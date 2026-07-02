@@ -117,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         render_distance: 8,
         vertical_render_distance: 4,
         net_sim_latency_ms: args.net_sim_latency_ms,
+        max_clients: 16,
     };
 
     run_standalone(config).await

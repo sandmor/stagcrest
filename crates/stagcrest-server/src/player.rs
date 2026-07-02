@@ -9,6 +9,7 @@ use stagcrest_protocol::{
     piston_extended, piston_facing, piston_front_pos, piston_head_facing, BlockPos, BlockState,
 };
 
+use crate::client_session::{ClientId, ClientRegistry};
 use crate::GameServer;
 
 fn is_axis_face_normal(nx: i32, ny: i32, nz: i32) -> bool {
@@ -18,19 +19,32 @@ fn is_axis_face_normal(nx: i32, ny: i32, nz: i32) -> bool {
     )
 }
 
-pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> PlayerAck {
+pub fn apply_player_action(
+    server: &mut GameServer,
+    clients: &mut ClientRegistry,
+    client_id: ClientId,
+    action: PlayerAction,
+) -> PlayerAck {
     let ack = |ok: bool, reason: &str| PlayerAck {
         action_seq: action.action_seq,
         ok,
         reason: reason.to_string(),
     };
 
-    if !server.handshake_complete {
+    let Some(client) = clients.get(client_id) else {
+        return ack(false, "client disconnected");
+    };
+
+    if !client.handshake_complete {
         return ack(false, "handshake incomplete");
     }
 
+    let pose = client.pose;
+
     let air = server.air;
     let registry = &server.registry;
+    let h = server.config.render_distance;
+    let v = server.config.vertical_render_distance;
 
     match action.kind {
         PlayerActionKind::Break => {
@@ -73,16 +87,19 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                     &server.registry,
                 );
                 server.mark_chunk_dirty(pos.chunk_pos());
-                server.queue_priority(stagcrest_net::GameMessage::Server(
-                    stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
+                server.fanout_block_update(
+                    clients,
+                    BlockUpdate {
                         pos,
                         id: air,
                         state: BlockState(0),
-                    }),
-                ));
+                    },
+                    h,
+                    v,
+                );
             }
             server.circuit.tick(&mut server.world, &server.registry);
-            server.broadcast_circuit_replication();
+            server.broadcast_circuit_replication(clients);
             ack(true, "")
         }
         PlayerActionKind::Place => {
@@ -95,7 +112,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 return ack(false, "not air");
             }
 
-            if let Some(pose) = server.latest_pose {
+            if let Some(pose) = pose {
                 let min = Vec3::new(place_pos.x as f32, place_pos.y as f32, place_pos.z as f32);
                 let max = min + Vec3::ONE;
                 let pos = pose.position();
@@ -116,8 +133,7 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
             };
 
-            let (dir_x, dir_y, dir_z) = server
-                .latest_pose
+            let (dir_x, dir_y, dir_z) = pose
                 .map(|p| {
                     let yaw = p.yaw;
                     let pitch = p.pitch;
@@ -184,17 +200,20 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 .circuit
                 .notify_block_changed(place_pos, &mut server.world, registry);
             server.circuit.tick(&mut server.world, registry);
-            server.broadcast_circuit_replication();
+            server.broadcast_circuit_replication(clients);
             server.mark_chunk_dirty(place_pos.chunk_pos());
             let (_, block_state) = server.world.get_block(place_pos);
 
-            server.queue_priority(stagcrest_net::GameMessage::Server(
-                stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
+            server.fanout_block_update(
+                clients,
+                BlockUpdate {
                     pos: place_pos,
                     id: block_id,
                     state: block_state,
-                }),
-            ));
+                },
+                h,
+                v,
+            );
             ack(true, "")
         }
         PlayerActionKind::Toggle => {
@@ -217,15 +236,18 @@ pub fn apply_player_action(server: &mut GameServer, action: PlayerAction) -> Pla
                 return ack(false, "not toggleable");
             }
             server.circuit.tick(&mut server.world, registry);
-            server.broadcast_circuit_replication();
+            server.broadcast_circuit_replication(clients);
             let (id, state) = server.world.get_block(action.target);
-            server.queue_priority(stagcrest_net::GameMessage::Server(
-                stagcrest_net::ServerMessage::BlockUpdate(BlockUpdate {
+            server.fanout_block_update(
+                clients,
+                BlockUpdate {
                     pos: action.target,
                     id,
                     state,
-                }),
-            ));
+                },
+                h,
+                v,
+            );
             ack(true, "")
         }
         PlayerActionKind::Pick => {

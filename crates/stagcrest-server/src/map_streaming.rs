@@ -57,7 +57,7 @@ impl ServerBlobCache {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ClientMapState {
     pub active: bool,
     pub subscribed: HashSet<(i32, i32)>,

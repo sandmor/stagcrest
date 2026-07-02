@@ -86,6 +86,7 @@ fn start_connection_system(
         render_distance: config.render_distance,
         vertical_render_distance: config.vertical_render_distance,
         net_sim_latency_ms: net.net_config.sim_latency_ms,
+        max_clients: 1,
     };
 
     if let Some(addr) = net.connect_addr.clone() {
@@ -177,6 +178,7 @@ fn poll_connection_system(
         let lru_cap = stagcrest_server::streaming_lru_capacity(
             config.render_distance,
             config.vertical_render_distance,
+            1,
         );
         let world = WorldReplica::new(stagcrest_world::World::with_lru_capacity(lru_cap, air));
 

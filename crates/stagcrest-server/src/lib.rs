@@ -1,4 +1,6 @@
+mod client_session;
 mod export_minimap;
+mod interest;
 mod map_generation;
 mod map_streaming;
 mod net;
@@ -25,11 +27,11 @@ use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 
 use crate::map_generation::MapChunkPipeline;
-use crate::map_streaming::{ClientMapState, ServerBlobCache, MAX_MAP_SNAPSHOT_SEND_PER_TICK};
+use crate::map_streaming::{ServerBlobCache, MAX_MAP_SNAPSHOT_SEND_PER_TICK};
 
-const MAX_PENDING_BULK: usize = 256;
 use tokio::net::TcpListener;
 
+pub use client_session::{ClientId, ClientRegistry, ConnectedClient};
 pub use export_minimap::{
     export_minimap, load_map_export_setup, open_world_session, rebuild_all_map_chunks,
     ExportError, ExportMinimapConfig, MapExportSetup,
@@ -48,6 +50,7 @@ pub struct ServerConfig {
     pub render_distance: i32,
     pub vertical_render_distance: i32,
     pub net_sim_latency_ms: u64,
+    pub max_clients: usize,
 }
 
 impl Default for ServerConfig {
@@ -60,6 +63,7 @@ impl Default for ServerConfig {
             render_distance: 8,
             vertical_render_distance: 4,
             net_sim_latency_ms: 0,
+            max_clients: 16,
         }
     }
 }
@@ -76,25 +80,16 @@ pub struct GameServer {
     pub session: WorldSession,
     pub generator: TerrainGenerator,
     pub pipeline: StreamingPipeline,
-    pub stream_state: TerrainStreamState,
-    pub last_center: Option<ChunkPos>,
     pub air: BlockId,
     pub registry: BlockRegistry,
-    pub latest_pose: Option<stagcrest_net::PlayerPose>,
-    pending_priority: Vec<GameMessage>,
-    pending_bulk: Vec<GameMessage>,
     circuit_accumulator: f32,
     pub server_id: u64,
-    pub client_id: Option<u64>,
-    pub(crate) handshake_complete: bool,
-    pub(crate) handshake_pending: bool,
     cached_manifest: stagcrest_protocol::manifest::ContentManifest,
     cached_atlas: AtlasTransfer,
     map_pipeline: MapChunkPipeline,
     map_ctx: Arc<MapResolveContext>,
     map_y_chunks: Vec<i32>,
     map_blob_cache: ServerBlobCache,
-    client_map: ClientMapState,
 }
 
 impl GameServer {
@@ -114,8 +109,11 @@ impl GameServer {
         let column_blocks = ColumnBlocks::resolve(&registry, air);
 
         let mut session = WorldSession::open(&config.world_name, config.world_seed)?;
-        let lru_cap =
-            streaming_lru_capacity(config.render_distance, config.vertical_render_distance);
+        let lru_cap = streaming_lru_capacity(
+            config.render_distance,
+            config.vertical_render_distance,
+            config.max_clients,
+        );
         let world = World::with_lru_capacity(lru_cap, air);
         let mut terrain = WorldGenState::new(WorldSeed(config.world_seed));
         terrain.apply_river_config(biomes.river_config());
@@ -125,12 +123,6 @@ impl GameServer {
         let spawn_chunk = spawn.chunk_pos();
         let y_bounds = world_chunk_y_bounds(terrain.config());
         let mut pipeline = StreamingPipeline::default();
-        let stream_state = TerrainStreamState {
-            center_x: spawn_chunk.x,
-            center_y: spawn_chunk.y,
-            center_z: spawn_chunk.z,
-            valid: true,
-        };
         let initial_h = config.render_distance.min(4);
         let initial_v = config.vertical_render_distance.min(4);
         pipeline.enqueue_area(
@@ -182,25 +174,16 @@ impl GameServer {
             session,
             generator,
             pipeline,
-            stream_state,
-            last_center: Some(spawn_chunk),
             air,
             registry,
-            latest_pose: None,
-            pending_priority: Vec::new(),
-            pending_bulk: Vec::new(),
             circuit_accumulator: 0.0,
             server_id: 1,
-            client_id: None,
-            handshake_complete: false,
-            handshake_pending: false,
             cached_manifest,
             cached_atlas,
             map_pipeline,
             map_ctx,
             map_y_chunks,
             map_blob_cache: ServerBlobCache::default(),
-            client_map: ClientMapState::default(),
         })
     }
 
@@ -217,25 +200,38 @@ impl GameServer {
         self.cached_atlas.clone()
     }
 
-    pub fn handle_client_message(&mut self, msg: ClientMessage) {
-        net::handle_client_message(self, msg);
+    pub fn handle_client_message(
+        &mut self,
+        clients: &mut ClientRegistry,
+        client_id: ClientId,
+        msg: ClientMessage,
+    ) {
+        net::handle_client_message(self, clients, client_id, msg);
     }
 
-    pub(crate) fn broadcast_circuit_replication(&mut self) {
+    pub fn fanout_block_update(
+        &self,
+        clients: &mut ClientRegistry,
+        update: BlockUpdate,
+        h_radius: i32,
+        v_radius: i32,
+    ) {
+        clients.fanout_block_update(update, h_radius, v_radius);
+    }
+
+    pub(crate) fn broadcast_circuit_replication(&mut self, clients: &mut ClientRegistry) {
+        let h = self.config.render_distance;
+        let v = self.config.vertical_render_distance;
         for (pos, id, state) in self.circuit.drain_visual_updates() {
-            self.queue_priority(GameMessage::Server(ServerMessage::BlockUpdate(
-                BlockUpdate { pos, id, state },
-            )));
+            clients.fanout_block_update(BlockUpdate { pos, id, state }, h, v);
         }
         let updates = self.circuit.drain_power_updates();
         if !updates.is_empty() {
-            self.queue_priority(GameMessage::Server(ServerMessage::CircuitPowerBatch(
-                CircuitPowerBatch { updates },
-            )));
+            clients.fanout_circuit_batch(CircuitPowerBatch { updates }, h, v);
         }
     }
 
-    pub fn tick(&mut self, dt_secs: f32) {
+    pub fn tick(&mut self, clients: &mut ClientRegistry, dt_secs: f32) {
         const CIRCUIT_TICK_INTERVAL: f32 = 0.1;
 
         self.circuit_accumulator += dt_secs;
@@ -245,10 +241,26 @@ impl GameServer {
             self.session
                 .persistence
                 .absorb_dirty_chunks(self.circuit.drain_dirty_chunks());
-            self.broadcast_circuit_replication();
+            self.broadcast_circuit_replication(clients);
         }
 
-        if self.handshake_complete {
+        if clients.any_handshake_complete() {
+            let streaming_count = clients
+                .clients()
+                .iter()
+                .filter(|c| c.handshake_complete && c.stream.valid)
+                .count();
+            let enqueue_rotate = if streaming_count > 0 {
+                clients.next_enqueue_client_index(streaming_count)
+            } else {
+                0
+            };
+            let fair_rotate = if streaming_count > 0 {
+                clients.next_fair_client_index(streaming_count)
+            } else {
+                0
+            };
+
             let stream_result = self.pipeline.tick(
                 &mut self.world,
                 &mut self.terrain,
@@ -258,89 +270,73 @@ impl GameServer {
                 &self.biomes,
                 &self.registry,
                 &self.generator,
-                &self.stream_state,
-                &mut self.last_center,
+                clients.clients_mut(),
                 self.air,
                 self.config.render_distance,
                 self.config.vertical_render_distance,
+                enqueue_rotate,
+                fair_rotate,
             );
-            for snapshot in stream_result.snapshots {
-                let chunk = snapshot.pos;
-                self.queue_bulk(GameMessage::Server(ServerMessage::ChunkSnapshot(snapshot)));
-                let seed = self.circuit.power_in_chunk(chunk);
-                if !seed.is_empty() {
-                    self.queue_bulk(GameMessage::Server(ServerMessage::CircuitPowerBatch(
-                        CircuitPowerBatch { updates: seed },
+
+            for (client_id, delta) in stream_result.per_client {
+                let Some(client) = clients.get_mut(client_id) else {
+                    continue;
+                };
+                for snapshot in delta.snapshots {
+                    let chunk = snapshot.pos;
+                    client.queue_bulk(GameMessage::Server(ServerMessage::ChunkSnapshot(
+                        snapshot,
                     )));
+                    let seed = self.circuit.power_in_chunk(chunk);
+                    if !seed.is_empty() {
+                        client.queue_bulk(GameMessage::Server(ServerMessage::CircuitPowerBatch(
+                            CircuitPowerBatch { updates: seed },
+                        )));
+                    }
+                }
+                for pos in delta.unloads {
+                    client.queue_priority(GameMessage::Server(ServerMessage::ChunkUnload(pos)));
                 }
             }
-            for pos in stream_result.unloads {
-                self.queue_priority(GameMessage::Server(ServerMessage::ChunkUnload(pos)));
-            }
+
             self.map_pipeline.tick(
                 &self.world,
                 &self.map_y_chunks,
                 &self.map_ctx,
                 &self.session.storage,
             );
-            self.tick_map_streaming();
+            self.tick_map_streaming(clients);
         }
     }
 
-    fn tick_map_streaming(&mut self) {
+    fn tick_map_streaming(&mut self, clients: &mut ClientRegistry) {
         for done in self.map_pipeline.drain_completions() {
             self.map_blob_cache
                 .insert(done.mx, done.mz, done.blob.clone());
-            if let Some(msg) = self.client_map.fan_out_regen(done.mx, done.mz, done.blob) {
-                self.queue_bulk(msg);
+            for client in clients.clients_mut() {
+                if let Some(msg) = client
+                    .map
+                    .fan_out_regen(done.mx, done.mz, done.blob.clone())
+                {
+                    client.queue_bulk(msg);
+                }
             }
         }
 
-        if self.pending_bulk.len() >= MAX_PENDING_BULK {
-            return;
-        }
-
         let storage = self.session.storage.as_ref();
-        let snapshots = self.client_map.drain_pending(
-            MAX_MAP_SNAPSHOT_SEND_PER_TICK,
-            &mut self.map_blob_cache,
-            storage,
-            &self.world,
-            &self.map_y_chunks,
-            &mut self.map_pipeline,
-        );
-        for snap in snapshots {
-            self.queue_bulk(GameMessage::Server(ServerMessage::MapChunkSnapshot(snap)));
+        for client in clients.clients_mut() {
+            let snapshots = client.map.drain_pending(
+                MAX_MAP_SNAPSHOT_SEND_PER_TICK,
+                &mut self.map_blob_cache,
+                storage,
+                &self.world,
+                &self.map_y_chunks,
+                &mut self.map_pipeline,
+            );
+            for snap in snapshots {
+                client.queue_bulk(GameMessage::Server(ServerMessage::MapChunkSnapshot(snap)));
+            }
         }
-    }
-
-    pub fn queue_priority(&mut self, msg: GameMessage) {
-        self.pending_priority.push(msg);
-    }
-
-    pub fn queue_bulk(&mut self, msg: GameMessage) {
-        if self.pending_bulk.len() >= MAX_PENDING_BULK {
-            self.pending_bulk.remove(0);
-        }
-        self.pending_bulk.push(msg);
-    }
-
-    pub fn drain_outgoing(&mut self) -> impl Iterator<Item = GameMessage> + '_ {
-        let priority = std::mem::take(&mut self.pending_priority);
-        let bulk = std::mem::take(&mut self.pending_bulk);
-        priority.into_iter().chain(bulk)
-    }
-
-    pub fn drain_priority(&mut self) -> impl Iterator<Item = GameMessage> + '_ {
-        std::mem::take(&mut self.pending_priority).into_iter()
-    }
-
-    pub fn drain_bulk(&mut self) -> impl Iterator<Item = GameMessage> + '_ {
-        std::mem::take(&mut self.pending_bulk).into_iter()
-    }
-
-    pub fn enable_world_streaming(&mut self) {
-        self.handshake_complete = true;
     }
 
     pub fn flush_persistence(&mut self) {
@@ -359,15 +355,11 @@ impl GameServer {
         self.session.persistence.mark_dirty(pos);
     }
 
-    pub(crate) fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) {
-        if self.handshake_pending && wire_ready {
-            self.handshake_pending = false;
-            self.handshake_complete = true;
-        }
-    }
-
     pub fn run_loop<T: GameTransport>(&mut self, transport: &mut T, tick_ms: u64) {
+        let mut clients = ClientRegistry::new(1);
+        let embedded_id = clients.register_inprocess();
         let dt = tick_ms as f32 / 1000.0;
+
         loop {
             let mut latest_pose = None;
             while let Ok(Some(GameMessage::Client(msg))) = transport.try_recv() {
@@ -377,30 +369,46 @@ impl GameServer {
                     }
                     ClientMessage::Ping { nonce } => {
                         if let Some(pose) = latest_pose.take() {
-                            net::handle_pose(self, pose);
+                            if let Some(c) = clients.get_mut(embedded_id) {
+                                net::handle_pose(c, pose);
+                            }
                         }
-                        self.handle_client_message(ClientMessage::Ping { nonce });
+                        self.handle_client_message(
+                            &mut clients,
+                            embedded_id,
+                            ClientMessage::Ping { nonce },
+                        );
                     }
                     other => {
                         if let Some(pose) = latest_pose.take() {
-                            net::handle_pose(self, pose);
+                            if let Some(c) = clients.get_mut(embedded_id) {
+                                net::handle_pose(c, pose);
+                            }
                         }
-                        self.handle_client_message(other);
+                        self.handle_client_message(&mut clients, embedded_id, other);
                     }
                 }
             }
             if let Some(pose) = latest_pose.take() {
-                net::handle_pose(self, pose);
-            }
-            self.tick(dt);
-            let outgoing: Vec<_> = self.drain_outgoing().collect();
-            for msg in outgoing {
-                if transport.send(msg).is_err() {
-                    self.flush_persistence();
-                    return;
+                if let Some(c) = clients.get_mut(embedded_id) {
+                    net::handle_pose(c, pose);
                 }
             }
-            self.finish_handshake_if_wire_ready(true);
+
+            self.tick(&mut clients, dt);
+
+            if let Some(c) = clients.get_mut(embedded_id) {
+                c.finish_handshake_if_wire_ready(true);
+                let priority = c.take_priority();
+                let bulk = c.take_bulk();
+                for msg in priority.into_iter().chain(bulk) {
+                    if transport.send(msg).is_err() {
+                        self.flush_persistence();
+                        return;
+                    }
+                }
+            }
+
             transport.idle_wait(Duration::from_millis(tick_ms));
         }
     }
@@ -421,6 +429,52 @@ pub fn spawn_local(
     Ok((handle, client_transport))
 }
 
+async fn drain_client_io(clients: &mut ClientRegistry, id: ClientId) -> bool {
+    let wire_ready = clients
+        .get(id)
+        .and_then(|c| c.tcp.as_ref())
+        .is_some_and(|conn| {
+            conn.handshake_wire_ready
+                .load(std::sync::atomic::Ordering::Acquire)
+        });
+
+    let priority = clients
+        .get_mut(id)
+        .map(|c| c.take_priority())
+        .unwrap_or_default();
+    let bulk = if wire_ready {
+        clients
+            .get_mut(id)
+            .map(|c| c.take_bulk())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let Some(conn) = clients.get_mut(id).and_then(|c| c.tcp.as_mut()) else {
+        return false;
+    };
+
+    for msg in priority {
+        if send_message(conn, msg).await.is_err() {
+            return true;
+        }
+    }
+
+    if wire_ready {
+        for msg in bulk {
+            if send_message(conn, msg).await.is_err() {
+                return true;
+            }
+        }
+        if let Some(c) = clients.get_mut(id) {
+            c.finish_handshake_if_wire_ready(true);
+        }
+    }
+
+    false
+}
+
 pub async fn run_standalone(
     config: ServerConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -435,7 +489,7 @@ pub async fn run_standalone(
     let mut net_config = NetConfig::default();
     net_config.sim_latency_ms = config.net_sim_latency_ms;
     let mut interval = tokio::time::interval(Duration::from_millis(16));
-    let mut session: Option<stagcrest_net::AsyncTcpSession> = None;
+    let mut clients = ClientRegistry::new(config.max_clients);
 
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
@@ -447,69 +501,59 @@ pub async fn run_standalone(
                 server.flush_persistence();
                 return Ok(());
             }
-            accept = listener.accept(), if session.is_none() => {
+            accept = listener.accept(), if clients.has_capacity() => {
                 let (stream, addr) = accept?;
                 tracing::info!("client connected from {addr}");
-                session = Some(spawn_tcp_session(stream, net_config.clone()).await?);
-                server.handshake_complete = false;
-                server.handshake_pending = false;
-                server.client_id = None;
-                if let Some(conn) = session.as_ref() {
-                    conn.handshake_wire_ready
-                        .store(false, std::sync::atomic::Ordering::Release);
-                }
+                let session = spawn_tcp_session(stream, net_config.clone()).await?;
+                session.handshake_wire_ready
+                    .store(false, std::sync::atomic::Ordering::Release);
+                clients.register_tcp(session);
             }
             _ = interval.tick() => {
-                let mut disconnected = false;
-                if let Some(conn) = session.as_mut() {
+                let client_ids = clients.client_ids();
+                let mut disconnected = Vec::new();
+                let mut inbound: Vec<(ClientId, ClientMessage)> = Vec::new();
+
+                for id in &client_ids {
+                    let Some(client) = clients.get_mut(*id) else {
+                        continue;
+                    };
+                    let Some(conn) = client.tcp.as_mut() else {
+                        continue;
+                    };
                     loop {
                         match conn.incoming.try_recv() {
-                            Ok(msg) => {
-                                if let GameMessage::Client(client_msg) = msg {
-                                    server.handle_client_message(client_msg);
-                                }
+                            Ok(GameMessage::Client(client_msg)) => {
+                                inbound.push((*id, client_msg));
                             }
+                            Ok(_) => {}
                             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
                             Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                                disconnected = true;
+                                disconnected.push(*id);
                                 break;
                             }
                         }
                     }
-                    if !disconnected {
-                        server.tick(0.016);
-                        for msg in server.drain_priority() {
-                            if send_message(conn, msg).await.is_err() {
-                                disconnected = true;
-                                break;
-                            }
-                        }
-                        if !disconnected
-                            && conn.handshake_wire_ready.load(std::sync::atomic::Ordering::Acquire)
-                        {
-                            for msg in server.drain_bulk() {
-                                if send_message(conn, msg).await.is_err() {
-                                    disconnected = true;
-                                    break;
-                                }
-                            }
-                        }
-                        server.finish_handshake_if_wire_ready(
-                            conn.handshake_wire_ready
-                                .load(std::sync::atomic::Ordering::Acquire),
-                        );
-                    }
-                } else {
-                    server.tick(0.016);
                 }
-                if disconnected {
-                    server.flush_persistence();
-                    server.pipeline.reset_client_delivery();
-                    server.client_map.reset();
-                    session = None;
-                    server.handshake_complete = false;
-                    server.handshake_pending = false;
-                    server.client_id = None;
+
+                for (id, msg) in inbound {
+                    server.handle_client_message(&mut clients, id, msg);
+                }
+
+                server.tick(&mut clients, 0.016);
+
+                for id in &client_ids {
+                    if disconnected.contains(id) {
+                        continue;
+                    }
+                    if drain_client_io(&mut clients, *id).await {
+                        disconnected.push(*id);
+                    }
+                }
+
+                for id in disconnected {
+                    tracing::info!("client {:?} disconnected", id);
+                    clients.remove(id);
                 }
             }
         }
