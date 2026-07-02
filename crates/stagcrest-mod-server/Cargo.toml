@@ -7,6 +7,7 @@ edition.workspace = true
 stagcrest-protocol.workspace = true
 stagcrest-world.workspace = true
 stagcrest-mod-sdk.workspace = true
+stagcrest-storage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

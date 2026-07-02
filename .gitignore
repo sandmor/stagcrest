@@ -5,11 +5,7 @@
 .DS_Store
 mods/**/*.wasm
 
-# Local data (worlds, configs, etc.)
+# Local data (worlds, configs, resource packs, etc.)
 /data/
-
-# Local Minecraft-format resource packs (not shipped in the repo).
-/resourcepacks/*
-!/resourcepacks/.gitkeep
-!/resourcepacks/resourcepacks.toml.example
-!/resourcepacks/resourcepacks.web.toml.example
+!/data/resourcepacks/.gitkeep
+!/data/resourcepacks/resourcepacks.toml.example

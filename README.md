@@ -122,12 +122,12 @@ Texture packs are **not included** in the repo. A fresh clone runs with flat-col
 
 To use Minecraft-format block textures locally:
 
-1. Drop a pack folder under `resourcepacks/` (must contain `pack.mcmeta`).
+1. Drop a pack folder under `data/resourcepacks/` (must contain `pack.mcmeta`).
 2. Copy the example manifest:
    ```bash
-   cp resourcepacks/resourcepacks.toml.example resourcepacks/resourcepacks.toml
+   cp data/resourcepacks/resourcepacks.toml.example data/resourcepacks/resourcepacks.toml
    ```
-3. Edit `resourcepacks/resourcepacks.toml`: set `path` to your pack folder name and `enabled = true`.
+3. Edit `data/resourcepacks/resourcepacks.toml`: set `path` to your pack folder name and `enabled = true`.
 
 The server loads block PNGs from `{pack}/assets/minecraft/textures/block/` for textures referenced by `stagcrest-core`.
 
@@ -151,7 +151,7 @@ crates/
 mods/
   stagcrest-core/       — air, blocks, redstone, textures
   mods.toml             — mod manifest
-resourcepacks/          — local MC-format packs (gitignored)
+data/resourcepacks/     — local MC-format packs (gitignored)
 ```
 
 ## Controls

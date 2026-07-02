@@ -1,6 +1,7 @@
 use crate::assets::{AssetError, AssetReader, FsAssetReader};
 use serde::Deserialize;
 use stagcrest_protocol::TextureAnimation;
+use stagcrest_storage::DATA_DIR;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -116,7 +117,7 @@ impl ResourcePackLoader {
     }
 
     fn read_manifest(reader: &dyn AssetReader) -> Result<Vec<String>, AssetError> {
-        let manifest_path = "resourcepacks/resourcepacks.toml";
+        let manifest_path = &format!("{DATA_DIR}/resourcepacks/resourcepacks.toml");
         let mut pack_roots = Vec::new();
 
         if reader.exists(manifest_path) {
@@ -138,7 +139,7 @@ impl ResourcePackLoader {
             if !entry.enabled {
                 continue;
             }
-            pack_roots.push(format!("resourcepacks/{}", entry.path));
+            pack_roots.push(format!("{DATA_DIR}/resourcepacks/{}", entry.path));
             tracing::info!("resource pack enabled: {}", entry.id);
         }
         Ok(pack_roots)

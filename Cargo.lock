@@ -4532,6 +4532,7 @@ dependencies = [
  "slab",
  "stagcrest-mod-sdk",
  "stagcrest-protocol",
+ "stagcrest-storage",
  "stagcrest-world",
  "thiserror 2.0.18",
  "toml",
