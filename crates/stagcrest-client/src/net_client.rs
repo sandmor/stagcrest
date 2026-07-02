@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use stagcrest_net::{
-    ClientHello, ClientMessage, GameMessage, GameTransport, NetConfig, ServerMessage,
+    ClientHello, ClientMessage, GameMessage, GameTransport, MapViewSubscribe, NetConfig, ServerMessage,
     PROTOCOL_VERSION,
 };
 use stagcrest_protocol::manifest::ContentManifest;
@@ -171,6 +171,12 @@ impl GameNetClient {
     pub fn send_action(&mut self, action: stagcrest_net::PlayerAction) {
         if let Some(t) = self.transport.as_mut() {
             let _ = t.send(GameMessage::Client(ClientMessage::Action(action)));
+        }
+    }
+
+    pub fn send_map_view_subscribe(&mut self, sub: MapViewSubscribe) {
+        if let Some(t) = self.transport.as_mut() {
+            let _ = t.send(GameMessage::Client(ClientMessage::MapViewSubscribe(sub)));
         }
     }
 }

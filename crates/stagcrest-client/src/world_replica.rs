@@ -5,7 +5,6 @@ use stagcrest_world::World;
 
 use crate::chunk_streaming::{drop_chunk_assets, unload_chunk, BiomeGridCache};
 use crate::mesh_scheduler::{request_face_neighbors, MeshScheduler, RemeshUrgency};
-use crate::minimap::{MinimapColumnCache, MinimapState};
 use stagcrest_render::MeshCacheResource;
 
 #[derive(Resource)]
@@ -26,12 +25,9 @@ impl WorldReplica {
         biome_cache: &mut BiomeGridCache,
         power: &mut CircuitPowerOverlay,
         commands: &mut Commands,
-        mut minimap: Option<&mut MinimapState>,
-        minimap_cache: Option<&mut MinimapColumnCache>,
     ) {
         match msg {
             ServerMessage::ChunkSnapshot(snapshot) => {
-                let pos = snapshot.pos;
                 self.apply_chunk_snapshot(
                     snapshot,
                     mesh_scheduler,
@@ -40,23 +36,12 @@ impl WorldReplica {
                     power,
                     commands,
                 );
-                if let (Some(m), Some(c)) = (minimap.as_mut(), minimap_cache) {
-                    m.refresh_chunk_in_view(c, pos);
-                }
             }
             ServerMessage::ChunkUnload(pos) => {
                 unload_chunk(pos, self, mesh_scheduler, mesh_cache, power, commands);
-                if let (Some(m), Some(c)) = (minimap.as_mut(), minimap_cache) {
-                    m.unload_chunk(c, pos);
-                }
             }
             ServerMessage::BlockUpdate(update) => {
-                let wx = update.pos.x;
-                let wz = update.pos.z;
                 self.apply_block_update(update, mesh_scheduler);
-                if let (Some(m), Some(c)) = (minimap.as_mut(), minimap_cache) {
-                    m.refresh_column(c, wx, wz);
-                }
             }
             _ => {}
         }

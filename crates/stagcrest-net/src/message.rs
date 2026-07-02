@@ -100,12 +100,31 @@ pub struct CircuitPowerBatch {
     pub updates: Vec<(BlockPos, u8)>,
 }
 
+/// Client reports which map tiles overlap the minimap HUD (sent on view change only).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapViewSubscribe {
+    pub active: bool,
+    pub center_x: i32,
+    pub center_z: i32,
+    pub bpp: u32,
+    pub tiles: Vec<(i32, i32)>,
+}
+
+/// Server pushes a stored map tile (`MapChunkBlob` bytes).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapChunkSnapshot {
+    pub mx: i32,
+    pub mz: i32,
+    pub compressed: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello(ClientHello),
     Pose(PlayerPose),
     Action(PlayerAction),
     ChunkUnsubscribe(ChunkPos),
+    MapViewSubscribe(MapViewSubscribe),
     Ping { nonce: u32 },
 }
 
@@ -120,6 +139,7 @@ pub enum ServerMessage {
     ChunkUnload(ChunkPos),
     BlockUpdate(BlockUpdate),
     CircuitPowerBatch(CircuitPowerBatch),
+    MapChunkSnapshot(MapChunkSnapshot),
     PlayerAck(PlayerAck),
     Pong { nonce: u32 },
 }
@@ -136,6 +156,7 @@ impl GameMessage {
         matches!(
             self,
             GameMessage::Server(ServerMessage::ChunkSnapshot(_))
+                | GameMessage::Server(ServerMessage::MapChunkSnapshot(_))
         )
     }
 }

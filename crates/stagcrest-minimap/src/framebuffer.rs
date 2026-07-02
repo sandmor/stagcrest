@@ -88,6 +88,28 @@ impl DirtyRegion {
             Self { full: false, rects }
         }
     }
+
+    pub fn from_rect(px0: u32, pz0: u32, px1: u32, pz1: u32) -> Self {
+        Self {
+            full: false,
+            rects: vec![(px0, pz0, px1, pz1)],
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.full && self.rects.is_empty()
+    }
+
+    pub fn merge(&mut self, other: DirtyRegion) {
+        if other.full {
+            *self = DirtyRegion::full();
+            return;
+        }
+        if self.full {
+            return;
+        }
+        self.rects.extend(other.rects);
+    }
 }
 
 pub struct MinimapFramebuffer {

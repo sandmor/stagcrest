@@ -9,6 +9,7 @@ use crate::port::{encode_chunk_key, encode_map_chunk_key, ChunkStorage};
 use crate::StorageError;
 
 const CHUNKS_TABLE: TableDefinition<&[u8; 12], &[u8]> = TableDefinition::new("chunks");
+const CHUNK_REV_TABLE: TableDefinition<&[u8; 12], [u8; 8]> = TableDefinition::new("chunk_rev");
 const META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 const MAP_CHUNKS_TABLE: TableDefinition<&[u8; 8], &[u8]> = TableDefinition::new("map_chunks");
 
@@ -31,6 +32,7 @@ impl RedbChunkStorage {
                 .map_err(|e| StorageError::Database(e.to_string()))?;
             {
                 let _ = txn.open_table(CHUNKS_TABLE);
+                let _ = txn.open_table(CHUNK_REV_TABLE);
                 let _ = txn.open_table(META_TABLE);
                 let _ = txn.open_table(MAP_CHUNKS_TABLE);
             }
@@ -74,6 +76,48 @@ impl RedbChunkStorage {
             Ok(None) => Ok(None),
             Err(e) => Err(StorageError::Database(e.to_string())),
         }
+    }
+
+    pub fn get_chunk_revision(&self, pos: ChunkPos) -> Result<u64, StorageError> {
+        let key = encode_chunk_key(pos);
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let table = txn
+            .open_table(CHUNK_REV_TABLE)
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        match table.get(&key) {
+            Ok(Some(value)) => Ok(u64::from_be_bytes(value.value())),
+            Ok(None) => Ok(0),
+            Err(e) => Err(StorageError::Database(e.to_string())),
+        }
+    }
+
+    pub fn increment_chunk_revision(&self, pos: ChunkPos) -> Result<u64, StorageError> {
+        let key = encode_chunk_key(pos);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        let next = {
+            let mut table = txn
+                .open_table(CHUNK_REV_TABLE)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            let current = match table.get(&key) {
+                Ok(Some(value)) => u64::from_be_bytes(value.value()),
+                Ok(None) => 0,
+                Err(e) => return Err(StorageError::Database(e.to_string())),
+            };
+            let next = current.saturating_add(1);
+            table
+                .insert(&key, next.to_be_bytes())
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            next
+        };
+        txn.commit()
+            .map_err(|e| StorageError::Database(e.to_string()))?;
+        Ok(next)
     }
 
     pub fn put_chunk(&self, pos: ChunkPos, chunk: &InactiveChunk) -> Result<(), StorageError> {
@@ -211,11 +255,23 @@ impl ChunkStorage for RedbChunkStorage {
             .begin_write()
             .map_err(|e| StorageError::Database(e.to_string()))?;
         {
-            let mut table = txn
+            let mut chunks = txn
                 .open_table(CHUNKS_TABLE)
                 .map_err(|e| StorageError::Database(e.to_string()))?;
-            table
+            chunks
                 .insert(&key, compressed)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+
+            let mut revs = txn
+                .open_table(CHUNK_REV_TABLE)
+                .map_err(|e| StorageError::Database(e.to_string()))?;
+            let current = match revs.get(&key) {
+                Ok(Some(value)) => u64::from_be_bytes(value.value()),
+                Ok(None) => 0,
+                Err(e) => return Err(StorageError::Database(e.to_string())),
+            };
+            revs
+                .insert(&key, current.saturating_add(1).to_be_bytes())
                 .map_err(|e| StorageError::Database(e.to_string()))?;
         }
         txn.commit()
@@ -289,6 +345,25 @@ mod tests {
         let positions = storage.iter_chunk_positions().unwrap();
         assert_eq!(positions.len(), 1);
         assert_eq!(positions[0], ChunkPos { x: -2, y: 0, z: 5 });
+    }
+
+    #[test]
+    fn chunk_revision_increments_on_write() {
+        let dir = std::env::temp_dir().join(format!("stagcrest_redb_rev_{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join("world.redb"));
+        let storage = RedbChunkStorage::open(dir.join("world.redb")).unwrap();
+        let pos = ChunkPos { x: 0, y: 0, z: 0 };
+        assert_eq!(storage.get_chunk_revision(pos).unwrap(), 0);
+        let chunk = InactiveChunk::from_indices(
+            vec![BlockId(0), BlockId(1)],
+            vec![BlockState(0), BlockState(0)],
+            &vec![1u16; CHUNK_VOLUME],
+        )
+        .unwrap();
+        storage.put_chunk(pos, &chunk).unwrap();
+        assert_eq!(storage.get_chunk_revision(pos).unwrap(), 1);
+        storage.put_chunk(pos, &chunk).unwrap();
+        assert_eq!(storage.get_chunk_revision(pos).unwrap(), 2);
     }
 
     #[test]

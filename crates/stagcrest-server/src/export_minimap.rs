@@ -204,6 +204,7 @@ pub fn rebuild_all_map_chunks(
     );
 
     let empty_overrides = std::collections::HashMap::new();
+    let empty_modified = std::collections::HashSet::new();
     for (mx, mz) in map_coords {
         let input = MapChunkLoadInput {
             storage: session.storage.as_ref(),
@@ -212,6 +213,7 @@ pub fn rebuild_all_map_chunks(
             mx,
             mz,
             overrides: &empty_overrides,
+            modified_live: &empty_modified,
         };
         let blob = build_map_chunk_blob(&input, map_ctx)?;
         session.storage.put_map_chunk(mx, mz, &blob)?;

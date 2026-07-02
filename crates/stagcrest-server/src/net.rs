@@ -1,6 +1,7 @@
+use stagcrest_minimap::{expected_subscribe_tiles, MINIMAP_ZOOM_LEVELS};
 use stagcrest_net::{
-    ClientHello, ClientMessage, GameMessage, InitialState, PlayerPose, ServerHello, ServerMessage,
-    PROTOCOL_VERSION,
+    ClientHello, ClientMessage, GameMessage, InitialState, MapViewSubscribe, PlayerPose, ServerHello,
+    ServerMessage, PROTOCOL_VERSION,
 };
 use stagcrest_protocol::BlockPos;
 
@@ -19,6 +20,7 @@ pub fn handle_client_hello(server: &mut GameServer, hello: ClientHello) -> Resul
 
 pub fn send_handshake(server: &mut GameServer) {
     server.pipeline.reset_client_delivery();
+    server.client_map.reset();
     let world_name = server.config.world_name.clone();
     let world_seed = server.config.world_seed;
     server.queue_priority(GameMessage::Server(ServerMessage::Hello(ServerHello {
@@ -73,10 +75,36 @@ pub fn handle_client_message(server: &mut GameServer, msg: ClientMessage) {
         ClientMessage::ChunkUnsubscribe(pos) => {
             server.pipeline.sent_to_client.remove(&pos);
         }
+        ClientMessage::MapViewSubscribe(sub) => handle_map_view_subscribe(server, sub),
         ClientMessage::Ping { nonce } => {
             server.queue_priority(GameMessage::Server(ServerMessage::Pong { nonce }));
         }
     }
+}
+
+fn validate_map_view_subscribe(sub: &MapViewSubscribe) -> bool {
+    if !sub.active {
+        return sub.tiles.is_empty();
+    }
+    if !MINIMAP_ZOOM_LEVELS.contains(&sub.bpp) {
+        return false;
+    }
+    let expected = expected_subscribe_tiles(sub.center_x, sub.center_z, sub.bpp);
+    sub.tiles.len() == expected.len()
+        && sub.tiles.iter().all(|tile| expected.contains(tile))
+}
+
+fn handle_map_view_subscribe(server: &mut GameServer, sub: MapViewSubscribe) {
+    if !validate_map_view_subscribe(&sub) {
+        tracing::warn!(
+            "rejecting invalid MapViewSubscribe: active={} bpp={} tiles={}",
+            sub.active,
+            sub.bpp,
+            sub.tiles.len()
+        );
+        return;
+    }
+    server.client_map.handle_subscribe(sub);
 }
 
 impl GameServer {

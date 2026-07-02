@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use stagcrest_protocol::ChunkPos;
 use stagcrest_storage::{InactiveChunk, RedbChunkStorage, StorageError};
@@ -15,6 +15,7 @@ pub struct MapChunkLoadInput<'a> {
     pub mx: i32,
     pub mz: i32,
     pub overrides: &'a HashMap<ChunkPos, InactiveChunk>,
+    pub modified_live: &'a HashSet<ChunkPos>,
 }
 
 /// Load the 4×4 world-chunk strip grid for map chunk `(mx, mz)`.

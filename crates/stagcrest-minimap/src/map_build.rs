@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use stagcrest_protocol::{BlockDef, BlockId, ChunkPos};
 use thiserror::Error;
@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::color::{MinimapBiomeClimate, MinimapColorCtxOwned};
 use crate::map_format::MapChunkBlob;
 use crate::map_raster::rasterize_map_chunk;
+use crate::map_revision::compute_layer_source_revision;
 use crate::map_source::{load_strips_for_map_chunk, MapChunkLoadInput};
 use crate::raster::strip_biome_at;
 use crate::resolve::{BlockDefTable, ColumnResolver};
@@ -72,7 +73,26 @@ pub fn build_map_chunk_blob(
 ) -> Result<Vec<u8>, MapBuildError> {
     let strips = load_strips_for_map_chunk(input)?;
     let rgb = rasterize_map_chunk_with_ctx(&strips, input.mx, input.mz, ctx);
-    Ok(MapChunkBlob::encode_single_layer(ctx.y_min, ctx.y_max, &rgb))
+    let modified = if input.modified_live.is_empty() {
+        collect_modified_positions(input.world, input.mx, input.mz, input.y_chunks)
+    } else {
+        input.modified_live.clone()
+    };
+    let source_revision = compute_layer_source_revision(
+        input.storage,
+        input.mx,
+        input.mz,
+        ctx.y_min,
+        ctx.y_max,
+        input.y_chunks,
+        &modified,
+    );
+    Ok(MapChunkBlob::encode_single_layer(
+        ctx.y_min,
+        ctx.y_max,
+        source_revision,
+        &rgb,
+    ))
 }
 
 fn rasterize_map_chunk_with_ctx(
@@ -101,6 +121,34 @@ fn rasterize_map_chunk_with_ctx(
         }
         MinimapBiomeClimate::default()
     })
+}
+
+/// Positions of in-memory chunks with unsaved edits in a map tile region.
+pub fn collect_modified_positions(
+    world: Option<&stagcrest_world::World>,
+    mx: i32,
+    mz: i32,
+    y_chunks: &[i32],
+) -> HashSet<ChunkPos> {
+    let Some(world) = world else {
+        return HashSet::new();
+    };
+    let base_cx = mx * crate::map_tile::WORLD_CHUNKS_PER_MAP;
+    let base_cz = mz * crate::map_tile::WORLD_CHUNKS_PER_MAP;
+    let mut out = HashSet::new();
+    for dz in 0..crate::map_tile::WORLD_CHUNKS_PER_MAP {
+        for dx in 0..crate::map_tile::WORLD_CHUNKS_PER_MAP {
+            let cx = base_cx + dx;
+            let cz = base_cz + dz;
+            for &cy in y_chunks {
+                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                if world.has_chunk(pos) && world.is_populated(pos) && world.is_modified(pos) {
+                    out.insert(pos);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Collect in-memory chunk overrides for a map tile region from a live world.

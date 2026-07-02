@@ -1,5 +1,6 @@
 mod export_minimap;
 mod map_generation;
+mod map_streaming;
 mod net;
 mod persistence;
 mod player;
@@ -24,6 +25,9 @@ use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 
 use crate::map_generation::MapChunkPipeline;
+use crate::map_streaming::{ClientMapState, ServerBlobCache, MAX_MAP_SNAPSHOT_SEND_PER_TICK};
+
+const MAX_PENDING_BULK: usize = 256;
 use tokio::net::TcpListener;
 
 pub use export_minimap::{
@@ -89,6 +93,8 @@ pub struct GameServer {
     map_pipeline: MapChunkPipeline,
     map_ctx: Arc<MapResolveContext>,
     map_y_chunks: Vec<i32>,
+    map_blob_cache: ServerBlobCache,
+    client_map: ClientMapState,
 }
 
 impl GameServer {
@@ -193,6 +199,8 @@ impl GameServer {
             map_pipeline,
             map_ctx,
             map_y_chunks,
+            map_blob_cache: ServerBlobCache::default(),
+            client_map: ClientMapState::default(),
         })
     }
 
@@ -269,15 +277,40 @@ impl GameServer {
             for pos in stream_result.unloads {
                 self.queue_priority(GameMessage::Server(ServerMessage::ChunkUnload(pos)));
             }
-            for pos in stream_result.map_dirty_chunks {
-                self.map_pipeline.mark_dirty_from_chunk(pos);
-            }
             self.map_pipeline.tick(
                 &self.world,
                 &self.map_y_chunks,
                 &self.map_ctx,
                 &self.session.storage,
             );
+            self.tick_map_streaming();
+        }
+    }
+
+    fn tick_map_streaming(&mut self) {
+        for done in self.map_pipeline.drain_completions() {
+            self.map_blob_cache
+                .insert(done.mx, done.mz, done.blob.clone());
+            if let Some(msg) = self.client_map.fan_out_regen(done.mx, done.mz, done.blob) {
+                self.queue_bulk(msg);
+            }
+        }
+
+        if self.pending_bulk.len() >= MAX_PENDING_BULK {
+            return;
+        }
+
+        let storage = self.session.storage.as_ref();
+        let snapshots = self.client_map.drain_pending(
+            MAX_MAP_SNAPSHOT_SEND_PER_TICK,
+            &mut self.map_blob_cache,
+            storage,
+            &self.world,
+            &self.map_y_chunks,
+            &mut self.map_pipeline,
+        );
+        for snap in snapshots {
+            self.queue_bulk(GameMessage::Server(ServerMessage::MapChunkSnapshot(snap)));
         }
     }
 
@@ -286,6 +319,9 @@ impl GameServer {
     }
 
     pub fn queue_bulk(&mut self, msg: GameMessage) {
+        if self.pending_bulk.len() >= MAX_PENDING_BULK {
+            self.pending_bulk.remove(0);
+        }
         self.pending_bulk.push(msg);
     }
 
@@ -321,7 +357,6 @@ impl GameServer {
 
     pub(crate) fn mark_chunk_dirty(&mut self, pos: ChunkPos) {
         self.session.persistence.mark_dirty(pos);
-        self.map_pipeline.mark_dirty_from_chunk(pos);
     }
 
     pub(crate) fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) {
@@ -470,6 +505,7 @@ pub async fn run_standalone(
                 if disconnected {
                     server.flush_persistence();
                     server.pipeline.reset_client_delivery();
+                    server.client_map.reset();
                     session = None;
                     server.handshake_complete = false;
                     server.handshake_pending = false;

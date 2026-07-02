@@ -4,7 +4,7 @@ use crate::mesh_scheduler::{
     mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll,
     mesh_rebuild_after_atlas_change, mesh_recover_unmeshed, MeshScheduler,
 };
-use crate::minimap::{MinimapColumnCache, MinimapState};
+use crate::minimap::MinimapDecodeQueue;
 use crate::net_client::GameNetClient;
 use crate::world_replica::{apply_power_batch, CircuitPowerOverlay, WorldReplica};
 use crate::world_select::SelectedWorld;
@@ -120,21 +120,25 @@ impl Plugin for GamePlugin {
     }
 }
 
-fn net_poll_system(
+pub(crate) fn net_poll_system(
     mut net: ResMut<GameNetClient>,
     mut world: ResMut<WorldReplica>,
     mut mesh_scheduler: ResMut<MeshScheduler>,
     mut mesh_cache: ResMut<MeshCacheResource>,
     mut biome_cache: ResMut<BiomeGridCache>,
     mut power_overlay: ResMut<CircuitPowerOverlay>,
-    mut minimap: Option<ResMut<MinimapState>>,
-    mut minimap_cache: Option<ResMut<MinimapColumnCache>>,
+    mut decode_queue: Option<ResMut<MinimapDecodeQueue>>,
     mut commands: Commands,
 ) {
     for msg in net.poll() {
         match msg {
             ServerMessage::CircuitPowerBatch(batch) => {
                 apply_power_batch(&mut power_overlay, batch.updates, &mut mesh_scheduler);
+            }
+            ServerMessage::MapChunkSnapshot(snap) => {
+                if let Some(q) = decode_queue.as_mut() {
+                    q.enqueue(snap.mx, snap.mz, snap.compressed);
+                }
             }
             other => {
                 world.apply_server_message(
@@ -144,8 +148,6 @@ fn net_poll_system(
                     &mut biome_cache,
                     &mut power_overlay,
                     &mut commands,
-                    minimap.as_deref_mut(),
-                    minimap_cache.as_deref_mut(),
                 );
             }
         }
