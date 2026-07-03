@@ -126,9 +126,7 @@ pub fn bake_block_icons(
         let rgba = rasterize_block_icon(
             &mesh,
             profile,
-            &atlas_res.atlas.pixels,
-            atlas_res.atlas.width,
-            atlas_res.atlas.height,
+            &atlas_res.atlases,
             grass,
             foliage,
             water,
@@ -184,14 +182,13 @@ struct Triangle {
     uv1: [f32; 2],
     uv2: [f32; 2],
     tint: f32,
+    atlas_index: u8,
 }
 
 fn rasterize_block_icon(
     mesh: &ChunkMesh,
     profile: IconBakeProfile,
-    atlas: &[u8],
-    atlas_w: u32,
-    atlas_h: u32,
+    atlases: &[stagcrest_mod_client::TextureAtlas],
     grass_tint: [f32; 3],
     foliage_tint: [f32; 3],
     water_tint: [f32; 3],
@@ -220,9 +217,7 @@ fn rasterize_block_icon(
             &mut color,
             &mut depth,
             size,
-            atlas,
-            atlas_w,
-            atlas_h,
+            atlases,
             grass_tint,
             foliage_tint,
             water_tint,
@@ -302,6 +297,7 @@ fn collect_triangles(
             uv1: v1.uv,
             uv2: v2.uv,
             tint: v0.tint,
+            atlas_index: v0.atlas_index as u8,
         });
     }
 }
@@ -337,9 +333,7 @@ fn rasterize_triangle(
     color: &mut [u8],
     depth: &mut [f32],
     size: f32,
-    atlas: &[u8],
-    atlas_w: u32,
-    atlas_h: u32,
+    atlases: &[stagcrest_mod_client::TextureAtlas],
     grass_tint: [f32; 3],
     foliage_tint: [f32; 3],
     water_tint: [f32; 3],
@@ -382,7 +376,7 @@ fn rasterize_triangle(
 
             let u = w0 * tri.uv0[0] + w1 * tri.uv1[0] + w2 * tri.uv2[0];
             let v = w0 * tri.uv0[1] + w1 * tri.uv1[1] + w2 * tri.uv2[1];
-            let mut px = sample_atlas(atlas, atlas_w, atlas_h, u, v);
+            let mut px = sample_atlas(atlases, tri.atlas_index, u, v);
             apply_tint(
                 &mut px,
                 tri.tint,
@@ -408,7 +402,18 @@ fn edge(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
     (p[0] - a[0]) * (b[1] - a[1]) - (p[1] - a[1]) * (b[0] - a[0])
 }
 
-fn sample_atlas(atlas: &[u8], aw: u32, ah: u32, u: f32, v: f32) -> [u8; 4] {
+fn sample_atlas(
+    atlases: &[stagcrest_mod_client::TextureAtlas],
+    atlas_index: u8,
+    u: f32,
+    v: f32,
+) -> [u8; 4] {
+    let Some(page) = atlases.get(atlas_index as usize).or_else(|| atlases.first()) else {
+        return [128, 128, 128, 255];
+    };
+    let aw = page.width;
+    let ah = page.height;
+    let atlas = &page.pixels;
     let x = (u * aw as f32).clamp(0.0, aw as f32 - 1.0) as u32;
     let y = (v * ah as f32).clamp(0.0, ah as f32 - 1.0) as u32;
     let i = ((y * aw + x) * 4) as usize;

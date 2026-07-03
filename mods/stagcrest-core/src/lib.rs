@@ -13,6 +13,10 @@ impl stagcrest_mod_sdk::ContentRegistrar for WasmRegistrar {
         stagcrest_mod_sdk::register_texture(req)
     }
 
+    fn register_texture_from_pack(&mut self, namespaced_id: &str, mc_name: &str) -> i32 {
+        stagcrest_mod_sdk::register_texture_from_pack(namespaced_id, mc_name)
+    }
+
     fn register_block(&mut self, req: stagcrest_mod_sdk::RegisterBlockRequest) -> i32 {
         stagcrest_mod_sdk::register_block(req)
     }

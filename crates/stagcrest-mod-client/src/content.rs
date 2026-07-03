@@ -1,6 +1,6 @@
-use stagcrest_protocol::manifest::{AtlasTransfer, ContentManifest};
+use stagcrest_atlas::{build_atlas_set, texture_def_from_png, AtlasLimits, AtlasPage, AtlasSet};
+use stagcrest_protocol::manifest::{ContentManifest, TextureAssetTransfer};
 
-use crate::atlas::TextureAtlas;
 use crate::biome::BiomeRegistryClient;
 use crate::colormap::ColormapSet;
 use crate::models::ModelRegistry;
@@ -9,51 +9,59 @@ use crate::registry::BlockRegistry;
 /// Client-side content rebuilt from server handshake messages.
 pub struct ContentRuntime {
     pub registry: BlockRegistry,
-    pub atlas: TextureAtlas,
+    pub atlases: Vec<TextureAtlas>,
     pub models: ModelRegistry,
     pub colormaps: ColormapSet,
     pub biomes: BiomeRegistryClient,
     pub loaded_mods: Vec<String>,
 }
 
+pub type TextureAtlas = AtlasPage;
+
 impl ContentRuntime {
-    pub fn from_parts(manifest: ContentManifest, atlas: AtlasTransfer) -> Self {
-        let registry = BlockRegistry::from_wire_snapshot(manifest.registry);
-        let atlas = TextureAtlas::from_transfer(&atlas);
+    pub fn from_parts(
+        manifest: ContentManifest,
+        texture_assets: &[TextureAssetTransfer],
+        limits: AtlasLimits,
+    ) -> Result<Self, String> {
+        let mut registry = BlockRegistry::from_wire_snapshot(manifest.registry);
+        let atlas_set = build_client_atlas(&registry, texture_assets, limits)?;
+        registry.apply_atlas_set(&atlas_set);
+        let atlases = atlas_set.pages;
         let colormaps = ColormapSet::from_snapshot(&manifest.colormaps);
         let biomes = BiomeRegistryClient::from_snapshot(manifest.biomes);
-        Self {
+        Ok(Self {
             loaded_mods: manifest.loaded_mods,
             registry,
-            atlas,
+            atlases,
             models: ModelRegistry::new(),
             colormaps,
             biomes,
-        }
+        })
     }
 }
 
-impl TextureAtlas {
-    pub fn from_transfer(transfer: &AtlasTransfer) -> Self {
-        let img = image::load_from_memory(&transfer.png).expect("atlas PNG decode");
-        let rgba = img.to_rgba8();
-        assert_eq!(
-            rgba.width(),
-            transfer.width,
-            "atlas PNG width mismatch"
-        );
-        assert_eq!(
-            rgba.height(),
-            transfer.height,
-            "atlas PNG height mismatch"
-        );
-        Self {
-            width: transfer.width,
-            height: transfer.height,
-            pixels: rgba.into_raw(),
-            placements: transfer.placements.clone(),
-        }
+fn build_client_atlas(
+    registry: &BlockRegistry,
+    assets: &[TextureAssetTransfer],
+    limits: AtlasLimits,
+) -> Result<AtlasSet, String> {
+    let mut decoded = Vec::with_capacity(assets.len());
+    for asset in assets {
+        let meta = registry
+            .textures()
+            .find(|t| t.id == asset.id)
+            .ok_or_else(|| format!("unknown texture id {:?}", asset.id.0))?;
+        let tex = texture_def_from_png(
+            asset.id,
+            meta.namespaced_id.clone(),
+            &asset.png,
+            asset.animation.clone().or(meta.animation.clone()),
+        )
+        .map_err(|e| e.to_string())?;
+        decoded.push(tex);
     }
+    build_atlas_set(decoded, limits).map_err(|e| e.to_string())
 }
 
 impl ColormapSet {

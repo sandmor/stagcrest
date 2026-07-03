@@ -3,9 +3,6 @@ use crate::{
     RegisterCaveConfigRequest, RegisterFeatureRequest, RegisterRiverConfigRequest,
     RegisterRiverFeatureRequest, RegisterTextureRequest,
 };
-use serde::Deserialize;
-
-const PACK_TEXTURE_BUF: usize = 2 * 1024 * 1024;
 
 #[link(wasm_import_module = "stagcrest_host")]
 extern "C" {
@@ -13,11 +10,15 @@ extern "C" {
     fn host_register_block(ptr: i32, len: i32) -> i32;
     #[link_name = "register_texture"]
     fn host_register_texture(ptr: i32, len: i32) -> i32;
+    #[link_name = "register_texture_from_pack"]
+    fn host_register_texture_from_pack(
+        id_ptr: i32,
+        id_len: i32,
+        mc_ptr: i32,
+        mc_len: i32,
+    ) -> i32;
     #[link_name = "log_message"]
     fn host_log_message(ptr: i32, len: i32);
-    #[link_name = "load_texture_from_pack"]
-    fn host_load_texture_from_pack(name_ptr: i32, name_len: i32, out_ptr: i32, out_max: i32)
-        -> i32;
     #[link_name = "register_biome"]
     fn host_register_biome(ptr: i32, len: i32) -> i32;
     #[link_name = "register_feature"]
@@ -52,6 +53,16 @@ pub fn register_block(req: RegisterBlockRequest) -> i32 {
 pub fn register_texture(req: RegisterTextureRequest) -> i32 {
     let json = serde_json::to_string(&req).expect("serialize RegisterTextureRequest");
     unsafe { with_utf8(&json, |ptr, len| host_register_texture(ptr, len)) }
+}
+
+pub fn register_texture_from_pack(namespaced_id: &str, mc_name: &str) -> i32 {
+    unsafe {
+        with_utf8(namespaced_id, |id_ptr, id_len| {
+            with_utf8(mc_name, |mc_ptr, mc_len| {
+                host_register_texture_from_pack(id_ptr, id_len, mc_ptr, mc_len)
+            })
+        })
+    }
 }
 
 pub fn register_biome(req: RegisterBiomeRequest) -> i32 {
@@ -91,30 +102,4 @@ pub fn log(msg: &str) {
             0
         });
     }
-}
-
-pub fn load_texture_from_pack(mc_name: &str) -> Option<(u32, u32, Vec<u8>)> {
-    let mut out = vec![0u8; PACK_TEXTURE_BUF];
-    let written = unsafe {
-        with_utf8(mc_name, |name_ptr, name_len| {
-            host_load_texture_from_pack(
-                name_ptr,
-                name_len,
-                out.as_mut_ptr() as i32,
-                out.len() as i32,
-            )
-        })
-    };
-    if written <= 0 {
-        return None;
-    }
-    let slice = &out[..written as usize];
-    #[derive(Deserialize)]
-    struct PackTexture {
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-    }
-    let tex: PackTexture = serde_json::from_slice(slice).ok()?;
-    Some((tex.width, tex.height, tex.rgba))
 }

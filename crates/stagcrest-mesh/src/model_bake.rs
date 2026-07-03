@@ -14,6 +14,8 @@ pub struct GpuMeshVertex {
     pub overlay_uv: [f32; 2],
     pub tint: f32,
     pub overlay_tint: f32,
+    pub atlas_index: f32,
+    pub overlay_atlas_index: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -108,8 +110,10 @@ fn bake_element(
             y: 0,
             w: 0,
             h: 0,
+            atlas_index: 0,
         });
-    let (aw, ah) = registry.atlas_dimensions();
+    let (aw, ah) = registry.atlas_dimensions(atlas_uv.atlas_index);
+    let (oaw, oah) = registry.atlas_dimensions(overlay_atlas.atlas_index);
     let tint = face_tex.tint.as_f32();
     let overlay_tint = face_tex.overlay_tint.as_f32();
 
@@ -133,6 +137,8 @@ fn bake_element(
             overlay_atlas,
             aw,
             ah,
+            oaw,
+            oah,
             tint,
             overlay_tint,
         );
@@ -158,6 +164,8 @@ fn push_quad(
             overlay_uv: overlay_uvs[i],
             tint,
             overlay_tint,
+            atlas_index: 0.0,
+            overlay_atlas_index: 0.0,
         });
     }
     mesh.indices
@@ -172,6 +180,8 @@ fn push_model_face(
     overlay_atlas: AtlasRect,
     aw: u32,
     ah: u32,
+    oaw: u32,
+    oah: u32,
     tint: f32,
     overlay_tint: f32,
 ) {
@@ -183,11 +193,24 @@ fn push_model_face(
             (atlas_uv.y as f32 + uv[1] / 16.0 * atlas_uv.h as f32) / ah as f32,
         ];
         overlay_uvs[i] = [
-            (overlay_atlas.x as f32 + uv[0] / 16.0 * overlay_atlas.w as f32) / aw as f32,
-            (overlay_atlas.y as f32 + uv[1] / 16.0 * overlay_atlas.h as f32) / ah as f32,
+            (overlay_atlas.x as f32 + uv[0] / 16.0 * overlay_atlas.w as f32) / oaw as f32,
+            (overlay_atlas.y as f32 + uv[1] / 16.0 * overlay_atlas.h as f32) / oah as f32,
         ];
     }
-    push_quad(mesh, corners, uvs, overlay_uvs, tint, overlay_tint);
+    let base = mesh.vertices.len() as u32;
+    for (i, pos) in corners.iter().enumerate() {
+        mesh.vertices.push(GpuMeshVertex {
+            position: *pos,
+            uv: uvs[i],
+            overlay_uv: overlay_uvs[i],
+            tint,
+            overlay_tint,
+            atlas_index: atlas_uv.atlas_index as f32,
+            overlay_atlas_index: overlay_atlas.atlas_index as f32,
+        });
+    }
+    mesh.indices
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
 fn element_corners_block_local(element: &ModelElement, model_rotation: [f32; 3]) -> [[f32; 3]; 8] {

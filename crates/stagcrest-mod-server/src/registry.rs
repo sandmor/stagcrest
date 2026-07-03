@@ -10,10 +10,10 @@ pub struct BlockRegistry {
     blocks: HashMap<BlockId, BlockDef>,
     by_namespaced: HashMap<String, BlockId>,
     textures: HashMap<TextureId, TextureDef>,
+    texture_pngs: HashMap<TextureId, Vec<u8>>,
     texture_by_name: HashMap<String, TextureId>,
     atlas_uvs: HashMap<TextureId, AtlasRect>,
-    atlas_width: u32,
-    atlas_height: u32,
+    atlas_pages: Vec<(u32, u32)>,
     placeable: Vec<BlockId>,
     next_block_id: u32,
     next_texture_id: u32,
@@ -62,6 +62,40 @@ impl BlockRegistry {
         id
     }
 
+    /// Register a texture from verbatim PNG file bytes (resource pack).
+    pub fn register_texture_from_png(
+        &mut self,
+        namespaced_id: String,
+        png: Vec<u8>,
+        width: u32,
+        height: u32,
+        animation: Option<TextureAnimation>,
+    ) -> TextureId {
+        if let Some(&id) = self.texture_by_name.get(&namespaced_id) {
+            return id;
+        }
+        let id = TextureId(self.next_texture_id);
+        self.next_texture_id += 1;
+        self.texture_pngs.insert(id, png);
+        self.textures.insert(
+            id,
+            TextureDef {
+                id,
+                namespaced_id: namespaced_id.clone(),
+                width,
+                height,
+                rgba: Vec::new(),
+                animation,
+            },
+        );
+        self.texture_by_name.insert(namespaced_id, id);
+        id
+    }
+
+    pub fn texture_png(&self, id: TextureId) -> Option<&[u8]> {
+        self.texture_pngs.get(&id).map(Vec::as_slice)
+    }
+
     pub fn texture_animation(&self, id: TextureId) -> Option<&TextureAnimation> {
         self.textures.get(&id).and_then(|t| t.animation.as_ref())
     }
@@ -106,13 +140,24 @@ impl BlockRegistry {
         self.atlas_uvs.insert(tex, rect);
     }
 
-    pub fn set_atlas_dimensions(&mut self, width: u32, height: u32) {
-        self.atlas_width = width;
-        self.atlas_height = height;
+    pub fn set_atlas_pages(&mut self, pages: Vec<(u32, u32)>) {
+        self.atlas_pages = pages;
     }
 
-    pub fn atlas_dimensions(&self) -> (u32, u32) {
-        (self.atlas_width.max(1), self.atlas_height.max(1))
+    pub fn atlas_pages(&self) -> &[(u32, u32)] {
+        &self.atlas_pages
+    }
+
+    pub fn atlas_dimensions(&self, atlas_index: u8) -> (u32, u32) {
+        self.atlas_pages
+            .get(atlas_index as usize)
+            .copied()
+            .unwrap_or((1, 1))
+    }
+
+    /// Legacy: dimensions of atlas page 0 (or 1x1).
+    pub fn primary_atlas_dimensions(&self) -> (u32, u32) {
+        self.atlas_dimensions(0)
     }
 
     pub fn atlas_uv(&self, tex: TextureId) -> AtlasRect {
@@ -123,8 +168,31 @@ impl BlockRegistry {
                 y: 0,
                 w: 1,
                 h: 1,
+                atlas_index: 0,
             }
         })
+    }
+
+    pub fn build_texture_assets(&self) -> Vec<stagcrest_protocol::manifest::TextureAssetTransfer> {
+        use stagcrest_protocol::manifest::TextureAssetTransfer;
+        let mut out: Vec<TextureAssetTransfer> = self
+            .textures
+            .values()
+            .map(|tex| {
+                let png = self
+                    .texture_pngs
+                    .get(&tex.id)
+                    .cloned()
+                    .unwrap_or_else(|| encode_rgba_png(tex.width, tex.height, &tex.rgba));
+                TextureAssetTransfer {
+                    id: tex.id,
+                    png,
+                    animation: tex.animation.clone(),
+                }
+            })
+            .collect();
+        out.sort_by_key(|t| t.id.0);
+        out
     }
 
     pub fn placeable_blocks(&self) -> &[BlockId] {
@@ -243,13 +311,6 @@ impl BlockRegistry {
                 })
                 .collect(),
             placeable: self.placeable.clone(),
-            atlas_uvs: self
-                .atlas_uvs
-                .iter()
-                .map(|(&id, &rect)| (id, rect))
-                .collect(),
-            atlas_width: self.atlas_width,
-            atlas_height: self.atlas_height,
             next_block_id: self.next_block_id,
             next_texture_id: self.next_texture_id,
         }
@@ -265,8 +326,7 @@ impl BlockRegistry {
                 .iter()
                 .map(|(&id, &rect)| (id, rect))
                 .collect(),
-            atlas_width: self.atlas_width,
-            atlas_height: self.atlas_height,
+            atlas_pages: self.atlas_pages.clone(),
             next_block_id: self.next_block_id,
             next_texture_id: self.next_texture_id,
         }
@@ -276,8 +336,7 @@ impl BlockRegistry {
         let mut registry = Self {
             next_block_id: snap.next_block_id,
             next_texture_id: snap.next_texture_id,
-            atlas_width: snap.atlas_width,
-            atlas_height: snap.atlas_height,
+            atlas_pages: snap.atlas_pages,
             ..Default::default()
         };
         for tex in snap.textures {
@@ -298,4 +357,16 @@ impl BlockRegistry {
         registry.placeable = snap.placeable;
         registry
     }
+}
+
+fn encode_rgba_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    use image::{ImageBuffer, Rgba};
+    use std::io::Cursor;
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, rgba.to_vec()).unwrap_or_else(|| {
+            ImageBuffer::from_pixel(width.max(1), height.max(1), Rgba([0, 0, 0, 255]))
+        });
+    let mut png = Vec::new();
+    let _ = img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png);
+    png
 }

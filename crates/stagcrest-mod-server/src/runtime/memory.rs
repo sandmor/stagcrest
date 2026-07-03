@@ -32,6 +32,7 @@ pub fn read_utf8<T>(
     String::from_utf8(bytes).ok()
 }
 
+#[allow(dead_code)]
 pub fn write_bytes<T>(
     memory: &Memory,
     mut ctx: impl AsContextMut<Data = T>,

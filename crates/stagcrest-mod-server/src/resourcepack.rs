@@ -63,7 +63,7 @@ pub const DEFAULT_MC_BLOCK_TEXTURES: &[&str] = &[
 struct BlockTextureEntry {
     width: u32,
     height: u32,
-    rgba: Vec<u8>,
+    png: Vec<u8>,
     animation: Option<TextureAnimation>,
 }
 
@@ -95,6 +95,10 @@ pub struct ResourcePackLoader {
 }
 
 impl ResourcePackLoader {
+    pub fn repo_root(&self) -> &std::path::Path {
+        &self.repo_root
+    }
+
     pub fn load(repo_root: impl AsRef<Path>, _reader: &dyn AssetReader) -> Result<Self, AssetError> {
         let pack_roots = Self::read_pack_roots(repo_root.as_ref())?;
         Ok(Self {
@@ -203,11 +207,15 @@ impl ResourcePackLoader {
         })
     }
 
-    /// Minecraft-style vertical animation strip when `.mcmeta` is absent.
+    /// Minecraft-style vertical animation strip when `.mcmeta` is absent (fluids only).
     pub fn infer_vertical_strip_animation(
+        mc_name: &str,
         texture_width: u32,
         texture_height: u32,
     ) -> Option<TextureAnimation> {
+        if mc_name != "water_still" && mc_name != "water_flow" {
+            return None;
+        }
         if texture_width == 0 || texture_height <= texture_width {
             return None;
         }
@@ -234,7 +242,7 @@ impl ResourcePackLoader {
                 let Ok(bytes) = reader.read_bytes(&path) else {
                     continue;
                 };
-                let Some((w, h, rgba)) = Self::load_rgba_from_bytes(&bytes) else {
+                let Some((w, h, _)) = Self::load_rgba_from_bytes(&bytes) else {
                     continue;
                 };
                 let mcmeta_path = format!("{path}.mcmeta");
@@ -246,13 +254,14 @@ impl ResourcePackLoader {
                 } else {
                     None
                 };
-                let animation = animation.or_else(|| Self::infer_vertical_strip_animation(w, h));
+                let animation =
+                    animation.or_else(|| Self::infer_vertical_strip_animation(name, w, h));
                 self.block_textures.borrow_mut().insert(
                     name.to_string(),
                     BlockTextureEntry {
                         width: w,
                         height: h,
-                        rgba,
+                        png: bytes,
                         animation,
                     },
                 );
@@ -261,24 +270,45 @@ impl ResourcePackLoader {
         }
     }
 
+    pub fn load_mc_block_texture_png(
+        &self,
+        reader: &dyn AssetReader,
+        name: &str,
+    ) -> Option<(u32, u32, Vec<u8>, Option<TextureAnimation>)> {
+        if let Some(e) = self.block_textures.borrow().get(name) {
+            return Some((e.width, e.height, e.png.clone(), e.animation.clone()));
+        }
+        self.try_load_block_texture(reader, name);
+        self.block_textures.borrow().get(name).map(|e| {
+            (
+                e.width,
+                e.height,
+                e.png.clone(),
+                e.animation.clone(),
+            )
+        })
+    }
+
     fn load_mc_block_texture_with_reader(
         &self,
         reader: &dyn AssetReader,
         name: &str,
     ) -> Option<(u32, u32, Vec<u8>)> {
-        if let Some(e) = self.block_textures.borrow().get(name) {
-            return Some((e.width, e.height, e.rgba.clone()));
-        }
-        self.try_load_block_texture(reader, name);
-        self.block_textures
-            .borrow()
-            .get(name)
-            .map(|e| (e.width, e.height, e.rgba.clone()))
+        self.load_mc_block_texture_png(reader, name)
+            .map(|(w, h, png, _)| (w, h, png))
     }
 
     pub fn load_mc_block_texture(&self, name: &str) -> Option<(u32, u32, Vec<u8>)> {
         let reader = FsAssetReader::new(&self.repo_root);
         self.load_mc_block_texture_with_reader(&reader, name)
+    }
+
+    pub fn load_mc_block_texture_png_for_transfer(
+        &self,
+        name: &str,
+    ) -> Option<(u32, u32, Vec<u8>, Option<TextureAnimation>)> {
+        let reader = FsAssetReader::new(&self.repo_root);
+        self.load_mc_block_texture_png(&reader, name)
     }
 
     pub fn animation_for_mc_texture(&self, name: &str) -> Option<TextureAnimation> {
@@ -315,12 +345,13 @@ impl ResourcePackLoader {
     }
 }
 
-/// Minecraft-style vertical animation strip when `.mcmeta` is absent.
+/// Minecraft-style vertical animation strip when `.mcmeta` is absent (fluids only).
 pub fn infer_vertical_strip_animation(
+    mc_name: &str,
     texture_width: u32,
     texture_height: u32,
 ) -> Option<TextureAnimation> {
-    ResourcePackLoader::infer_vertical_strip_animation(texture_width, texture_height)
+    ResourcePackLoader::infer_vertical_strip_animation(mc_name, texture_width, texture_height)
 }
 
 #[cfg(test)]
@@ -370,8 +401,8 @@ source = "local"
 
         let reader = FsAssetReader::new(dir.path());
         let loader = ResourcePackLoader::load(dir.path(), &reader).unwrap();
-        let (w, h, rgba) = loader.load_mc_block_texture_with_reader(&reader, "stone").unwrap();
+        let (w, h, png) = loader.load_mc_block_texture_with_reader(&reader, "stone").unwrap();
         assert_eq!((w, h), (32, 32));
-        assert_eq!(rgba[0..4], [40, 40, 40, 255]);
+        assert!(!png.is_empty());
     }
 }

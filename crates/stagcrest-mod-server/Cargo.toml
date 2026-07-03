@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 stagcrest-protocol.workspace = true
+stagcrest-atlas.workspace = true
 stagcrest-world.workspace = true
 stagcrest-mod-sdk.workspace = true
 stagcrest-storage.workspace = true

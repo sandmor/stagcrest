@@ -1,0 +1,13 @@
+[package]
+name = "stagcrest-atlas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+etagere = { workspace = true }
+image = { workspace = true }
+stagcrest-protocol = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

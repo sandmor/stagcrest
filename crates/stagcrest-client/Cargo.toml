@@ -19,6 +19,7 @@ stagcrest-world.workspace = true
 stagcrest-mesh.workspace = true
 stagcrest-circuit.workspace = true
 stagcrest-mod-client.workspace = true
+stagcrest-atlas.workspace = true
 stagcrest-render.workspace = true
 stagcrest-storage.workspace = true
 stagcrest-net.workspace = true

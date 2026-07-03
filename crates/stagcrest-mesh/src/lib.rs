@@ -37,6 +37,8 @@ pub struct VoxelVertex {
     pub tint: f32,
     pub overlay_tint: f32,
     pub tint_mul: [f32; 3],
+    pub atlas_index: f32,
+    pub overlay_atlas_index: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -404,9 +406,9 @@ fn texture_uv_corners(
     registry: &BlockRegistry,
     tex_id: TextureId,
     sub: [f32; 4],
-) -> [(f32, f32); 4] {
+) -> ([(f32, f32); 4], u8) {
     let uv_rect = registry.atlas_uv(tex_id);
-    let (aw, ah) = registry.atlas_dimensions();
+    let (aw, ah) = registry.atlas_dimensions(uv_rect.atlas_index);
     let anim_meta = registry.texture_animation(tex_id);
     let frame_h = anim_meta
         .map(|anim| anim.frame_height.min(uv_rect.h))
@@ -434,7 +436,10 @@ fn texture_uv_corners(
     let u1 = (su1 - 0.5).max(su0) / aw as f32;
     let v0 = (sv0 + 0.5).min(sv1) / ah as f32;
     let v1 = (sv1 - 0.5).max(sv0) / ah as f32;
-    [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
+    (
+        [(u0, v1), (u1, v1), (u1, v0), (u0, v0)],
+        uv_rect.atlas_index,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -461,7 +466,7 @@ fn emit_wire_quad_raw(
         },
         overlay_tint: TintKind::None,
     };
-    let uvs = texture_uv_corners(registry, tex_id, uv_sub);
+    let (uvs, atlas_index) = texture_uv_corners(registry, tex_id, uv_sub);
     let tint = if power_tinted {
         wire_power_vertex_tint(power)
     } else {
@@ -478,6 +483,8 @@ fn emit_wire_quad_raw(
             tint,
             overlay_tint: 0.0,
             tint_mul,
+            atlas_index: atlas_index as f32,
+            overlay_atlas_index: 0.0,
         });
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -908,7 +915,7 @@ pub(crate) fn atlas_uv_bounds(
     tex_id: TextureId,
     uv_rect: stagcrest_protocol::AtlasRect,
 ) -> (f32, f32, f32, f32) {
-    let (aw, ah) = registry.atlas_dimensions();
+    let (aw, ah) = registry.atlas_dimensions(uv_rect.atlas_index);
     let frame_h = atlas_frame_height(registry, tex_id, uv_rect);
     let x = uv_rect.x as f32;
     let y = uv_rect.y as f32;
@@ -954,6 +961,7 @@ fn emit_face_from_texture(
                 y: 0,
                 w: 0,
                 h: 0,
+                atlas_index: 0,
             });
     let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
     emit_face(
@@ -1097,6 +1105,7 @@ fn emit_quad_single(
                 y: 0,
                 w: 0,
                 h: 0,
+                atlas_index: 0,
             });
 
     let (verts, indices) = block_model::mesh_buffers(mesh, bucket);
@@ -1121,6 +1130,8 @@ fn emit_quad_single(
             tint,
             overlay_tint: face_tex.overlay_tint.as_f32(),
             tint_mul,
+            atlas_index: uv_rect.atlas_index as f32,
+            overlay_atlas_index: overlay_uv.atlas_index as f32,
         });
     }
 
@@ -1173,6 +1184,8 @@ fn emit_face(
             tint,
             overlay_tint,
             tint_mul,
+            atlas_index: uv.atlas_index as f32,
+            overlay_atlas_index: overlay_uv_rect.atlas_index as f32,
         });
     }
 
@@ -1269,5 +1282,76 @@ mod tests {
         assert!(!neighbor_culls_face(&water, None, Vec3::Y));
         assert!(neighbor_culls_face(&stone, Some(&stone), Vec3::Y));
         assert!(!neighbor_culls_face(&stone, Some(&plant), Vec3::Y));
+    }
+
+    #[test]
+    fn packed_texture_uvs_fit_atlas_pages() {
+        use image::{ImageBuffer, Rgba};
+        use stagcrest_atlas::{build_atlas_set, texture_def_from_png, AtlasLimits};
+        use stagcrest_mod_client::BlockRegistry;
+
+        fn solid_png(w: u32, h: u32) -> Vec<u8> {
+            let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                ImageBuffer::from_pixel(w, h, Rgba([40, 80, 120, 255]));
+            let mut png = Vec::new();
+            img.write_to(
+                &mut std::io::Cursor::new(&mut png),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+            png
+        }
+
+        let png = solid_png(64, 64);
+        let stone = texture_def_from_png(TextureId(1), "stagcrest:stone".into(), &png, None)
+            .unwrap();
+        let water_png = solid_png(64, 2048);
+        let water = texture_def_from_png(
+            TextureId(2),
+            "stagcrest:water_still".into(),
+            &water_png,
+            None,
+        )
+        .unwrap();
+        let set = build_atlas_set(
+            [stone.clone(), water],
+            AtlasLimits {
+                max_dimension: 8192,
+                max_atlases: 8,
+            },
+        )
+        .unwrap();
+
+        let mut registry = BlockRegistry::new();
+        registry.register_texture_with_animation(
+            stone.namespaced_id.clone(),
+            stone.width,
+            stone.height,
+            stone.rgba,
+            stone.animation,
+        );
+        registry.apply_atlas_set(&set);
+
+        for tex in registry.textures() {
+            let rect = registry.atlas_uv(tex.id);
+            let (aw, ah) = registry.atlas_dimensions(rect.atlas_index);
+            assert!(
+                rect.x + rect.w <= aw,
+                "texture {:?} exceeds page width",
+                tex.namespaced_id
+            );
+            assert!(
+                rect.y + rect.h <= ah,
+                "texture {:?} exceeds page height",
+                tex.namespaced_id
+            );
+            let corners = texture_uv_corners(&registry, tex.id, FULL_TILE_UV);
+            let (uvs, page_idx) = corners;
+            assert_eq!(page_idx, rect.atlas_index);
+            for (u, v) in uvs {
+                assert!((0.0..=1.0).contains(&u));
+                assert!((0.0..=1.0).contains(&v));
+            }
+        }
     }
 }

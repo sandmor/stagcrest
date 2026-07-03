@@ -390,9 +390,18 @@ mod tests {
         use stagcrest_protocol::{FaceTexture, TintKind};
 
         let mut reg = BlockRegistry::new();
-        reg.set_atlas_dimensions(256, 256);
+        reg.set_atlas_pages(vec![(256, 256)]);
         let tex = reg.register_texture("t".into(), 16, 16, vec![0; 16 * 16 * 4]);
-        reg.set_atlas_uv(tex, stagcrest_protocol::AtlasRect { x: 0, y: 0, w: 16, h: 16 });
+        reg.set_atlas_uv(
+            tex,
+            stagcrest_protocol::AtlasRect {
+                x: 0,
+                y: 0,
+                w: 16,
+                h: 16,
+                atlas_index: 0,
+            },
+        );
         let face_tex = FaceTexture {
             texture: tex,
             overlay: None,

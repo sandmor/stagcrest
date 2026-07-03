@@ -98,8 +98,10 @@ fn emit_element(
             y: 0,
             w: 0,
             h: 0,
+            atlas_index: 0,
         });
-    let (aw, ah) = registry.atlas_dimensions();
+    let (aw, ah) = registry.atlas_dimensions(atlas_uv.atlas_index);
+    let (oaw, oah) = registry.atlas_dimensions(overlay_atlas.atlas_index);
     // Model faces never use wire power tint; `TintKind::PowerLevel` at power 0
     // still encodes as 3.0 and triggers a red multiply in the shader.
     let tint = if face_tex.tint == TintKind::PowerLevel {
@@ -129,6 +131,8 @@ fn emit_element(
             overlay_atlas,
             aw,
             ah,
+            oaw,
+            oah,
             tint,
             overlay_tint,
             bucket,
@@ -257,6 +261,8 @@ fn emit_model_face(
     overlay_atlas: AtlasRect,
     aw: u32,
     ah: u32,
+    oaw: u32,
+    oah: u32,
     tint: f32,
     overlay_tint: f32,
     bucket: MeshBucket,
@@ -268,9 +274,9 @@ fn emit_model_face(
         let u = (atlas_uv.x as f32 + uv_pixels[i][0] / 16.0 * atlas_uv.w as f32) / aw as f32;
         let v = (atlas_uv.y as f32 + uv_pixels[i][1] / 16.0 * atlas_uv.h as f32) / ah as f32;
         let ou =
-            (overlay_atlas.x as f32 + uv_pixels[i][0] / 16.0 * overlay_atlas.w as f32) / aw as f32;
+            (overlay_atlas.x as f32 + uv_pixels[i][0] / 16.0 * overlay_atlas.w as f32) / oaw as f32;
         let ov =
-            (overlay_atlas.y as f32 + uv_pixels[i][1] / 16.0 * overlay_atlas.h as f32) / ah as f32;
+            (overlay_atlas.y as f32 + uv_pixels[i][1] / 16.0 * overlay_atlas.h as f32) / oah as f32;
         verts.push(VoxelVertex {
             position: *pos,
             uv: [u, v],
@@ -278,6 +284,8 @@ fn emit_model_face(
             tint,
             overlay_tint,
             tint_mul: [1.0, 1.0, 1.0],
+            atlas_index: atlas_uv.atlas_index as f32,
+            overlay_atlas_index: overlay_atlas.atlas_index as f32,
         });
     }
 

@@ -11,6 +11,8 @@ use bevy::shader::{Shader, ShaderRef};
 pub const VOXEL_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("a7c3e891-4f2b-4d1e-9c8a-0123456789ab");
 
+pub const MAX_ATLAS_PAGES: usize = 8;
+
 #[derive(Default)]
 pub struct VoxelMaterialPlugin;
 
@@ -29,22 +31,62 @@ impl Plugin for VoxelMaterialPlugin {
 pub struct VoxelMaterial {
     #[texture(0)]
     #[sampler(1)]
-    pub atlas: Handle<Image>,
-    #[uniform(2)]
+    pub atlas0: Handle<Image>,
+    #[texture(2)]
+    #[sampler(3)]
+    pub atlas1: Handle<Image>,
+    #[texture(4)]
+    #[sampler(5)]
+    pub atlas2: Handle<Image>,
+    #[texture(6)]
+    #[sampler(7)]
+    pub atlas3: Handle<Image>,
+    #[texture(8)]
+    #[sampler(9)]
+    pub atlas4: Handle<Image>,
+    #[texture(10)]
+    #[sampler(11)]
+    pub atlas5: Handle<Image>,
+    #[texture(12)]
+    #[sampler(13)]
+    pub atlas6: Handle<Image>,
+    #[texture(14)]
+    #[sampler(15)]
+    pub atlas7: Handle<Image>,
+    #[uniform(16)]
     pub grass_tint: LinearRgba,
-    #[uniform(3)]
+    #[uniform(17)]
     pub foliage_tint: LinearRgba,
-    #[uniform(4)]
+    #[uniform(18)]
     pub power_tint_dark: LinearRgba,
-    #[uniform(5)]
+    #[uniform(19)]
     pub power_tint_bright: LinearRgba,
-    #[uniform(6)]
+    #[uniform(20)]
     pub material_flags: Vec4,
-    #[uniform(7)]
+    #[uniform(21)]
     pub water_tint: LinearRgba,
-    #[uniform(8)]
+    #[uniform(22)]
     pub fluid_anim: Vec4,
     pub alpha_mode: AlphaMode,
+}
+
+impl VoxelMaterial {
+    pub fn with_atlas_handles(
+        mut base: Self,
+        handles: &[Handle<Image>],
+    ) -> Self {
+        let fallback = handles.first().cloned().unwrap_or(base.atlas0.clone());
+        let pick = |i: usize| handles.get(i).cloned().unwrap_or_else(|| fallback.clone());
+        base.atlas0 = pick(0);
+        base.atlas1 = pick(1);
+        base.atlas2 = pick(2);
+        base.atlas3 = pick(3);
+        base.atlas4 = pick(4);
+        base.atlas5 = pick(5);
+        base.atlas6 = pick(6);
+        base.atlas7 = pick(7);
+        base
+    }
 }
 
 impl Material for VoxelMaterial {
@@ -73,6 +115,8 @@ impl Material for VoxelMaterial {
             ATTRIBUTE_BLOCK_TINT.at_shader_location(3),
             ATTRIBUTE_OVERLAY_TINT.at_shader_location(4),
             ATTRIBUTE_TINT_MUL.at_shader_location(5),
+            ATTRIBUTE_ATLAS_INDEX.at_shader_location(6),
+            ATTRIBUTE_OVERLAY_ATLAS_INDEX.at_shader_location(7),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -87,3 +131,7 @@ pub const ATTRIBUTE_OVERLAY_TINT: MeshVertexAttribute =
     MeshVertexAttribute::new("OverlayTint", 988301003, VertexFormat::Float32);
 pub const ATTRIBUTE_TINT_MUL: MeshVertexAttribute =
     MeshVertexAttribute::new("TintMul", 988301004, VertexFormat::Float32x3);
+pub const ATTRIBUTE_ATLAS_INDEX: MeshVertexAttribute =
+    MeshVertexAttribute::new("AtlasIndex", 988301005, VertexFormat::Float32);
+pub const ATTRIBUTE_OVERLAY_ATLAS_INDEX: MeshVertexAttribute =
+    MeshVertexAttribute::new("OverlayAtlasIndex", 988301006, VertexFormat::Float32);

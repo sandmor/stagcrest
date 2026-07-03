@@ -1,16 +1,18 @@
 use crate::client_content::{cleanup_screen, spawn_screen_button};
 use crate::game::{AppState, GameConfig, ModContext};
-use crate::ui::UiTheme;
 use crate::world_select::SelectedWorld;
+use crate::ui::UiTheme;
 use bevy::prelude::*;
 use bevy::tasks::{block_on, IoTaskPool, Task};
 use futures_lite::future;
+use stagcrest_atlas::AtlasLimits;
 use stagcrest_mod_client::content::ContentRuntime;
 use crate::net_client::{connect_tcp, GameNetClient};
 use crate::world_replica::WorldReplica;
-use stagcrest_protocol::manifest::{AtlasTransfer, ContentManifest};
+use stagcrest_protocol::manifest::{ContentManifest, TextureAssetTransfer};
 use stagcrest_protocol::BlockId;
 use stagcrest_render::{next_atlas_revision, BlockAtlasResource, MeshCacheResource};
+
 
 pub struct LoadingPlugin;
 
@@ -21,7 +23,8 @@ struct LoadingState {
     error: Option<String>,
     tcp_connect: Option<Task<Result<Box<dyn stagcrest_net::GameTransport>, String>>>,
     pending_manifest: Option<ContentManifest>,
-    pending_atlas: Option<AtlasTransfer>,
+    pending_textures: Vec<TextureAssetTransfer>,
+    all_textures_received: bool,
 }
 
 #[derive(Component)]
@@ -132,7 +135,6 @@ fn poll_connection_system(
     mut commands: Commands,
     config: Res<GameConfig>,
     mut next_state: ResMut<NextState<AppState>>,
-    _images: ResMut<Assets<Image>>,
 ) {
     if state.done {
         if state.error.is_none() {
@@ -153,8 +155,12 @@ fn poll_connection_system(
             ServerMessage::Manifest(manifest) => {
                 state.pending_manifest = Some(manifest);
             }
-            ServerMessage::AtlasTransfer(atlas) => {
-                state.pending_atlas = Some(atlas);
+            ServerMessage::TextureAssets(chunk) => {
+                let is_last = chunk.index + 1 >= chunk.total;
+                state.pending_textures.extend(chunk.textures);
+                if is_last {
+                    state.all_textures_received = true;
+                }
             }
             ServerMessage::Initial(_) => {
                 net.initial_received = true;
@@ -163,47 +169,58 @@ fn poll_connection_system(
         }
     }
 
-    if let (Some(manifest), Some(atlas)) = (
-        state.pending_manifest.take(),
-        state.pending_atlas.take(),
-    ) {
-        let runtime = ContentRuntime::from_parts(manifest, atlas);
-        let grass_rgb = runtime.colormaps.default_grass_tint();
-        let foliage_rgb = runtime.colormaps.default_foliage_tint();
-        let water_rgb = runtime.colormaps.default_water_tint();
-        let air = runtime
-            .registry
-            .block_by_name("stagcrest:air")
-            .unwrap_or(BlockId(0));
-        let lru_cap = stagcrest_server::streaming_lru_capacity(
-            config.render_distance,
-            config.vertical_render_distance,
-            1,
-        );
-        let world = WorldReplica::new(stagcrest_world::World::with_lru_capacity(lru_cap, air));
+    if state.pending_manifest.is_some() && state.all_textures_received {
+        let Some(manifest) = state.pending_manifest.take() else {
+            return;
+        };
+        let textures = std::mem::take(&mut state.pending_textures);
+        let limits = AtlasLimits::default();
+        match ContentRuntime::from_parts(manifest, &textures, limits) {
+            Ok(runtime) => {
+                let grass_rgb = runtime.colormaps.default_grass_tint();
+                let foliage_rgb = runtime.colormaps.default_foliage_tint();
+                let water_rgb = runtime.colormaps.default_water_tint();
+                let air = runtime
+                    .registry
+                    .block_by_name("stagcrest:air")
+                    .unwrap_or(BlockId(0));
+                let lru_cap = stagcrest_server::streaming_lru_capacity(
+                    config.render_distance,
+                    config.vertical_render_distance,
+                    1,
+                );
+                let world =
+                    WorldReplica::new(stagcrest_world::World::with_lru_capacity(lru_cap, air));
 
-        let fluid_anim = fluid_anim_uniform(&runtime.registry, runtime.atlas.height);
-        let revision = next_atlas_revision();
+                let fluid_anim = fluid_anim_uniform(&runtime.registry);
+                let revision = next_atlas_revision();
 
-        commands.insert_resource(ModContext {
-            registry: runtime.registry,
-            atlas: runtime.atlas.clone(),
-            models: runtime.models,
-            colormaps: runtime.colormaps,
-            biomes: runtime.biomes,
-        });
-        commands.insert_resource(world);
-        commands.insert_resource(crate::chunk_streaming::BiomeGridCache::default());
-        commands.insert_resource(BlockAtlasResource {
-            revision,
-            atlas: runtime.atlas,
-            grass_tint: Color::srgb(grass_rgb[0], grass_rgb[1], grass_rgb[2]),
-            foliage_tint: Color::srgb(foliage_rgb[0], foliage_rgb[1], foliage_rgb[2]),
-            water_tint: Color::srgb(water_rgb[0], water_rgb[1], water_rgb[2]),
-            fluid_anim,
-        });
-        commands.insert_resource(MeshCacheResource::default());
-        net.handshake_done = true;
+                commands.insert_resource(ModContext {
+                    registry: runtime.registry,
+                    atlases: runtime.atlases.clone(),
+                    models: runtime.models,
+                    colormaps: runtime.colormaps,
+                    biomes: runtime.biomes,
+                });
+                commands.insert_resource(world);
+                commands.insert_resource(crate::chunk_streaming::BiomeGridCache::default());
+                commands.insert_resource(BlockAtlasResource {
+                    revision,
+                    atlases: runtime.atlases,
+                    grass_tint: Color::srgb(grass_rgb[0], grass_rgb[1], grass_rgb[2]),
+                    foliage_tint: Color::srgb(foliage_rgb[0], foliage_rgb[1], foliage_rgb[2]),
+                    water_tint: Color::srgb(water_rgb[0], water_rgb[1], water_rgb[2]),
+                    fluid_anim,
+                });
+                commands.insert_resource(MeshCacheResource::default());
+                net.handshake_done = true;
+            }
+            Err(err) => {
+                state.error = Some(format!("Failed to build texture atlases: {err}"));
+                state.done = true;
+                return;
+            }
+        }
     }
 
     if !state.done && net.handshake_done && net.initial_received {
@@ -211,10 +228,12 @@ fn poll_connection_system(
     }
 }
 
-fn fluid_anim_uniform(registry: &stagcrest_mod_client::BlockRegistry, atlas_height: u32) -> Vec4 {
+fn fluid_anim_uniform(registry: &stagcrest_mod_client::BlockRegistry) -> Vec4 {
     let Some(tex_id) = registry.texture_by_name("stagcrest:water_still") else {
         return Vec4::ONE;
     };
+    let uv = registry.atlas_uv(tex_id);
+    let (_, page_h) = registry.atlas_dimensions(uv.atlas_index);
     let anim = registry.texture_animation(tex_id).cloned().or_else(|| {
         registry
             .textures()
@@ -224,7 +243,7 @@ fn fluid_anim_uniform(registry: &stagcrest_mod_client::BlockRegistry, atlas_heig
     let Some(anim) = anim else {
         return Vec4::ONE;
     };
-    let frame_uv_step = anim.frame_height as f32 / atlas_height.max(1) as f32;
+    let frame_uv_step = anim.frame_height as f32 / page_h.max(1) as f32;
     let frametime_secs = (anim.frametime_ticks as f32 / 20.0).max(0.05);
     Vec4::new(anim.frame_count as f32, frame_uv_step, frametime_secs, 0.0)
 }
@@ -247,7 +266,7 @@ fn loading_ui(
         format!("Failed to connect:\n{err}")
     } else if state.done {
         "Ready!".to_string()
-    } else if state.pending_manifest.is_some() && state.pending_atlas.is_none() {
+    } else if state.pending_manifest.is_some() {
         "Receiving textures...".to_string()
     } else {
         "Connecting to server...".to_string()
@@ -304,5 +323,3 @@ fn loading_button_system(
         }
     }
 }
-
-

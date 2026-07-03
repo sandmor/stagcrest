@@ -283,9 +283,10 @@ pub async fn spawn_tcp_session(
         'writer: loop {
             let mut wrote = false;
             while let Ok(msg) = priority_rx.try_recv() {
-                let atlas_sent = matches!(
+                let wire_done = matches!(
                     msg,
-                    GameMessage::Server(ServerMessage::AtlasTransfer(_))
+                    GameMessage::Server(ServerMessage::TextureAssets(ref chunk))
+                        if chunk.index + 1 >= chunk.total
                 );
                 match encode_payload(&msg) {
                     Ok(payload) => match wrap_frame(&payload) {
@@ -305,7 +306,7 @@ pub async fn spawn_tcp_session(
                                     break 'writer;
                                 }
                                 write_buf.clear();
-                                if atlas_sent {
+                                if wire_done {
                                     writer_handshake_ready.store(true, Ordering::Release);
                                 }
                             }

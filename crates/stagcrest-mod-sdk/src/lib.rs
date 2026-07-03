@@ -333,6 +333,10 @@ pub struct RegisterBiomeFeatureRequest {
 /// Implemented by the engine host (native) or host imports (wasm mod).
 pub trait ContentRegistrar {
     fn register_texture(&mut self, req: RegisterTextureRequest) -> i32;
+    fn register_texture_from_pack(&mut self, namespaced_id: &str, mc_name: &str) -> i32 {
+        let _ = (namespaced_id, mc_name);
+        0
+    }
     fn register_block(&mut self, req: RegisterBlockRequest) -> i32;
     fn register_biome(&mut self, req: RegisterBiomeRequest) -> i32 {
         let _ = req;
@@ -367,7 +371,7 @@ mod wasm;
 
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{
-    load_texture_from_pack, log, register_biome, register_biome_feature, register_block,
-    register_cave_config, register_feature, register_river_config, register_river_feature,
-    register_texture,
+    log, register_biome, register_biome_feature, register_block, register_cave_config,
+    register_feature, register_river_config, register_river_feature, register_texture,
+    register_texture_from_pack,
 };

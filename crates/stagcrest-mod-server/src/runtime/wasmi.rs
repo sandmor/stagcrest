@@ -1,7 +1,8 @@
-use crate::host::register_block_host;
+use crate::assets::FsAssetReader;
+use crate::host::{register_block_host, register_texture_from_pack};
 use crate::registry::BlockRegistry;
 use crate::resourcepack::ResourcePackLoader;
-use crate::runtime::memory::{read_utf8, write_bytes};
+use crate::runtime::memory::read_utf8;
 use crate::worldgen::{
     register_biome_feature_host, register_biome_host, register_cave_config_host,
     register_feature_host, register_river_config_host, register_river_feature_host, BiomeRegistry,
@@ -182,16 +183,14 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
 
     linker.func_wrap(
         "stagcrest_host",
-        "load_texture_from_pack",
-        |mut caller: Caller<'_, HostState>,
-         name_ptr: i32,
-         name_len: i32,
-         out_ptr: i32,
-         out_max: i32|
-         -> Result<i32, Error> {
+        "register_texture_from_pack",
+        |caller: Caller<'_, HostState>, id_ptr: i32, id_len: i32, mc_ptr: i32, mc_len: i32| -> Result<i32, Error> {
             let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
-            let name = read_utf8(&memory, &caller, name_ptr, name_len)
-                .ok_or_else(|| Error::new("invalid texture name"))?;
+            let namespaced_id = read_utf8(&memory, &caller, id_ptr, id_len)
+                .ok_or_else(|| Error::new("invalid namespaced_id"))?;
+            let mc_name = read_utf8(&memory, &caller, mc_ptr, mc_len)
+                .ok_or_else(|| Error::new("invalid mc_name"))?;
+            let registry = unsafe { &mut *caller.data().registry };
             let packs = unsafe {
                 if caller.data().packs.is_null() {
                     None
@@ -202,21 +201,16 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
             let Some(packs) = packs else {
                 return Ok(-1);
             };
-            let Some((width, height, rgba)) = packs.load_mc_block_texture(&name) else {
-                return Ok(-1);
-            };
-            let payload = serde_json::json!({
-                "width": width,
-                "height": height,
-                "rgba": rgba,
-            });
-            let bytes = payload.to_string();
-            let Some(written) =
-                write_bytes(&memory, &mut caller, out_ptr, out_max, bytes.as_bytes())
-            else {
-                return Ok(-2);
-            };
-            Ok(written)
+            let reader = FsAssetReader::new(&packs.repo_root());
+            let loaded = register_texture_from_pack(
+                registry,
+                packs,
+                &reader,
+                &namespaced_id,
+                &mc_name,
+                packs.animation_for_stagcrest_texture(&namespaced_id),
+            );
+            Ok(i32::from(loaded))
         },
     )?;
 

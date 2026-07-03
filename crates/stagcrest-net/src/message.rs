@@ -1,7 +1,7 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use stagcrest_protocol::{
-    manifest::{AtlasTransfer, ContentManifest},
+    manifest::{ContentManifest, TextureAssetsChunk},
     BlockId, BlockPos, BlockState, ChunkPos,
 };
 
@@ -133,7 +133,7 @@ pub enum ServerMessage {
     Hello(ServerHello),
     Reject(HelloReject),
     Manifest(ContentManifest),
-    AtlasTransfer(AtlasTransfer),
+    TextureAssets(TextureAssetsChunk),
     Initial(InitialState),
     ChunkSnapshot(ChunkSnapshot),
     ChunkUnload(ChunkPos),

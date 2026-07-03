@@ -8,8 +8,8 @@ pub use colormap::sample_colormap_rgb;
 pub use map_colors::default_map_color;
 
 pub use manifest::{
-    AtlasTransfer, ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot,
-    TextureWireDef,
+    ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot, TextureAssetTransfer,
+    TextureAssetsChunk, TextureWireDef,
 };
 
 use serde::{Deserialize, Serialize};
@@ -800,6 +800,8 @@ pub struct AtlasRect {
     pub y: u32,
     pub w: u32,
     pub h: u32,
+    #[serde(default)]
+    pub atlas_index: u8,
 }
 
 pub fn floor_div(a: i32, b: i32) -> i32 {

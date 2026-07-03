@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 stagcrest-protocol.workspace = true
+stagcrest-atlas.workspace = true
 image.workspace = true
 tracing.workspace = true
 stagcrest-circuit.workspace = true

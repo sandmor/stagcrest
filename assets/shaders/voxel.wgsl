@@ -5,15 +5,29 @@
     view_transformations::position_world_to_clip,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(0) var atlas_tex: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(1) var atlas_s: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> grass_tint: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> foliage_tint: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(4) var<uniform> power_tint_dark: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(5) var<uniform> power_tint_bright: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(6) var<uniform> material_flags: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(7) var<uniform> water_tint: vec4<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(8) var<uniform> fluid_anim: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var atlas0_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var atlas0_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var atlas1_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var atlas1_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var atlas2_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var atlas2_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(6) var atlas3_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(7) var atlas3_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(8) var atlas4_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(9) var atlas4_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(10) var atlas5_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(11) var atlas5_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(12) var atlas6_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(13) var atlas6_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(14) var atlas7_tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(15) var atlas7_s: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(16) var<uniform> grass_tint: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(17) var<uniform> foliage_tint: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(18) var<uniform> power_tint_dark: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(19) var<uniform> power_tint_bright: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(20) var<uniform> material_flags: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(21) var<uniform> water_tint: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(22) var<uniform> fluid_anim: vec4<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -22,6 +36,8 @@ struct Vertex {
     @location(3) tint: f32,
     @location(4) overlay_tint: f32,
     @location(5) tint_mul: vec3<f32>,
+    @location(6) atlas_index: f32,
+    @location(7) overlay_atlas_index: f32,
 }
 
 struct VertexOutput {
@@ -31,6 +47,8 @@ struct VertexOutput {
     @location(2) tint: f32,
     @location(3) overlay_tint: f32,
     @location(4) tint_mul: vec3<f32>,
+    @location(5) atlas_index: f32,
+    @location(6) overlay_atlas_index: f32,
 }
 
 @vertex
@@ -44,7 +62,23 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.tint = vertex.tint;
     out.overlay_tint = vertex.overlay_tint;
     out.tint_mul = vertex.tint_mul;
+    out.atlas_index = vertex.atlas_index;
+    out.overlay_atlas_index = vertex.overlay_atlas_index;
     return out;
+}
+
+fn sample_atlas(uv: vec2<f32>, atlas_index: u32) -> vec4<f32> {
+    switch atlas_index {
+        case 0u: { return textureSample(atlas0_tex, atlas0_s, uv); }
+        case 1u: { return textureSample(atlas1_tex, atlas1_s, uv); }
+        case 2u: { return textureSample(atlas2_tex, atlas2_s, uv); }
+        case 3u: { return textureSample(atlas3_tex, atlas3_s, uv); }
+        case 4u: { return textureSample(atlas4_tex, atlas4_s, uv); }
+        case 5u: { return textureSample(atlas5_tex, atlas5_s, uv); }
+        case 6u: { return textureSample(atlas6_tex, atlas6_s, uv); }
+        case 7u: { return textureSample(atlas7_tex, atlas7_s, uv); }
+        default: { return textureSample(atlas0_tex, atlas0_s, uv); }
+    }
 }
 
 // Matches stagcrest_protocol::TINT_WATER (4.5), above max power tint (4.0).
@@ -93,19 +127,22 @@ fn animated_uv(uv: vec2<f32>, tint: f32) -> vec2<f32> {
     return uv;
 }
 
-fn shade_water(uv: vec2<f32>, tint: f32) -> vec4<f32> {
+fn shade_water(uv: vec2<f32>, tint: f32, atlas_index: u32) -> vec4<f32> {
     let sample_uv = animated_uv(uv, tint);
-    let tex = textureSample(atlas_tex, atlas_s, sample_uv);
+    let tex = sample_atlas(sample_uv, atlas_index);
     return vec4(vec3<f32>(tex.r) * water_tint.rgb, tex.a);
 }
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let atlas_idx = u32(clamp(in.atlas_index, 0.0, 7.0));
+    let overlay_idx = u32(clamp(in.overlay_atlas_index, 0.0, 7.0));
+
     if is_water(in.tint) {
-        return shade_water(in.uv, in.tint);
+        return shade_water(in.uv, in.tint, atlas_idx);
     }
     let uv = animated_uv(in.uv, in.tint);
-    var base = textureSample(atlas_tex, atlas_s, uv);
+    var base = sample_atlas(uv, atlas_idx);
     if material_flags.x > 0.5 && base.a < 0.5 {
         discard;
     }
@@ -113,7 +150,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
 
     if in.overlay_tint >= 0.5 {
         let ov_uv = animated_uv(in.overlay_uv, in.overlay_tint);
-        let ov = textureSample(atlas_tex, atlas_s, ov_uv);
+        let ov = sample_atlas(ov_uv, overlay_idx);
         if material_flags.x > 0.5 && ov.a < 0.5 {
             discard;
         }

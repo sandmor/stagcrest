@@ -2413,6 +2413,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dea2df4cf52843e0452895c455a1a2cfbb842a1e7329671acf418fdc53ed4c59"
 
 [[package]]
+name = "etagere"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ecb5c40d5683a270e077688f53a99eac51c1cb1ae5ba63b55590370cb3536bf"
+dependencies = [
+ "euclid",
+]
+
+[[package]]
 name = "euclid"
 version = "0.22.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5180,6 +5189,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stagcrest-atlas"
+version = "0.1.0"
+dependencies = [
+ "etagere",
+ "image",
+ "stagcrest-protocol",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "stagcrest-circuit"
 version = "0.1.0"
 dependencies = [
@@ -5199,6 +5218,7 @@ dependencies = [
  "glam 0.29.3",
  "serde",
  "serde_json",
+ "stagcrest-atlas",
  "stagcrest-circuit",
  "stagcrest-content",
  "stagcrest-mesh",
@@ -5246,7 +5266,9 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam 0.29.3",
+ "image",
  "rayon",
+ "stagcrest-atlas",
  "stagcrest-mod-client",
  "stagcrest-protocol",
  "stagcrest-storage",
@@ -5271,6 +5293,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "image",
+ "stagcrest-atlas",
  "stagcrest-circuit",
  "stagcrest-protocol",
  "tracing",
@@ -5293,6 +5316,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slab",
+ "stagcrest-atlas",
  "stagcrest-content",
  "stagcrest-mod-sdk",
  "stagcrest-protocol",

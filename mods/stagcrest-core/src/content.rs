@@ -26,7 +26,7 @@ fn fluid_mask_texture(reg: &mut impl ContentRegistrar, name: &str, alpha: u8) {
     });
 }
 
-fn register_fluid_texture_from_pack(reg: &mut impl ContentRegistrar, id: &str, _mc_name: &str) {
+fn register_fluid_texture_from_pack(reg: &mut impl ContentRegistrar, id: &str, _mc: &str) {
     // Host preloads fluid textures (large animation strips) before mod init.
     // register_texture skips when the namespaced id is already registered.
     fluid_mask_texture(reg, id, 180);
@@ -65,6 +65,7 @@ fn cutout_fallback_texture(reg: &mut impl ContentRegistrar, name: &str) {
     });
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_variables))]
 pub(crate) fn register_plant_texture_from_pack(
     reg: &mut impl ContentRegistrar,
     id: &str,
@@ -72,13 +73,7 @@ pub(crate) fn register_plant_texture_from_pack(
 ) {
     #[cfg(target_arch = "wasm32")]
     {
-        if let Some((w, h, rgba)) = stagcrest_mod_sdk::load_texture_from_pack(mc_name) {
-            reg.register_texture(RegisterTextureRequest {
-                namespaced_id: id.to_string(),
-                width: w,
-                height: h,
-                rgba,
-            });
+        if reg.register_texture_from_pack(id, mc_name) != 0 {
             return;
         }
     }
@@ -89,13 +84,7 @@ pub(crate) fn register_plant_texture_from_pack(
 pub(crate) fn register_texture_from_pack(reg: &mut impl ContentRegistrar, id: &str, mc_name: &str) {
     #[cfg(target_arch = "wasm32")]
     {
-        if let Some((w, h, rgba)) = stagcrest_mod_sdk::load_texture_from_pack(mc_name) {
-            reg.register_texture(RegisterTextureRequest {
-                namespaced_id: id.to_string(),
-                width: w,
-                height: h,
-                rgba,
-            });
+        if reg.register_texture_from_pack(id, mc_name) != 0 {
             return;
         }
     }
@@ -111,14 +100,7 @@ pub(crate) fn register_optional_texture_from_pack(
 ) {
     #[cfg(target_arch = "wasm32")]
     {
-        if let Some((w, h, rgba)) = stagcrest_mod_sdk::load_texture_from_pack(mc_name) {
-            reg.register_texture(RegisterTextureRequest {
-                namespaced_id: id.to_string(),
-                width: w,
-                height: h,
-                rgba,
-            });
-        }
+        let _ = reg.register_texture_from_pack(id, mc_name);
     }
 }
 

@@ -16,6 +16,7 @@ members = [
     "crates/stagcrest-minimap",
     "crates/stagcrest-modrinth",
     "crates/stagcrest-content",
+    "crates/stagcrest-atlas",
     "mods/stagcrest-core",
 ]
 
@@ -88,6 +89,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 zip = "8.6"
 sha1 = "0.10"
 percent-encoding = "2"
+etagere = "0.3"
 
 stagcrest-protocol = { path = "crates/stagcrest-protocol" }
 stagcrest-storage = { path = "crates/stagcrest-storage" }
@@ -104,6 +106,7 @@ stagcrest-render = { path = "crates/stagcrest-render" }
 stagcrest-minimap = { path = "crates/stagcrest-minimap" }
 stagcrest-modrinth = { path = "crates/stagcrest-modrinth" }
 stagcrest-content = { path = "crates/stagcrest-content" }
+stagcrest-atlas = { path = "crates/stagcrest-atlas" }
 
 [profile.release]
 lto = true

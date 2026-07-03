@@ -12,8 +12,7 @@ pub struct BlockRegistry {
     textures: HashMap<TextureId, TextureDef>,
     texture_by_name: HashMap<String, TextureId>,
     atlas_uvs: HashMap<TextureId, AtlasRect>,
-    atlas_width: u32,
-    atlas_height: u32,
+    atlas_pages: Vec<(u32, u32)>,
     placeable: Vec<BlockId>,
     next_block_id: u32,
     next_texture_id: u32,
@@ -106,13 +105,35 @@ impl BlockRegistry {
         self.atlas_uvs.insert(tex, rect);
     }
 
-    pub fn set_atlas_dimensions(&mut self, width: u32, height: u32) {
-        self.atlas_width = width;
-        self.atlas_height = height;
+    pub fn set_atlas_pages(&mut self, pages: Vec<(u32, u32)>) {
+        self.atlas_pages = pages;
     }
 
-    pub fn atlas_dimensions(&self) -> (u32, u32) {
-        (self.atlas_width.max(1), self.atlas_height.max(1))
+    pub fn atlas_pages(&self) -> &[(u32, u32)] {
+        &self.atlas_pages
+    }
+
+    pub fn atlas_dimensions(&self, atlas_index: u8) -> (u32, u32) {
+        self.atlas_pages
+            .get(atlas_index as usize)
+            .copied()
+            .unwrap_or((1, 1))
+    }
+
+    pub fn primary_atlas_dimensions(&self) -> (u32, u32) {
+        self.atlas_dimensions(0)
+    }
+
+    pub fn apply_atlas_set(&mut self, set: &stagcrest_atlas::AtlasSet) {
+        self.atlas_pages = set
+            .pages
+            .iter()
+            .map(|page| (page.width, page.height))
+            .collect();
+        self.atlas_uvs.clear();
+        for placement in &set.placements {
+            self.atlas_uvs.insert(placement.id, placement.rect);
+        }
     }
 
     pub fn atlas_uv(&self, tex: TextureId) -> AtlasRect {
@@ -123,6 +144,7 @@ impl BlockRegistry {
                 y: 0,
                 w: 1,
                 h: 1,
+                atlas_index: 0,
             }
         })
     }
@@ -237,8 +259,7 @@ impl BlockRegistry {
                 .iter()
                 .map(|(&id, &rect)| (id, rect))
                 .collect(),
-            atlas_width: self.atlas_width,
-            atlas_height: self.atlas_height,
+            atlas_pages: self.atlas_pages.clone(),
             next_block_id: self.next_block_id,
             next_texture_id: self.next_texture_id,
         }
@@ -249,8 +270,6 @@ impl BlockRegistry {
         let mut registry = Self {
             next_block_id: snap.next_block_id,
             next_texture_id: snap.next_texture_id,
-            atlas_width: snap.atlas_width,
-            atlas_height: snap.atlas_height,
             ..Default::default()
         };
         for tex in snap.textures {
@@ -286,9 +305,6 @@ impl BlockRegistry {
                 .by_namespaced
                 .insert(def.namespaced_id.clone(), def.id);
             registry.blocks.insert(def.id, def);
-        }
-        for (id, rect) in snap.atlas_uvs {
-            registry.atlas_uvs.insert(id, rect);
         }
         registry.placeable = snap.placeable;
         registry

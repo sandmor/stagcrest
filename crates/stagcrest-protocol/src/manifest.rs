@@ -9,13 +9,12 @@ pub struct RegistrySnapshot {
     pub textures: Vec<TextureDef>,
     pub placeable: Vec<BlockId>,
     pub atlas_uvs: Vec<(TextureId, AtlasRect)>,
-    pub atlas_width: u32,
-    pub atlas_height: u32,
+    pub atlas_pages: Vec<(u32, u32)>,
     pub next_block_id: u32,
     pub next_texture_id: u32,
 }
 
-/// Texture metadata sent on the wire without pixel bytes (pixels live in `AtlasTransfer`).
+/// Texture metadata sent on the wire without pixel bytes (PNG bytes in `TextureAssetTransfer`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextureWireDef {
     pub id: TextureId,
@@ -32,20 +31,24 @@ pub struct RegistryWireSnapshot {
     pub blocks: Vec<BlockDef>,
     pub textures: Vec<TextureWireDef>,
     pub placeable: Vec<BlockId>,
-    pub atlas_uvs: Vec<(TextureId, AtlasRect)>,
-    pub atlas_width: u32,
-    pub atlas_height: u32,
     pub next_block_id: u32,
     pub next_texture_id: u32,
 }
 
-/// Lossless PNG atlas payload sent after the content manifest.
+/// Verbatim PNG file bytes for one block texture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AtlasTransfer {
-    pub width: u32,
-    pub height: u32,
-    pub placements: Vec<(TextureId, AtlasRect)>,
+pub struct TextureAssetTransfer {
+    pub id: TextureId,
     pub png: Vec<u8>,
+    pub animation: Option<TextureAnimation>,
+}
+
+/// Chunk of texture assets (bulk channel) during handshake.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextureAssetsChunk {
+    pub index: u32,
+    pub total: u32,
+    pub textures: Vec<TextureAssetTransfer>,
 }
 
 /// Colormap PNG bytes for grass/foliage/water tinting.
@@ -85,7 +88,7 @@ pub struct BiomesSnapshot {
     pub biomes: Vec<BiomeClientDef>,
 }
 
-/// Content metadata sent once after handshake (atlas follows separately).
+/// Content metadata sent once after handshake (texture PNGs follow separately).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentManifest {
     pub loaded_mods: Vec<String>,

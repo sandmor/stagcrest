@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn dispatch_defers_unfinished_chunk() {
         use crate::game::ModContext;
-        use stagcrest_mod_client::{BlockRegistry, ModelRegistry, TextureAtlas};
+        use stagcrest_mod_client::{BlockRegistry, ModelRegistry};
         use stagcrest_protocol::{BlockId, BlockPos, BlockState};
 
         let mut sched = MeshScheduler::default();
@@ -516,7 +516,7 @@ mod tests {
 
         let ctx = ModContext {
             registry: BlockRegistry::new(),
-            atlas: TextureAtlas::build(std::iter::empty()),
+            atlases: Vec::new(),
             models: ModelRegistry::new(),
             colormaps: stagcrest_mod_client::ColormapSet {
                 grass: vec![],

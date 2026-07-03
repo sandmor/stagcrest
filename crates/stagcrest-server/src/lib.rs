@@ -27,7 +27,7 @@ use stagcrest_net::{
     GameTransport, InProcessTransport, NetConfig, ServerMessage,
 };
 use stagcrest_minimap::{world_chunk_to_map_chunk, MapResolveContext};
-use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
+use stagcrest_protocol::{manifest::TextureAssetsChunk, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 
 use crate::map_generation::MapChunkPipeline;
@@ -92,7 +92,7 @@ pub struct GameServer {
     circuit_accumulator: f32,
     pub server_id: u64,
     cached_manifest: stagcrest_protocol::manifest::ContentManifest,
-    cached_atlas: AtlasTransfer,
+    cached_texture_chunks: Vec<TextureAssetsChunk>,
     map_pipeline: MapChunkPipeline,
     map_ctx: Arc<MapResolveContext>,
     map_y_chunks: Vec<i32>,
@@ -152,11 +152,11 @@ impl GameServer {
             let mut host = mod_host;
             let mut reg = registry;
             std::mem::swap(&mut host.registry, &mut reg);
-            let (cached_manifest, cached_atlas) = host.build_handshake_content(&colormaps);
+            let (cached_manifest, cached_texture_chunks) = host.build_handshake_content(&colormaps);
             std::mem::swap(&mut host.registry, &mut reg);
-            (host, reg, cached_manifest, cached_atlas)
+            (host, reg, cached_manifest, cached_texture_chunks)
         };
-        let (mod_host, registry, cached_manifest, cached_atlas) = cached;
+        let (mod_host, registry, cached_manifest, cached_texture_chunks) = cached;
 
         let map_ctx = Arc::new(map_generation::make_map_resolve_context(
             &registry,
@@ -186,7 +186,7 @@ impl GameServer {
             circuit_accumulator: 0.0,
             server_id: 1,
             cached_manifest,
-            cached_atlas,
+            cached_texture_chunks,
             map_pipeline,
             map_ctx,
             map_y_chunks,
@@ -196,15 +196,11 @@ impl GameServer {
 
     pub fn build_manifest(&mut self) -> stagcrest_protocol::manifest::ContentManifest {
         std::mem::swap(&mut self.mod_host.registry, &mut self.registry);
-        let (manifest, atlas) = self.mod_host.build_handshake_content(&self.colormaps);
-        self.cached_atlas = atlas;
+        let (manifest, chunks) = self.mod_host.build_handshake_content(&self.colormaps);
+        self.cached_texture_chunks = chunks;
         std::mem::swap(&mut self.mod_host.registry, &mut self.registry);
+        self.cached_manifest = manifest.clone();
         manifest
-    }
-
-    pub fn build_atlas_transfer(&mut self) -> AtlasTransfer {
-        self.build_manifest();
-        self.cached_atlas.clone()
     }
 
     pub fn handle_client_message(

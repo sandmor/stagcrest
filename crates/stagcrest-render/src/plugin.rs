@@ -7,7 +7,7 @@ use stagcrest_mod_client::TextureAtlas;
 use stagcrest_protocol::ChunkPos;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::voxel_material::{VoxelMaterial, VoxelMaterialPlugin};
+use crate::voxel_material::{VoxelMaterial, VoxelMaterialPlugin, MAX_ATLAS_PAGES};
 
 static ATLAS_REVISION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -28,7 +28,7 @@ pub struct PendingMeshRebuild {
 #[derive(Resource)]
 pub struct BlockAtlasResource {
     pub revision: u64,
-    pub atlas: TextureAtlas,
+    pub atlases: Vec<TextureAtlas>,
     pub grass_tint: Color,
     pub foliage_tint: Color,
     pub water_tint: Color,
@@ -59,7 +59,37 @@ pub struct ChunkEntityMarker {
     pub bucket: u8,
 }
 
-type AtlasKey = [u32; 16];
+type AtlasKey = [u32; 32];
+
+fn atlas_key_from(
+    revision: u64,
+    atlases: &[TextureAtlas],
+    grass: LinearRgba,
+    foliage: LinearRgba,
+    water: LinearRgba,
+    fluid_anim: Vec4,
+) -> AtlasKey {
+    let mut key = [0u32; 32];
+    key[0] = (revision & 0xFFFF_FFFF) as u32;
+    key[1] = (revision >> 32) as u32;
+    key[2] = grass.red.to_bits();
+    key[3] = grass.green.to_bits();
+    key[4] = grass.blue.to_bits();
+    key[5] = foliage.red.to_bits();
+    key[6] = foliage.green.to_bits();
+    key[7] = foliage.blue.to_bits();
+    key[8] = water.red.to_bits();
+    key[9] = water.green.to_bits();
+    key[10] = water.blue.to_bits();
+    key[11] = fluid_anim.x.to_bits();
+    key[12] = fluid_anim.y.to_bits();
+    key[13] = fluid_anim.z.to_bits();
+    for (i, page) in atlases.iter().take(MAX_ATLAS_PAGES).enumerate() {
+        key[14 + i * 2] = page.width;
+        key[15 + i * 2] = page.height;
+    }
+    key
+}
 
 pub struct VoxelRenderPlugin;
 
@@ -86,8 +116,8 @@ pub fn sync_chunk_meshes(
     mut opaque_mat: Local<Option<Handle<VoxelMaterial>>>,
     mut blend_mat: Local<Option<Handle<VoxelMaterial>>>,
     mut cutout_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut atlas_image_handles: Local<Vec<Handle<Image>>>,
     mut last_atlas_key: Local<Option<AtlasKey>>,
-    mut atlas_image: Local<Option<(AtlasKey, Handle<Image>)>>,
     existing: Query<(Entity, &ChunkEntityMarker)>,
 ) {
     let Some(atlas_res) = atlas else {
@@ -100,24 +130,14 @@ pub fn sync_chunk_meshes(
     let fluid_time = time.elapsed_secs();
     let mut fluid_anim = atlas_res.fluid_anim;
     fluid_anim.w = fluid_time;
-    let atlas_key = [
-        (atlas_res.revision & 0xFFFF_FFFF) as u32,
-        (atlas_res.revision >> 32) as u32,
-        atlas_res.atlas.width,
-        atlas_res.atlas.height,
-        grass.red.to_bits(),
-        grass.green.to_bits(),
-        grass.blue.to_bits(),
-        foliage.red.to_bits(),
-        foliage.green.to_bits(),
-        foliage.blue.to_bits(),
-        water.red.to_bits(),
-        water.green.to_bits(),
-        water.blue.to_bits(),
-        fluid_anim.x.to_bits(),
-        fluid_anim.y.to_bits(),
-        fluid_anim.z.to_bits(),
-    ];
+    let atlas_key = atlas_key_from(
+        atlas_res.revision,
+        &atlas_res.atlases,
+        grass,
+        foliage,
+        water,
+        fluid_anim,
+    );
 
     let atlas_changed = *last_atlas_key != Some(atlas_key);
     if atlas_changed {
@@ -152,17 +172,32 @@ pub fn sync_chunk_meshes(
         return;
     }
 
-    let image_handle = match atlas_image.as_ref() {
-        Some((key, handle)) if *key == atlas_key => handle.clone(),
-        _ => {
-            let handle = images.add(block_atlas_image(&atlas_res.atlas));
-            *atlas_image = Some((atlas_key, handle.clone()));
-            handle
+    let image_handles = if atlas_changed || atlas_image_handles.is_empty() {
+        let mut handles = Vec::with_capacity(MAX_ATLAS_PAGES);
+        for page in atlas_res.atlases.iter().take(MAX_ATLAS_PAGES) {
+            handles.push(images.add(block_atlas_image(page)));
         }
+        while handles.len() < MAX_ATLAS_PAGES {
+            let fallback = handles.first().cloned().unwrap_or_else(|| {
+                images.add(Image::default())
+            });
+            handles.push(fallback);
+        }
+        *atlas_image_handles = handles;
+        atlas_image_handles.clone()
+    } else {
+        atlas_image_handles.clone()
     };
 
     let base_tints = || VoxelMaterial {
-        atlas: image_handle.clone(),
+        atlas0: image_handles[0].clone(),
+        atlas1: image_handles[1].clone(),
+        atlas2: image_handles[2].clone(),
+        atlas3: image_handles[3].clone(),
+        atlas4: image_handles[4].clone(),
+        atlas5: image_handles[5].clone(),
+        atlas6: image_handles[6].clone(),
+        atlas7: image_handles[7].clone(),
         grass_tint: grass,
         foliage_tint: foliage,
         power_tint_dark: LinearRgba::new(0.4, 0.0, 0.0, 1.0),
@@ -337,6 +372,17 @@ fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
     mesh.insert_attribute(
         crate::voxel_material::ATTRIBUTE_TINT_MUL,
         vertices.iter().map(|v| v.tint_mul).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_ATLAS_INDEX,
+        vertices.iter().map(|v| v.atlas_index).collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_OVERLAY_ATLAS_INDEX,
+        vertices
+            .iter()
+            .map(|v| v.overlay_atlas_index)
+            .collect::<Vec<_>>(),
     );
     mesh.insert_indices(Indices::U32(indices.clone()));
 

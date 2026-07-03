@@ -93,17 +93,6 @@ impl ModHost {
         Ok(())
     }
 
-    pub fn finalize_atlas(&mut self) -> crate::TextureAtlas {
-        let textures: Vec<_> = self.registry.textures().cloned().collect();
-        let atlas = crate::TextureAtlas::build(textures.into_iter());
-        self.registry
-            .set_atlas_dimensions(atlas.width, atlas.height);
-        for (id, rect) in &atlas.placements {
-            self.registry.set_atlas_uv(*id, *rect);
-        }
-        atlas
-    }
-
     pub fn air_block(&self) -> BlockId {
         self.registry
             .block_by_name("stagcrest:air")
@@ -228,17 +217,7 @@ fn register_pack_plant_textures(
         ("stagcrest:dead_bush", "dead_bush"),
         ("stagcrest:oak_leaves", "oak_leaves"),
     ] {
-        packs.ensure_block_texture(reader, mc_name);
-        let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
-            continue;
-        };
-        registry.register_texture_with_animation(
-            namespaced_id.to_string(),
-            width,
-            height,
-            rgba,
-            None,
-        );
+        register_texture_from_pack(registry, packs, reader, namespaced_id, mc_name, None);
     }
 }
 
@@ -251,17 +230,29 @@ fn register_pack_fluid_textures(
         ("stagcrest:water_still", "water_still"),
         ("stagcrest:water_flow", "water_flow"),
     ] {
-        packs.ensure_block_texture(reader, mc_name);
-        let Some((width, height, rgba)) = packs.load_mc_block_texture(mc_name) else {
-            continue;
-        };
         let animation = packs.animation_for_mc_texture(mc_name);
-        registry.register_texture_with_animation(
-            namespaced_id.to_string(),
-            width,
-            height,
-            rgba,
-            animation,
-        );
+        register_texture_from_pack(registry, packs, reader, namespaced_id, mc_name, animation);
     }
+}
+
+pub(crate) fn register_texture_from_pack(
+    registry: &mut BlockRegistry,
+    packs: &ResourcePackLoader,
+    reader: &dyn crate::assets::AssetReader,
+    namespaced_id: &str,
+    mc_name: &str,
+    animation: Option<stagcrest_protocol::TextureAnimation>,
+) -> bool {
+    packs.ensure_block_texture(reader, mc_name);
+    let Some((width, height, png, anim)) = packs.load_mc_block_texture_png(reader, mc_name) else {
+        return false;
+    };
+    registry.register_texture_from_png(
+        namespaced_id.to_string(),
+        png,
+        width,
+        height,
+        animation.or(anim),
+    );
+    true
 }

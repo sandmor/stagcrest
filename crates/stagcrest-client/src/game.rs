@@ -41,7 +41,7 @@ pub enum GameplayState {
 #[derive(Resource)]
 pub struct ModContext {
     pub registry: BlockRegistry,
-    pub atlas: TextureAtlas,
+    pub atlases: Vec<TextureAtlas>,
     pub models: ModelRegistry,
     pub colormaps: ColormapSet,
     pub biomes: BiomeRegistryClient,

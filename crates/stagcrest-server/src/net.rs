@@ -40,8 +40,9 @@ pub fn send_handshake(server: &GameServer, client: &mut ConnectedClient) {
 
     let manifest = server.cached_manifest.clone();
     client.queue_priority(GameMessage::Server(ServerMessage::Manifest(manifest)));
-    let atlas = server.cached_atlas.clone();
-    client.queue_priority(GameMessage::Server(ServerMessage::AtlasTransfer(atlas)));
+    for chunk in &server.cached_texture_chunks {
+        client.queue_priority(GameMessage::Server(ServerMessage::TextureAssets(chunk.clone())));
+    }
     client.handshake_pending = true;
 }
 
