@@ -12,9 +12,9 @@ use stagcrest_net::MapViewSubscribe;
 use stagcrest_protocol::BlockPos;
 
 use crate::game::AppState;
+use crate::game_session::GameCamera;
 use crate::mesh_scheduler::poll_future_now;
 use crate::net_client::GameNetClient;
-use crate::player::FlyCamera;
 use crate::ui::UiTheme;
 
 pub const TEX_SIZE: u32 = MINIMAP_TEX_SIZE;
@@ -117,19 +117,18 @@ struct MinimapMarker;
 
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::InGame), spawn_minimap)
-            .add_systems(
-                Update,
-                (
-                    toggle_minimap,
-                    zoom_minimap,
-                    minimap_decode_apply.after(crate::game::net_poll_system),
-                    minimap_track_camera,
-                    minimap_subscribe,
-                    minimap_apply.after(minimap_decode_apply),
-                )
-                    .run_if(in_state(AppState::InGame).or_else(in_state(AppState::Paused))),
-            );
+        app.add_systems(
+            Update,
+            (
+                toggle_minimap,
+                zoom_minimap,
+                minimap_decode_apply.after(crate::game::net_poll_system),
+                minimap_track_camera,
+                minimap_subscribe,
+                minimap_apply.after(minimap_decode_apply),
+            )
+                .run_if(in_state(AppState::InGame)),
+        );
     }
 }
 
@@ -221,10 +220,10 @@ fn fill_unloaded_rgba(len: usize) -> Vec<u8> {
     rgba
 }
 
-fn spawn_minimap(
-    mut commands: Commands,
-    theme: Res<UiTheme>,
-    mut images: ResMut<Assets<Image>>,
+pub fn spawn_minimap(
+    commands: &mut Commands,
+    theme: &UiTheme,
+    images: &mut Assets<Image>,
 ) {
     let rgba = fill_unloaded_rgba((TEX_SIZE * TEX_SIZE * 4) as usize);
     let texture = images.add(Image::new(
@@ -255,6 +254,7 @@ fn spawn_minimap(
 
     commands
         .spawn((
+            crate::game_session::GameSessionEntity,
             MinimapRoot,
             Node {
                 position_type: PositionType::Absolute,
@@ -304,7 +304,7 @@ fn toggle_minimap(
     mut tiles: ResMut<MapTileCache>,
     mut queue: ResMut<MinimapDecodeQueue>,
     mut roots: Query<&mut Visibility, With<MinimapRoot>>,
-    camera: Query<&Transform, With<FlyCamera>>,
+    camera: Query<&Transform, With<GameCamera>>,
 ) {
     if keys.just_pressed(KeyCode::KeyM) {
         state.visible = !state.visible;
@@ -377,7 +377,7 @@ fn minimap_decode_apply(
 fn minimap_track_camera(
     mut state: ResMut<MinimapState>,
     mut tiles: ResMut<MapTileCache>,
-    camera: Query<&Transform, With<FlyCamera>>,
+    camera: Query<&Transform, With<GameCamera>>,
 ) {
     if !state.visible {
         return;

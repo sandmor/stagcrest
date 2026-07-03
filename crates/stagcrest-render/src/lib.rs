@@ -8,8 +8,9 @@ pub use outline::{
     OutlineMaterialPlugin,
 };
 pub use plugin::{
-    atlas_pixels_to_image, despawn_chunk_entities, sync_chunk_meshes, BlockAtlasResource,
-    ChunkEntityMarker, MeshCacheResource, PendingMeshRebuild, VoxelRenderPlugin,
+    atlas_pixels_to_image, despawn_chunk_entities, next_atlas_revision, sync_chunk_meshes,
+    BlockAtlasResource, ChunkEntityMarker, MeshCacheResource, PendingMeshRebuild,
+    VoxelRenderPlugin,
 };
 pub use underwater::{UnderwaterEffect, UnderwaterPlugin};
 pub use voxel_material::{VoxelMaterial, VoxelMaterialPlugin};

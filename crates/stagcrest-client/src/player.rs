@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorOptions, PrimaryWindow};
 use stagcrest_net::{PlayerAction, PlayerActionKind};
 
+use crate::game_session::GameCamera;
 use crate::net_client::GameNetClient;
 use crate::world_replica::WorldReplica;
 
@@ -29,7 +30,7 @@ pub struct SelectedBlock(pub stagcrest_protocol::BlockId);
 pub fn camera_system(
     keys: Res<ButtonInput<KeyCode>>,
     mut motion: MessageReader<bevy::input::mouse::MouseMotion>,
-    mut camera: Query<(&mut Transform, &FlyCamera)>,
+    mut camera: Query<(&mut Transform, &FlyCamera), With<GameCamera>>,
     time: Res<Time>,
 ) {
     let mouse_deltas: Vec<_> = motion.read().map(|ev| ev.delta).collect();
@@ -84,8 +85,7 @@ pub fn block_interaction(
     target: Res<crate::targeting::BlockTarget>,
     inventory_ui: Option<Res<crate::inventory::InventoryUiState>>,
     inventory: Option<ResMut<crate::inventory::CreativeInventory>>,
-    camera: Query<&Transform, With<FlyCamera>>,
-    fly: Query<&FlyCamera, With<FlyCamera>>,
+    fly: Query<&FlyCamera, With<GameCamera>>,
 ) {
     let Some(ctx) = mod_ctx else { return };
     let Ok(fly_cam) = fly.single() else { return };
@@ -165,11 +165,11 @@ pub fn block_interaction(
             hit.face_normal.z as i32,
         ],
     });
-    let _ = camera;
+    let _ = fly;
 }
 
 pub fn capture_cursor(
-    mut fly: Query<&mut FlyCamera>,
+    mut fly: Query<&mut FlyCamera, With<GameCamera>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
@@ -178,7 +178,7 @@ pub fn capture_cursor(
             c.grab_mode = bevy::window::CursorGrabMode::Locked;
             c.visible = false;
         }
-        for mut f in &mut fly {
+        if let Ok(mut f) = fly.single_mut() {
             f.captured = true;
         }
     }

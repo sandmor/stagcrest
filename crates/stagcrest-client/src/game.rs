@@ -1,5 +1,7 @@
 use crate::chunk_streaming::{on_chunk_unloaded_remove_biome, BiomeGridCache};
 use crate::environment::{self, PlayerEnvironment};
+use crate::game_session::{self, GameCamera, in_active_gameplay};
+use crate::inventory::inventory_open;
 use crate::mesh_scheduler::{
     mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll,
     mesh_rebuild_after_atlas_change, mesh_recover_unmeshed, MeshScheduler,
@@ -8,17 +10,13 @@ use crate::minimap::MinimapDecodeQueue;
 use crate::net_client::GameNetClient;
 use crate::world_replica::{apply_power_batch, CircuitPowerOverlay, WorldReplica};
 use crate::world_select::SelectedWorld;
-use crate::{block_outline, debug_overlay, minimap, player, targeting};
-use bevy::pbr::{DistanceFog, FogFalloff};
+use crate::{block_outline, player, targeting};
 use bevy::prelude::*;
 use stagcrest_mod_client::{
-    BiomeRegistryClient, BlockRegistry, ColormapSet, ModelRegistry, TextureAtlas, SEA_LEVEL,
+    BiomeRegistryClient, BlockRegistry, ColormapSet, ModelRegistry, TextureAtlas,
 };
 use stagcrest_net::ServerMessage;
-use stagcrest_render::{
-    spawn_block_outline, BlockAtlasResource, MeshCacheResource, OutlineMaterial, UnderwaterEffect,
-    VoxelRenderPlugin,
-};
+use stagcrest_render::{BlockAtlasResource, MeshCacheResource, UnderwaterEffect, VoxelRenderPlugin};
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -30,6 +28,13 @@ pub enum AppState {
     Connect,
     Loading,
     InGame,
+}
+
+#[derive(SubStates, Clone, Copy, Default, Eq, PartialEq, Hash, Debug)]
+#[source(AppState = AppState::InGame)]
+pub enum GameplayState {
+    #[default]
+    Active,
     Paused,
 }
 
@@ -74,47 +79,50 @@ impl Plugin for GamePlugin {
             .add_systems(
                 Update,
                 (
-                    net_poll_system.run_if(in_state(AppState::InGame)),
+                    net_poll_system.run_if(in_active_gameplay),
                     net_ping_system
                         .after(net_poll_system)
                         .run_if(in_state(AppState::InGame)),
                     send_pose_system
                         .after(net_poll_system)
-                        .run_if(in_state(AppState::InGame)),
-                    player::camera_system.run_if(in_state(AppState::InGame)),
-                    targeting::update_block_target.run_if(in_state(AppState::InGame)),
-                    player::block_interaction.run_if(in_state(AppState::InGame)),
-                    block_outline::sync_block_outline.run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
+                    player::capture_cursor
+                        .run_if(in_active_gameplay)
+                        .run_if(not(inventory_open)),
+                    player::camera_system.run_if(in_active_gameplay),
+                    targeting::update_block_target
+                        .after(player::capture_cursor)
+                        .run_if(in_active_gameplay),
+                    player::block_interaction
+                        .after(targeting::update_block_target)
+                        .run_if(in_active_gameplay),
+                    block_outline::sync_block_outline.run_if(in_active_gameplay),
                     mesh_drain_dirty
                         .after(net_poll_system)
-                        .run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
                     mesh_rebuild_after_atlas_change
                         .after(mesh_drain_dirty)
-                        .run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
                     mesh_dispatch
                         .after(net_poll_system)
                         .after(mesh_rebuild_after_atlas_change)
-                        .run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
                     mesh_poll
                         .after(mesh_dispatch)
-                        .run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
                     mesh_commit_meshes
                         .after(mesh_poll)
-                        .run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
                     mesh_recover_unmeshed
                         .after(net_poll_system)
                         .before(mesh_dispatch)
-                        .run_if(in_state(AppState::InGame)),
-                    update_fluid_anim.run_if(in_state(AppState::InGame)),
-                    environment::update_player_environment.run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
+                    update_fluid_anim.run_if(in_active_gameplay),
+                    environment::update_player_environment.run_if(in_active_gameplay),
                     sync_underwater_vision
                         .after(environment::update_player_environment)
-                        .run_if(in_state(AppState::InGame)),
+                        .run_if(in_active_gameplay),
                 ),
-            )
-            .add_systems(
-                OnEnter(AppState::InGame),
-                (setup_game_camera, setup_block_outline),
             )
             .add_systems(OnEnter(AppState::MainMenu), cleanup_game_session)
             .add_systems(OnEnter(AppState::WorldSelect), cleanup_game_session)
@@ -162,7 +170,7 @@ fn net_ping_system(time: Res<Time>, mut net: ResMut<GameNetClient>) {
 
 fn send_pose_system(
     mut net: ResMut<GameNetClient>,
-    camera: Query<&Transform, With<player::FlyCamera>>,
+    camera: Query<&Transform, With<GameCamera>>,
 ) {
     let Ok(transform) = camera.single() else {
         return;
@@ -181,76 +189,36 @@ fn cleanup_game_session(
     mut commands: Commands,
     mut selected_world: ResMut<SelectedWorld>,
     mod_ctx: Option<Res<ModContext>>,
-    outline_entities: Query<Entity, With<stagcrest_render::BlockOutlineMarker>>,
-    debug_roots: Query<Entity, With<debug_overlay::DebugOverlayRoot>>,
-    minimap_roots: Query<Entity, With<minimap::MinimapRoot>>,
-    cameras: Query<Entity, With<player::FlyCamera>>,
+    session_entities: Query<Entity, With<game_session::GameSessionEntity>>,
+    debug_roots: Query<Entity, With<crate::debug_overlay::DebugOverlayRoot>>,
+    minimap_roots: Query<Entity, With<crate::minimap::MinimapRoot>>,
     chunk_entities: Query<Entity, With<stagcrest_render::ChunkEntityMarker>>,
+    inventory_screens: Query<Entity, With<crate::inventory::screen::InventoryScreenRoot>>,
+    mut inventory_ui: ResMut<crate::inventory::InventoryUiState>,
 ) {
     *selected_world = SelectedWorld::default();
     if mod_ctx.is_none() {
         return;
     }
 
-    block_outline::despawn_block_outline(&mut commands, &outline_entities);
-    stagcrest_render::despawn_chunk_entities(&mut commands, &chunk_entities);
-    debug_overlay::cleanup_debug_overlay(&mut commands, &debug_roots);
-    minimap::cleanup_minimap(&mut commands, &minimap_roots);
-    for cam in &cameras {
-        commands.entity(cam).despawn();
-    }
+    game_session::teardown_game_session_entities(
+        &mut commands,
+        &session_entities,
+        &debug_roots,
+        &minimap_roots,
+        &chunk_entities,
+        &mut inventory_ui,
+        &inventory_screens,
+    );
     commands.remove_resource::<ModContext>();
     commands.remove_resource::<WorldReplica>();
     commands.remove_resource::<BlockAtlasResource>();
-    commands.remove_resource::<crate::block_icons::BlockIconCache>();
     commands.remove_resource::<MeshScheduler>();
     commands.remove_resource::<MeshCacheResource>();
     commands.remove_resource::<BiomeGridCache>();
     commands.remove_resource::<targeting::BlockTarget>();
     commands.remove_resource::<PlayerEnvironment>();
     commands.remove_resource::<CircuitPowerOverlay>();
-}
-
-fn setup_block_outline(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<OutlineMaterial>>,
-) {
-    spawn_block_outline(&mut commands, &mut meshes, &mut materials);
-}
-
-fn setup_game_camera(mut commands: Commands) {
-    commands.insert_resource(GlobalAmbientLight {
-        brightness: 800.0,
-        ..default()
-    });
-    commands.spawn(DirectionalLight {
-        illuminance: 10_000.0,
-        ..default()
-    });
-
-    let look_y = (SEA_LEVEL + 8) as f32;
-    let spawn_y = (SEA_LEVEL + 16) as f32;
-    let transform =
-        Transform::from_xyz(8.0, spawn_y, 8.0).looking_at(Vec3::new(0.0, look_y, 0.0), Vec3::Y);
-    commands.spawn((
-        Camera3d::default(),
-        Camera {
-            order: 0,
-            ..default()
-        },
-        transform,
-        player::FlyCamera::default(),
-        UnderwaterEffect::default(),
-        DistanceFog {
-            color: Color::srgba(0.1, 0.3, 0.5, 0.0),
-            falloff: FogFalloff::Linear {
-                start: 4.0,
-                end: 24.0,
-            },
-            ..default()
-        },
-    ));
 }
 
 fn update_fluid_anim(time: Res<Time>, atlas: Option<ResMut<BlockAtlasResource>>) {
@@ -263,7 +231,7 @@ fn sync_underwater_vision(
     env: Res<PlayerEnvironment>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
-    mut camera: Query<(&mut UnderwaterEffect, &mut DistanceFog), With<player::FlyCamera>>,
+    mut camera: Query<(&mut UnderwaterEffect, &mut DistanceFog), With<GameCamera>>,
 ) {
     let Ok((mut effect, mut fog)) = camera.single_mut() else {
         return;

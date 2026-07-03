@@ -9,6 +9,7 @@ use stagcrest_world::RaycastHit;
 use crate::chunk_streaming::BiomeGridCache;
 use crate::environment::PlayerEnvironment;
 use crate::game::{AppState, GameConfig, ModContext};
+use crate::game_session::GameCamera;
 use crate::net_client::GameNetClient;
 use crate::player::{FlyCamera, SelectedBlock};
 use crate::targeting::BlockTarget;
@@ -31,13 +32,10 @@ struct DebugOverlayText;
 
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DebugOverlayVisible>()
-            .add_systems(OnEnter(AppState::InGame), spawn_debug_overlay)
-            .add_systems(
-                Update,
-                (toggle_debug_overlay, update_debug_overlay)
-                    .run_if(in_state(AppState::InGame).or_else(in_state(AppState::Paused))),
-            );
+        app.init_resource::<DebugOverlayVisible>().add_systems(
+            Update,
+            (toggle_debug_overlay, update_debug_overlay).run_if(in_state(AppState::InGame)),
+        );
     }
 }
 
@@ -51,9 +49,10 @@ pub fn cleanup_debug_overlay(
     commands.insert_resource(DebugOverlayVisible(false));
 }
 
-pub fn spawn_debug_overlay(mut commands: Commands, theme: Res<UiTheme>) {
+pub fn spawn_debug_overlay(commands: &mut Commands, theme: &UiTheme) {
     commands
         .spawn((
+            crate::game_session::GameSessionEntity,
             DebugOverlayRoot,
             Node {
                 position_type: PositionType::Absolute,
@@ -103,7 +102,7 @@ fn update_debug_overlay(
     env: Res<PlayerEnvironment>,
     target: Res<BlockTarget>,
     selected: Res<SelectedBlock>,
-    camera: Query<(&Transform, &FlyCamera), With<FlyCamera>>,
+    camera: Query<(&Transform, &FlyCamera), With<GameCamera>>,
     mesh_cache: Option<Res<MeshCacheResource>>,
     mut text: Query<&mut Text, With<DebugOverlayText>>,
     mut fps_smooth: Local<f32>,

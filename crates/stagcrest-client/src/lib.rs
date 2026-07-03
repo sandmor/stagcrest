@@ -15,6 +15,7 @@ pub mod connect_screen;
 pub mod debug_overlay;
 pub mod environment;
 pub mod game;
+pub mod game_session;
 pub mod mesh_scheduler;
 pub mod inventory;
 pub mod loading;
@@ -52,6 +53,7 @@ pub fn run_app(launch: LaunchConfig) {
         .insert_resource(launch.clone())
         .insert_resource(GameNetClient::from_launch(&launch))
         .init_state::<AppState>()
+        .add_sub_state::<game::GameplayState>()
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
         .add_plugins(UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
@@ -64,6 +66,7 @@ pub fn run_app(launch: LaunchConfig) {
             world_select::WorldSelectPlugin,
             loading::LoadingPlugin,
             game::GamePlugin,
+            game_session::GameSessionPlugin,
             debug_overlay::DebugPlugin,
             minimap::MinimapPlugin,
             pause::PausePlugin,

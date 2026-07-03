@@ -2,6 +2,7 @@ use super::hotbar::InventoryScreenSlot;
 use super::screen::CatalogCell;
 use super::state::{CreativeInventory, InventoryUiState, SlotKind};
 use crate::block_icons::BlockIconCache;
+use crate::game_session::GameCamera;
 use crate::player::{release_cursor, FlyCamera, SelectedBlock};
 use crate::ui::UiTheme;
 use bevy::input_focus::InputFocus;
@@ -33,7 +34,7 @@ pub fn toggle_inventory_screen(
     theme: Res<UiTheme>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
     icons: Option<Res<BlockIconCache>>,
-    mut fly: Query<&mut FlyCamera>,
+    mut fly: Query<&mut FlyCamera, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     existing: Query<Entity, With<super::screen::InventoryScreenRoot>>,
     ghost: Query<Entity, With<CursorGhost>>,

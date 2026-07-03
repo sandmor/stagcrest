@@ -5,8 +5,16 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use stagcrest_mesh::{ChunkMesh, MeshCache};
 use stagcrest_mod_client::TextureAtlas;
 use stagcrest_protocol::ChunkPos;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::voxel_material::{VoxelMaterial, VoxelMaterialPlugin};
+
+static ATLAS_REVISION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Returns a unique revision id for each newly inserted block atlas resource.
+pub fn next_atlas_revision() -> u64 {
+    ATLAS_REVISION_COUNTER.fetch_add(1, Ordering::Relaxed) + 1
+}
 
 #[derive(Resource, Default)]
 pub struct MeshCacheResource(pub MeshCache);
@@ -19,6 +27,7 @@ pub struct PendingMeshRebuild {
 
 #[derive(Resource)]
 pub struct BlockAtlasResource {
+    pub revision: u64,
     pub atlas: TextureAtlas,
     pub grass_tint: Color,
     pub foliage_tint: Color,
@@ -50,7 +59,7 @@ pub struct ChunkEntityMarker {
     pub bucket: u8,
 }
 
-type AtlasKey = [u32; 14];
+type AtlasKey = [u32; 16];
 
 pub struct VoxelRenderPlugin;
 
@@ -92,6 +101,8 @@ pub fn sync_chunk_meshes(
     let mut fluid_anim = atlas_res.fluid_anim;
     fluid_anim.w = fluid_time;
     let atlas_key = [
+        (atlas_res.revision & 0xFFFF_FFFF) as u32,
+        (atlas_res.revision >> 32) as u32,
         atlas_res.atlas.width,
         atlas_res.atlas.height,
         grass.red.to_bits(),

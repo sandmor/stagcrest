@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::Deserialize;
 
-const PACK_TEXTURE_BUF: usize = 256 * 1024;
+const PACK_TEXTURE_BUF: usize = 2 * 1024 * 1024;
 
 #[link(wasm_import_module = "stagcrest_host")]
 extern "C" {

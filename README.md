@@ -124,7 +124,7 @@ Texture packs are **not included** in the repo. A fresh clone runs with flat-col
 
 **Advanced / dedicated server:** configure `data/settings.toml` (see `data/settings.toml.example`). Pack folders live under `data/resourcepacks/` and must contain `pack.mcmeta`.
 
-The server loads block PNGs from `{pack}/assets/minecraft/textures/block/` for textures referenced by `stagcrest-core`.
+The server loads block PNGs from `{pack}/assets/minecraft/textures/block/` (or legacy `{pack}/minecraft/textures/block/`) for textures referenced by `stagcrest-core`.
 
 ## Project layout
 

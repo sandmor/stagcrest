@@ -1,6 +1,6 @@
 use crate::block_icons::{bake_block_icons, BlockIconCache};
 use crate::game::{AppState, ModContext};
-use crate::player::{capture_cursor, SelectedBlock};
+use crate::player::SelectedBlock;
 use bevy::prelude::*;
 use bevy::text::EditableTextSystems;
 use stagcrest_render::BlockAtlasResource;
@@ -13,14 +13,13 @@ pub mod state;
 pub use state::{inventory_open, CreativeInventory, InventoryUiState};
 
 use hotbar::{
-    cleanup_hotbar, hotbar_click, hotbar_keyboard, hotbar_scroll, spawn_hotbar,
-    update_hotbar_highlight, update_hotbar_visibility,
+    hotbar_click, hotbar_keyboard, hotbar_scroll, update_hotbar_highlight, update_hotbar_visibility,
 };
 use input::{
     clear_search_on_escape, inventory_click, inventory_cursor_ghost, sync_selected_block,
     toggle_inventory_screen,
 };
-use screen::{cleanup_inventory_screen, on_search_text_changed, update_scrollbar_thumb};
+use screen::{on_search_text_changed, update_scrollbar_thumb};
 
 pub struct InventoryPlugin;
 
@@ -29,15 +28,6 @@ impl Plugin for InventoryPlugin {
         app.init_resource::<SelectedBlock>()
             .init_resource::<InventoryUiState>()
             .add_observer(on_search_text_changed)
-            .add_systems(OnEnter(AppState::InGame), setup_inventory)
-            .add_systems(
-                OnExit(AppState::InGame),
-                (
-                    cleanup_hotbar,
-                    cleanup_inventory_screen,
-                    cleanup_inventory_resources,
-                ),
-            )
             .add_systems(
                 Update,
                 (
@@ -52,29 +42,26 @@ impl Plugin for InventoryPlugin {
                     update_hotbar_visibility,
                     update_hotbar_highlight,
                     update_scrollbar_thumb,
-                    capture_cursor
-                        .run_if(in_state(AppState::InGame))
-                        .run_if(not(inventory_open)),
                 )
                     .run_if(in_state(AppState::InGame)),
             );
     }
 }
 
-fn setup_inventory(
-    mut commands: Commands,
-    theme: Res<crate::ui::UiTheme>,
-    mod_ctx: Option<Res<ModContext>>,
-    atlas: Option<Res<BlockAtlasResource>>,
-    mut images: ResMut<Assets<Image>>,
-    icons: Option<Res<BlockIconCache>>,
+pub fn setup_inventory(
+    commands: &mut Commands,
+    theme: &crate::ui::UiTheme,
+    mod_ctx: Option<&ModContext>,
+    atlas: Option<&BlockAtlasResource>,
+    images: &mut Assets<Image>,
+    icons: Option<&BlockIconCache>,
 ) {
     let (Some(ctx), Some(atlas)) = (mod_ctx, atlas) else {
         return;
     };
 
     if icons.is_none() {
-        let cache = bake_block_icons(&ctx, &atlas, &mut images);
+        let cache = bake_block_icons(ctx, atlas, images);
         commands.insert_resource(cache);
     }
 
@@ -92,12 +79,19 @@ fn setup_inventory(
     commands.insert_resource(inventory);
     commands.insert_resource(SelectedBlock(default));
 
-    spawn_hotbar(&mut commands, &theme);
+    hotbar::spawn_hotbar(commands, theme);
 }
 
-fn cleanup_inventory_resources(mut commands: Commands, mut ui: ResMut<InventoryUiState>) {
+pub fn teardown_inventory(
+    commands: &mut Commands,
+    ui: &mut InventoryUiState,
+    inventory_screens: &Query<Entity, With<screen::InventoryScreenRoot>>,
+) {
     ui.open = false;
     ui.cursor = None;
+    for entity in inventory_screens {
+        commands.entity(entity).despawn();
+    }
     commands.remove_resource::<CreativeInventory>();
     commands.remove_resource::<BlockIconCache>();
 }

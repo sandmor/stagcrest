@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use stagcrest_protocol::{BlockDef, BlockGeometry, BlockId};
 use stagcrest_world::RaycastHit;
 
+use crate::game_session::GameCamera;
 use crate::world_replica::WorldReplica;
 
 #[derive(Resource, Default)]
@@ -21,7 +22,7 @@ pub fn update_block_target(
     mod_ctx: Option<Res<crate::game::ModContext>>,
     world: Res<WorldReplica>,
     inventory_ui: Option<Res<crate::inventory::InventoryUiState>>,
-    camera: Query<(&Transform, &crate::player::FlyCamera), With<crate::player::FlyCamera>>,
+    camera: Query<(&Transform, &crate::player::FlyCamera), With<GameCamera>>,
     mut target: ResMut<BlockTarget>,
 ) {
     let Some(ctx) = mod_ctx else {

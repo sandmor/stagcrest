@@ -133,32 +133,41 @@ impl ResourcePackLoader {
         for name in names {
             self.ensure_block_texture(reader, name);
         }
+        if !self.pack_roots.is_empty() && self.block_textures.borrow().is_empty() {
+            tracing::warn!(
+                "resource pack enabled but no block textures loaded; \
+                 expected assets/minecraft/textures/block/ or minecraft/textures/block/"
+            );
+        }
     }
 
     pub fn ensure_block_texture(&self, reader: &dyn AssetReader, name: &str) {
         let _ = self.load_mc_block_texture_with_reader(reader, name);
     }
 
-    fn block_texture_path(pack_root: &str, mc_name: &str) -> String {
-        let filename = if mc_name.ends_with(".png") {
-            mc_name.to_string()
-        } else {
-            format!("{mc_name}.png")
-        };
-        format!("{pack_root}/assets/minecraft/textures/block/{filename}")
-    }
-
-    fn block_texture_mcmeta_path(pack_root: &str, mc_name: &str) -> String {
-        format!("{}.mcmeta", Self::block_texture_path(pack_root, mc_name))
-    }
-
-    pub(crate) fn colormap_path(pack_root: &str, name: &str) -> String {
-        let filename = if name.ends_with(".png") {
+    fn texture_filename(name: &str) -> String {
+        if name.ends_with(".png") {
             name.to_string()
         } else {
             format!("{name}.png")
-        };
-        format!("{pack_root}/assets/minecraft/textures/colormap/{filename}")
+        }
+    }
+
+    /// Standard `assets/minecraft/...` layout, then legacy root `minecraft/...` (Faithful zip).
+    fn block_texture_paths(pack_root: &str, mc_name: &str) -> [String; 2] {
+        let filename = Self::texture_filename(mc_name);
+        [
+            format!("{pack_root}/assets/minecraft/textures/block/{filename}"),
+            format!("{pack_root}/minecraft/textures/block/{filename}"),
+        ]
+    }
+
+    fn colormap_paths(pack_root: &str, name: &str) -> [String; 2] {
+        let filename = Self::texture_filename(name);
+        [
+            format!("{pack_root}/assets/minecraft/textures/colormap/{filename}"),
+            format!("{pack_root}/minecraft/textures/colormap/{filename}"),
+        ]
     }
 
     pub(crate) fn load_rgba_from_bytes(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -218,34 +227,36 @@ impl ResourcePackLoader {
             return;
         }
         for pack in &self.pack_roots {
-            let path = Self::block_texture_path(pack, name);
-            if reader.exists(&path) {
-                if let Ok(bytes) = reader.read_bytes(&path) {
-                    if let Some((w, h, rgba)) = Self::load_rgba_from_bytes(&bytes) {
-                        let mcmeta_path = Self::block_texture_mcmeta_path(pack, name);
-                        let mcmeta_exists = reader.exists(&mcmeta_path);
-                        let animation = if mcmeta_exists {
-                            reader
-                                .read_bytes(&mcmeta_path)
-                                .ok()
-                                .and_then(|b| Self::parse_mcmeta_animation(&b, w, h))
-                        } else {
-                            None
-                        };
-                        let animation =
-                            animation.or_else(|| Self::infer_vertical_strip_animation(w, h));
-                        self.block_textures.borrow_mut().insert(
-                            name.to_string(),
-                            BlockTextureEntry {
-                                width: w,
-                                height: h,
-                                rgba,
-                                animation,
-                            },
-                        );
-                        return;
-                    }
+            for path in Self::block_texture_paths(pack, name) {
+                if !reader.exists(&path) {
+                    continue;
                 }
+                let Ok(bytes) = reader.read_bytes(&path) else {
+                    continue;
+                };
+                let Some((w, h, rgba)) = Self::load_rgba_from_bytes(&bytes) else {
+                    continue;
+                };
+                let mcmeta_path = format!("{path}.mcmeta");
+                let animation = if reader.exists(&mcmeta_path) {
+                    reader
+                        .read_bytes(&mcmeta_path)
+                        .ok()
+                        .and_then(|b| Self::parse_mcmeta_animation(&b, w, h))
+                } else {
+                    None
+                };
+                let animation = animation.or_else(|| Self::infer_vertical_strip_animation(w, h));
+                self.block_textures.borrow_mut().insert(
+                    name.to_string(),
+                    BlockTextureEntry {
+                        width: w,
+                        height: h,
+                        rgba,
+                        animation,
+                    },
+                );
+                return;
             }
         }
     }
@@ -293,10 +304,11 @@ impl ResourcePackLoader {
         name: &str,
     ) -> Option<(u32, u32, Vec<u8>)> {
         for pack in &self.pack_roots {
-            let path = Self::colormap_path(pack, name);
-            if reader.exists(&path) {
-                let bytes = reader.read_bytes(&path).ok()?;
-                return Self::load_rgba_from_bytes(&bytes);
+            for path in Self::colormap_paths(pack, name) {
+                if reader.exists(&path) {
+                    let bytes = reader.read_bytes(&path).ok()?;
+                    return Self::load_rgba_from_bytes(&bytes);
+                }
             }
         }
         None
@@ -314,6 +326,10 @@ pub fn infer_vertical_strip_animation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::FsAssetReader;
+    use image::{ImageBuffer, Rgba};
+    use std::io::Write;
+    use tempfile::TempDir;
 
     #[test]
     fn parse_vertical_strip_mcmeta() {
@@ -323,5 +339,39 @@ mod tests {
         assert_eq!(anim.frame_height, 16);
         assert_eq!(anim.frame_count, 4);
         assert_eq!(anim.frametime_ticks, 2);
+    }
+
+    #[test]
+    fn loads_block_texture_from_minecraft_root_layout() {
+        let dir = TempDir::new().unwrap();
+        let pack_dir = dir.path().join("data/resourcepacks/test-pack");
+        let block_dir = pack_dir.join("minecraft/textures/block");
+        std::fs::create_dir_all(&block_dir).unwrap();
+        std::fs::write(pack_dir.join("pack.mcmeta"), r#"{"pack":{"pack_format":15}}"#).unwrap();
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(32, 32, Rgba([40, 40, 40, 255]));
+        img.save(block_dir.join("stone.png")).unwrap();
+
+        let settings = r#"
+[content]
+resource_pack_order = ["test-pack"]
+
+[[content.resource_packs]]
+id = "test-pack"
+path = "test-pack"
+enabled = true
+source = "local"
+"#;
+        std::fs::create_dir_all(dir.path().join("data")).unwrap();
+        std::fs::File::create(dir.path().join("data/settings.toml"))
+            .unwrap()
+            .write_all(settings.as_bytes())
+            .unwrap();
+
+        let reader = FsAssetReader::new(dir.path());
+        let loader = ResourcePackLoader::load(dir.path(), &reader).unwrap();
+        let (w, h, rgba) = loader.load_mc_block_texture_with_reader(&reader, "stone").unwrap();
+        assert_eq!((w, h), (32, 32));
+        assert_eq!(rgba[0..4], [40, 40, 40, 255]);
     }
 }

@@ -19,6 +19,7 @@ pub struct HotbarSlot {
 pub fn spawn_hotbar(commands: &mut Commands, theme: &UiTheme) {
     commands
         .spawn((
+            crate::game_session::GameSessionEntity,
             HotbarRoot,
             Node {
                 position_type: PositionType::Absolute,

@@ -1,7 +1,9 @@
 use crate::block_outline;
 use crate::client_content::{cleanup_screen, spawn_screen_button};
-use crate::game::AppState;
-use crate::player::{self, FlyCamera};
+use crate::game::{AppState, GameplayState};
+use crate::game_session::in_paused_gameplay;
+use crate::game_session::GameCamera;
+use crate::player;
 use crate::targeting::BlockTarget;
 use crate::ui::UiTheme;
 use bevy::prelude::*;
@@ -24,31 +26,31 @@ impl Plugin for PausePlugin {
         app.add_systems(
             Update,
             (
-                toggle_pause.run_if(in_state(AppState::InGame).or_else(in_state(AppState::Paused))),
-                pause_button_system.run_if(in_state(AppState::Paused)),
+                toggle_pause.run_if(in_state(AppState::InGame)),
+                pause_button_system.run_if(in_paused_gameplay),
             ),
         )
         .add_systems(
-            OnEnter(AppState::Paused),
+            OnEnter(GameplayState::Paused),
             (spawn_pause_menu, hide_block_outline_on_pause),
         )
-        .add_systems(OnExit(AppState::Paused), cleanup_screen::<PauseRoot>);
+        .add_systems(OnExit(GameplayState::Paused), cleanup_screen::<PauseRoot>);
     }
 }
 
 fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
-    state: Res<State<AppState>>,
-    mut next: ResMut<NextState<AppState>>,
-    mut fly: Query<&mut FlyCamera>,
+    gameplay: Res<State<GameplayState>>,
+    mut next: ResMut<NextState<GameplayState>>,
+    mut fly: Query<&mut player::FlyCamera, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
 
-    match state.get() {
-        AppState::InGame => {
+    match gameplay.get() {
+        GameplayState::Active => {
             if let Ok(mut fly) = fly.single_mut() {
                 if fly.captured {
                     if let Ok(mut c) = cursor.single_mut() {
@@ -57,17 +59,16 @@ fn toggle_pause(
                     return;
                 }
             }
-            next.set(AppState::Paused);
+            next.set(GameplayState::Paused);
         }
-        AppState::Paused => next.set(AppState::InGame),
-        _ => {}
+        GameplayState::Paused => next.set(GameplayState::Active),
     }
 }
 
 fn spawn_pause_menu(
     mut commands: Commands,
     theme: Res<UiTheme>,
-    mut fly: Query<&mut FlyCamera>,
+    mut fly: Query<&mut player::FlyCamera, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if let Ok(mut fly) = fly.single_mut() {
@@ -112,13 +113,14 @@ fn spawn_pause_menu(
 
 fn pause_button_system(
     mut interaction: Query<(&Interaction, &PauseAction), (Changed<Interaction>, With<Button>)>,
-    mut next: ResMut<NextState<AppState>>,
+    mut next_app: ResMut<NextState<AppState>>,
+    mut next_gameplay: ResMut<NextState<GameplayState>>,
 ) {
     for (interaction, action) in &mut interaction {
         if *interaction == Interaction::Pressed {
             match action {
-                PauseAction::Resume => next.set(AppState::InGame),
-                PauseAction::MainMenu => next.set(AppState::MainMenu),
+                PauseAction::Resume => next_gameplay.set(GameplayState::Active),
+                PauseAction::MainMenu => next_app.set(AppState::MainMenu),
             }
         }
     }

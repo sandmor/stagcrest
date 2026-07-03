@@ -343,7 +343,7 @@ pub fn mesh_recover_unmeshed(
     world: Res<crate::world_replica::WorldReplica>,
     cache: Res<stagcrest_render::MeshCacheResource>,
     mut scheduler: ResMut<MeshScheduler>,
-    camera: Query<&Transform, With<crate::player::FlyCamera>>,
+    camera: Query<&Transform, With<crate::game_session::GameCamera>>,
     config: Res<crate::game::GameConfig>,
     mut tick: Local<u32>,
 ) {
@@ -403,7 +403,7 @@ pub fn mesh_rebuild_after_atlas_change(
 pub fn mesh_drain_dirty(
     mut world: ResMut<WorldReplica>,
     mut scheduler: ResMut<MeshScheduler>,
-    camera: Query<&Transform, With<crate::player::FlyCamera>>,
+    camera: Query<&Transform, With<crate::game_session::GameCamera>>,
 ) {
     let Ok(cam) = camera.single() else { return };
     let dirty = world.take_dirty_chunks();

@@ -10,7 +10,7 @@ use crate::net_client::{connect_tcp, GameNetClient};
 use crate::world_replica::WorldReplica;
 use stagcrest_protocol::manifest::{AtlasTransfer, ContentManifest};
 use stagcrest_protocol::BlockId;
-use stagcrest_render::{BlockAtlasResource, MeshCacheResource};
+use stagcrest_render::{next_atlas_revision, BlockAtlasResource, MeshCacheResource};
 
 pub struct LoadingPlugin;
 
@@ -183,6 +183,7 @@ fn poll_connection_system(
         let world = WorldReplica::new(stagcrest_world::World::with_lru_capacity(lru_cap, air));
 
         let fluid_anim = fluid_anim_uniform(&runtime.registry, runtime.atlas.height);
+        let revision = next_atlas_revision();
 
         commands.insert_resource(ModContext {
             registry: runtime.registry,
@@ -194,6 +195,7 @@ fn poll_connection_system(
         commands.insert_resource(world);
         commands.insert_resource(crate::chunk_streaming::BiomeGridCache::default());
         commands.insert_resource(BlockAtlasResource {
+            revision,
             atlas: runtime.atlas,
             grass_tint: Color::srgb(grass_rgb[0], grass_rgb[1], grass_rgb[2]),
             foliage_tint: Color::srgb(foliage_rgb[0], foliage_rgb[1], foliage_rgb[2]),

@@ -4,7 +4,7 @@ use stagcrest_protocol::BlockPos;
 
 use crate::chunk_streaming::BiomeGridCache;
 use crate::game::ModContext;
-use crate::player::FlyCamera;
+use crate::game_session::GameCamera;
 use crate::world_replica::WorldReplica;
 
 const SUBMERSION_LERP_SPEED: f32 = 4.0;
@@ -47,7 +47,7 @@ pub fn update_player_environment(
     mod_ctx: Option<Res<ModContext>>,
     world: Option<Res<WorldReplica>>,
     biome_cache: Option<Res<BiomeGridCache>>,
-    camera: Query<&Transform, With<FlyCamera>>,
+    camera: Query<&Transform, With<GameCamera>>,
     mut env: ResMut<PlayerEnvironment>,
 ) {
     let Ok(transform) = camera.single() else {

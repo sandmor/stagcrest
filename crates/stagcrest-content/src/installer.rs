@@ -80,6 +80,7 @@ impl ContentInstaller {
         let install_result = (|| {
             self.extract_zip_to(&bytes, &tmp)?;
             self.validate_pack_dir(&tmp)?;
+            Self::normalize_pack_layout(&tmp)?;
             if dest.exists() {
                 std::fs::remove_dir_all(&dest)?;
             }
@@ -141,6 +142,21 @@ impl ContentInstaller {
             }
         }
         Ok(p.to_path_buf())
+    }
+
+    /// Move root `minecraft/` into `assets/minecraft/` when packs omit the `assets/` prefix.
+    fn normalize_pack_layout(pack_dir: &Path) -> Result<(), ContentError> {
+        let assets_mc = pack_dir.join("assets/minecraft");
+        if assets_mc.exists() {
+            return Ok(());
+        }
+        let root_mc = pack_dir.join("minecraft");
+        if root_mc.is_dir() {
+            std::fs::create_dir_all(pack_dir.join("assets"))?;
+            std::fs::rename(root_mc, assets_mc)?;
+            tracing::info!("normalized resource pack layout at {}", pack_dir.display());
+        }
+        Ok(())
     }
 
     fn extract_zip_to(&self, bytes: &[u8], dest: &Path) -> Result<(), ContentError> {
