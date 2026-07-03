@@ -1,69 +1,23 @@
-use std::collections::HashSet;
-use std::path::Path;
-use std::time::Duration;
+use std::path::PathBuf;
 
 use image::{ImageBuffer, Rgba};
 use indicatif::{ProgressBar, ProgressStyle};
-use stagcrest_minimap::{
-    build_map_chunk_blob, map_chunk_block_bounds, MapChunkBlob, MapChunkLoadInput,
-    MapResolveContext, MAP_CHUNK_SIZE,
-};
-use stagcrest_mod_server::{
-    load_mods, world_chunk_y_bounds, ColormapSet, FsAssetReader, TerrainConfig,
-};
-use stagcrest_storage::WorldMeta;
+use stagcrest_minimap::{map_chunk_block_bounds, MapChunkBlob, MAP_CHUNK_SIZE};
 use thiserror::Error;
 
-use crate::map_generation::make_map_resolve_context;
+use crate::map_tile_maintenance::MapTileRebuildReport;
+use crate::offline_bootstrap::{
+    bootstrap_offline, open_offline_world, rebuild_all_minimap_tiles, spinner, BootstrapError,
+    WorldSeedPolicy,
+};
 use crate::session::WorldSession;
-
-fn spinner(msg: impl Into<String>) -> ProgressBar {
-    let bar = ProgressBar::new_spinner();
-    bar.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner} {msg}")
-            .unwrap(),
-    );
-    bar.enable_steady_tick(Duration::from_millis(100));
-    bar.set_message(msg.into());
-    bar
-}
-
-/// Mod/colormap context required to rasterize map chunks from world data.
-pub struct MapExportSetup {
-    pub map_ctx: MapResolveContext,
-    pub y_chunks: Vec<i32>,
-}
-
-pub fn load_map_export_setup(mods_root: &Path) -> Result<MapExportSetup, ExportError> {
-    let spin = spinner("Loading mods and colormaps...");
-    let host = load_mods(mods_root)?;
-    let colormaps = ColormapSet::load(&FsAssetReader::new(mods_root), None);
-    let air = host.air_block();
-    let terrain = TerrainConfig::default();
-    let map_ctx = make_map_resolve_context(
-        &host.registry,
-        &colormaps,
-        &host.biome_registry,
-        air,
-        &terrain,
-    );
-    let y_chunks: Vec<i32> = world_chunk_y_bounds(&terrain).collect();
-    spin.finish_with_message("mods loaded");
-    Ok(MapExportSetup {
-        map_ctx,
-        y_chunks,
-    })
-}
 
 #[derive(Debug, Error)]
 pub enum ExportError {
+    #[error("bootstrap: {0}")]
+    Bootstrap(#[from] BootstrapError),
     #[error("storage: {0}")]
     Storage(#[from] stagcrest_storage::StorageError),
-    #[error("mod: {0}")]
-    Mod(#[from] stagcrest_mod_server::ModError),
-    #[error("map: {0}")]
-    Map(#[from] stagcrest_minimap::MapBuildError),
     #[error("map format: {0}")]
     MapFormat(#[from] stagcrest_minimap::MapFormatError),
     #[error("io: {0}")]
@@ -76,35 +30,60 @@ pub enum ExportError {
 
 pub struct ExportMinimapConfig {
     pub world_name: String,
-    pub output: std::path::PathBuf,
-    pub mods_root: std::path::PathBuf,
+    pub output: PathBuf,
+    pub mods_root: PathBuf,
     pub padding: i32,
     pub scale: u32,
-    pub rebuild_map: bool,
-}
-
-pub fn open_world_session(world_name: &str) -> Result<WorldSession, ExportError> {
-    let spin = spinner(format!("Opening world '{world_name}'..."));
-    let session = WorldSession::open(world_name, 0)?;
-    spin.finish_with_message(format!("opened world '{world_name}'"));
-    Ok(session)
+    pub rebuild_minimap: bool,
+    pub jobs: Option<usize>,
 }
 
 pub fn export_minimap(config: ExportMinimapConfig) -> Result<(), ExportError> {
-    let session = open_world_session(&config.world_name)?;
-    let _meta = WorldMeta::load(session.storage.as_ref())?;
+    let session = if config.rebuild_minimap {
+        let offline = bootstrap_offline(
+            &config.world_name,
+            &config.mods_root,
+            WorldSeedPolicy::UseStored,
+        )?;
+        let report = rebuild_all_minimap_tiles(&offline, config.jobs)?;
+        print_rebuild_summary(&report);
+        offline.session
+    } else {
+        open_offline_world(&config.world_name, WorldSeedPolicy::UseStored)?
+    };
 
-    if config.rebuild_map {
-        let setup = load_map_export_setup(&config.mods_root)?;
-        rebuild_all_map_chunks(&session, &setup.map_ctx, &setup.y_chunks)?;
-    }
+    export_png_from_session(&session, &config)
+}
 
+/// Rebuild all minimap tiles for a world (single bootstrap: one mod load, one DB open).
+pub fn rebuild_all_map_chunks(
+    world_name: &str,
+    mods_root: &PathBuf,
+    jobs: Option<usize>,
+) -> Result<MapTileRebuildReport, ExportError> {
+    let offline = bootstrap_offline(world_name, mods_root, WorldSeedPolicy::UseStored)?;
+    let report = rebuild_all_minimap_tiles(&offline, jobs)?;
+    print_rebuild_summary(&report);
+    Ok(report)
+}
+
+fn print_rebuild_summary(report: &MapTileRebuildReport) {
+    println!(
+        "{} world chunks → {} map tiles rebuilt",
+        report.world_chunks, report.rebuilt
+    );
+}
+
+fn export_png_from_session(
+    session: &WorldSession,
+    config: &ExportMinimapConfig,
+) -> Result<(), ExportError> {
     let scan = spinner("Scanning map tiles...");
     let map_coords = session.storage.iter_map_chunk_coords()?;
     if map_coords.is_empty() {
         scan.finish_and_clear();
         return Err(ExportError::Message(
-            "no map chunks in world — run with --rebuild-map after exploring".into(),
+            "no map chunks in world — run with --rebuild-minimap after exploring".into(),
         ));
     }
     scan.finish_with_message(format!("{} map tiles", map_coords.len()));
@@ -169,57 +148,6 @@ pub fn export_minimap(config: ExportMinimapConfig) -> Result<(), ExportError> {
         out_h,
         config.output.display()
     );
-    Ok(())
-}
-
-pub fn rebuild_all_map_chunks(
-    session: &WorldSession,
-    map_ctx: &MapResolveContext,
-    y_chunks: &[i32],
-) -> Result<(), ExportError> {
-    let scan = spinner("Scanning world chunks...");
-    let positions = session.storage.iter_chunk_positions()?;
-    if positions.is_empty() {
-        scan.finish_and_clear();
-        return Err(ExportError::Message(
-            "no saved chunks in world — explore the world first".into(),
-        ));
-    }
-
-    let mut map_coords: HashSet<(i32, i32)> = HashSet::new();
-    for pos in &positions {
-        map_coords.insert(stagcrest_minimap::world_chunk_to_map_chunk(pos.x, pos.z));
-    }
-    scan.finish_with_message(format!(
-        "{} world chunks → {} map tiles",
-        positions.len(),
-        map_coords.len()
-    ));
-
-    let bar = ProgressBar::new(map_coords.len() as u64);
-    bar.set_style(
-        ProgressStyle::default_bar()
-            .template("{bar:40} {pos}/{len} map chunks {elapsed}")
-            .unwrap(),
-    );
-
-    let empty_overrides = std::collections::HashMap::new();
-    let empty_modified = std::collections::HashSet::new();
-    for (mx, mz) in map_coords {
-        let input = MapChunkLoadInput {
-            storage: session.storage.as_ref(),
-            world: None,
-            y_chunks,
-            mx,
-            mz,
-            overrides: &empty_overrides,
-            modified_live: &empty_modified,
-        };
-        let blob = build_map_chunk_blob(&input, map_ctx)?;
-        session.storage.put_map_chunk(mx, mz, &blob)?;
-        bar.inc(1);
-    }
-    bar.finish_with_message("map chunks rebuilt");
     Ok(())
 }
 

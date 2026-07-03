@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use stagcrest_server::{
-    export_minimap, load_map_export_setup, open_world_session, rebuild_all_map_chunks,
-    run_standalone, ExportMinimapConfig, ServerConfig,
+    build_world_region, export_minimap, rebuild_all_map_chunks, run_standalone, BuildMapConfig,
+    ExportMinimapConfig, ServerConfig,
 };
 
 #[derive(Parser, Debug)]
@@ -59,9 +59,27 @@ enum Command {
 
         /// Rebuild map chunks from saved world data before exporting.
         #[arg(long)]
-        rebuild_map: bool,
+        rebuild_minimap: bool,
+
+        /// Rayon thread count for parallel map-tile rebuild (default: all cores).
+        #[arg(long)]
+        jobs: Option<usize>,
     },
     /// Rebuild map chunk tiles in world storage without exporting PNG.
+    RebuildMinimap {
+        /// World name (storage folder under data/worlds/).
+        #[arg(long, default_value = "default")]
+        world: String,
+
+        /// Root directory containing mods/ and assets.
+        #[arg(long, default_value = ".")]
+        mods_dir: PathBuf,
+
+        /// Rayon thread count for parallel map-tile rebuild (default: all cores).
+        #[arg(long)]
+        jobs: Option<usize>,
+    },
+    /// Procedurally generate world chunks in a circular region (full vertical span).
     BuildMap {
         /// World name (storage folder under data/worlds/).
         #[arg(long, default_value = "default")]
@@ -70,6 +88,30 @@ enum Command {
         /// Root directory containing mods/ and assets.
         #[arg(long, default_value = ".")]
         mods_dir: PathBuf,
+
+        /// World generation seed (default: stored world seed, or 42).
+        #[arg(long)]
+        seed: Option<u64>,
+
+        /// Circle center block X (default: spawn).
+        #[arg(long, default_value_t = 8)]
+        center_x: i32,
+
+        /// Circle center block Z (default: spawn).
+        #[arg(long, default_value_t = 8)]
+        center_z: i32,
+
+        /// Horizontal radius in chunks.
+        #[arg(long, default_value_t = 16)]
+        radius: i32,
+
+        /// Regenerate chunks even if already saved.
+        #[arg(long)]
+        force: bool,
+
+        /// Rayon thread count for parallel generation (default: all cores).
+        #[arg(long)]
+        jobs: Option<usize>,
     },
 }
 
@@ -87,7 +129,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         mods_dir,
         scale,
         padding,
-        rebuild_map,
+        rebuild_minimap,
+        jobs,
     }) = args.command
     {
         export_minimap(ExportMinimapConfig {
@@ -96,16 +139,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             mods_root: mods_dir,
             padding,
             scale: scale.max(1),
-            rebuild_map,
+            rebuild_minimap,
+            jobs,
         })?;
         return Ok(());
     }
 
-    if let Some(Command::BuildMap { world, mods_dir }) = args.command {
-        let session = open_world_session(&world)?;
-        let setup = load_map_export_setup(&mods_dir)?;
-        rebuild_all_map_chunks(&session, &setup.map_ctx, &setup.y_chunks)?;
+    if let Some(Command::RebuildMinimap {
+        world,
+        mods_dir,
+        jobs,
+    }) = args.command
+    {
+        rebuild_all_map_chunks(&world, &mods_dir, jobs)?;
         println!("map chunks rebuilt for world {world}");
+        return Ok(());
+    }
+
+    if let Some(Command::BuildMap {
+        world,
+        mods_dir,
+        seed,
+        center_x,
+        center_z,
+        radius,
+        force,
+        jobs,
+    }) = args.command
+    {
+        let report = build_world_region(BuildMapConfig {
+            world_name: world.clone(),
+            mods_root: mods_dir,
+            center_x,
+            center_z,
+            radius_chunks: radius,
+            seed,
+            force,
+            jobs,
+        })?;
+        println!(
+            "build-map: world {world} — generated {} chunks, skipped {}, rebuilt {} map tiles",
+            report.generated, report.skipped, report.map_tiles_rebuilt
+        );
         return Ok(());
     }
 

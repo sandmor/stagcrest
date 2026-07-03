@@ -17,11 +17,28 @@ pub struct WorldSession {
 
 impl WorldSession {
     pub fn open(world_name: impl Into<String>, world_seed: u64) -> Result<Self, StorageError> {
+        Self::open_with_resolved_seed(world_name, Some(world_seed))
+    }
+
+    /// Open world storage. When `world_seed` is `None`, keeps the seed stored in world meta (or 42 if unset).
+    pub fn open_with_resolved_seed(
+        world_name: impl Into<String>,
+        world_seed: Option<u64>,
+    ) -> Result<Self, StorageError> {
         let world_name = world_name.into();
         let path = Path::new(DATA_DIR).join("worlds").join(&world_name).join("world.redb");
         let storage = Arc::new(RedbChunkStorage::open(path)?);
         let mut meta = WorldMeta::load(storage.as_ref())?;
-        meta.world_seed = world_seed;
+        meta.world_seed = match world_seed {
+            Some(seed) => seed,
+            None => {
+                if meta.world_seed == 0 {
+                    42
+                } else {
+                    meta.world_seed
+                }
+            }
+        };
         let persistence = ChunkPersistence::new(storage.clone());
         Ok(Self {
             world_name,

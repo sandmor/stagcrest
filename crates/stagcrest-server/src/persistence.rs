@@ -8,7 +8,18 @@ use stagcrest_storage::{
     compress_stored, store_inactive_chunk, ChunkStorage, InactiveChunk, RedbChunkStorage,
     StorageError,
 };
-use stagcrest_world::World;
+use stagcrest_world::{EvictedChunk, World};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum PersistError {
+    #[error("storage: {0}")]
+    Storage(#[from] StorageError),
+    #[error("chunk {0:?} is not populated or cannot be packed")]
+    ChunkNotPackable(ChunkPos),
+    #[error("missing biome grid for populated chunk {0:?}")]
+    MissingBiomeGrid(ChunkPos),
+}
 
 pub struct ChunkPersistence {
     dirty: HashSet<ChunkPos>,
@@ -36,7 +47,7 @@ impl ChunkPersistence {
         pos: ChunkPos,
         chunk: &InactiveChunk,
         stored_chunks: &mut HashSet<ChunkPos>,
-    ) -> Result<(), StorageError> {
+    ) -> Result<(), PersistError> {
         store_inactive_chunk(self.storage.as_ref(), pos, chunk)?;
         stored_chunks.insert(pos);
         Ok(())
@@ -88,17 +99,21 @@ impl ChunkPersistence {
         terrain: &WorldGenState,
         circuit: &CircuitWorld,
         stored_chunks: &mut HashSet<ChunkPos>,
-    ) {
+    ) -> Vec<ChunkPos> {
         for pos in world.loaded_chunk_positions().collect::<Vec<_>>() {
             if world.is_populated(pos) {
                 self.dirty.insert(pos);
             }
         }
-        while self.drain(usize::MAX, world, terrain, circuit, stored_chunks)
-            .into_iter()
-            .next()
-            .is_some()
-        {}
+        let mut all_persisted = Vec::new();
+        loop {
+            let batch = self.drain(usize::MAX, world, terrain, circuit, stored_chunks);
+            if batch.is_empty() {
+                break;
+            }
+            all_persisted.extend(batch);
+        }
+        all_persisted
     }
 }
 
@@ -108,17 +123,39 @@ pub fn persist_chunk(
     circuit: &CircuitWorld,
     pos: ChunkPos,
     storage: &RedbChunkStorage,
-) -> Result<(), StorageError> {
+) -> Result<(), PersistError> {
     let Some(mut chunk) = world.pack_chunk_for_storage(pos) else {
-        return Ok(());
+        return Err(PersistError::ChunkNotPackable(pos));
     };
     let Some(biome) = terrain.biome_grid(pos) else {
-        tracing::warn!("missing biome grid for populated chunk {pos:?}");
-        return Ok(());
+        return Err(PersistError::MissingBiomeGrid(pos));
     };
     chunk.biome_grid = *biome;
     chunk.circuit = circuit.export_chunk_snapshot(pos);
-    store_inactive_chunk(storage, pos, &chunk)
+    store_inactive_chunk(storage, pos, &chunk)?;
+    Ok(())
+}
+
+/// Persist a populated chunk evicted from the in-memory world LRU.
+pub fn persist_evicted_chunk(
+    persistence: &ChunkPersistence,
+    evicted: EvictedChunk,
+    terrain: &WorldGenState,
+    circuit: &CircuitWorld,
+    stored_chunks: &mut HashSet<ChunkPos>,
+) -> Result<Option<ChunkPos>, PersistError> {
+    let pos = evicted.pos;
+    if !evicted.meta.is_populated() {
+        return Ok(None);
+    }
+    let Some(inactive) = evicted.inactive else {
+        return Ok(None);
+    };
+    let Some(chunk) = pack_evicted_chunk(inactive, terrain, circuit, pos) else {
+        return Err(PersistError::MissingBiomeGrid(pos));
+    };
+    persistence.persist_inactive(pos, &chunk, stored_chunks)?;
+    Ok(Some(pos))
 }
 
 pub fn pack_evicted_chunk(

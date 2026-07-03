@@ -86,6 +86,8 @@ cargo run -p stagcrest-client -- --connect 127.0.0.1:4242
 | `stagcrest-server` | `--bind HOST:PORT`          | Listen address (default `0.0.0.0:4242`)         |
 | `stagcrest-server` | `--net-sim-latency-ms N`    | Artificial latency on outbound frames           |
 | `stagcrest-server` | `export-minimap` subcommand | PNG minimap of all saved chunks (see below)     |
+| `stagcrest-server` | `build-map` subcommand      | Pregenerate world chunks in a circular region   |
+| `stagcrest-server` | `rebuild-minimap` subcommand | Rebuild stored minimap tiles from world chunks |
 
 Export a minimap PNG from explored/saved terrain (streams chunks from disk; does not load the full world into memory):
 
@@ -95,7 +97,25 @@ cargo run -p stagcrest-server -- export-minimap \
   --output worlds/default/minimap.png
 ```
 
-Optional: `--scale N` (blocks per pixel, default 1), `--padding N` (extra border around saved bbox, default 64).
+Optional: `--scale N` (blocks per pixel, default 1), `--padding N` (extra border around saved bbox, default 64), `--rebuild-minimap` (rebuild map tiles before export), `--jobs N` (rayon threads).
+
+Pregenerate world terrain in a circle around spawn (full vertical column, default radius 16 chunks). Map tiles for the built area are rebuilt automatically when chunks are saved:
+
+```bash
+cargo run -p stagcrest-server -- build-map \
+  --world default \
+  --radius 16 \
+  --center-x 8 \
+  --center-z 8
+```
+
+Optional: `--seed`, `--force` (regenerate existing chunks), `--jobs N`.
+
+Rebuild all minimap tiles from saved world chunks without exporting PNG:
+
+```bash
+cargo run -p stagcrest-server -- rebuild-minimap --world default
+```
 
 Press **F3** in-game for debug overlay (position, target block, net transport, RTT from ping). Press **M** for the minimap (top-right); **+** / **-** to zoom. The HUD minimap uses a per-column color cache with incremental framebuffer compositing (pan scrolls the buffer and resolves only new edge columns; zoom re-composites from cache).
 

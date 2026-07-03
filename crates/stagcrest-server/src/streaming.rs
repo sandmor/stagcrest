@@ -3,16 +3,17 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_server::{
     world_chunk_y_bounds, BiomeRegistry, BlockRegistry, ChunkGenData, ColumnBlocks,
-    DecorateSnapshot, TerrainGenerator, WorldGenState,
+    TerrainGenerator, WorldGenState,
 };
 use stagcrest_net::ChunkSnapshot;
 use stagcrest_protocol::{BlockId, BlockPos, ChunkPos, CHUNK_SIZE};
 use stagcrest_storage::load_inactive_chunk;
 use stagcrest_world::{EvictedChunk, World};
 
+use crate::chunk_gen::{apply_pass1_density, apply_pass2_decorate};
 use crate::client_session::{ClientId, ConnectedClient};
 use crate::interest::chunk_in_client_radius;
-use crate::persistence::{compressed_chunk_wire, pack_evicted_chunk, pack_network_chunk};
+use crate::persistence::{compressed_chunk_wire, pack_network_chunk, persist_evicted_chunk};
 use crate::session::WorldSession;
 
 const MAX_GEN_PER_TICK: usize = 2;
@@ -73,16 +74,18 @@ impl StreamingPipeline {
         for evicted_chunk in evicted {
             let pos = evicted_chunk.pos;
             if evicted_chunk.meta.is_populated() && evicted_chunk.meta.modified {
-                if let Some(inactive) = evicted_chunk.inactive {
-                    if let Some(chunk) = pack_evicted_chunk(inactive, terrain, circuit, pos) {
-                        if let Err(err) = session.persistence.persist_inactive(
-                            pos,
-                            &chunk,
-                            &mut session.stored_chunks,
-                        ) {
-                            tracing::error!("failed to persist evicted chunk {pos:?}: {err}");
-                            session.persistence.mark_dirty(pos);
-                        }
+                match persist_evicted_chunk(
+                    &session.persistence,
+                    evicted_chunk,
+                    terrain,
+                    circuit,
+                    &mut session.stored_chunks,
+                ) {
+                    Ok(Some(persisted_pos)) => result.persisted.push(persisted_pos),
+                    Ok(None) => {}
+                    Err(err) => {
+                        tracing::error!("failed to persist evicted chunk {pos:?}: {err}");
+                        session.persistence.mark_dirty(pos);
                     }
                 }
             }
@@ -166,13 +169,14 @@ impl StreamingPipeline {
             );
         }
 
-        session.persistence.drain(
+        let persisted = session.persistence.drain(
             MAX_IO_PER_TICK,
             world,
             terrain,
             circuit,
             &mut session.stored_chunks,
         );
+        result.persisted.extend(persisted);
 
         for _ in 0..MAX_IO_PER_TICK {
             let Some(pos) = self.pop_fair_load(clients, h_radius, v_radius, fair_rotate) else {
@@ -214,20 +218,16 @@ impl StreamingPipeline {
         for _ in 0..MAX_GEN_PER_TICK {
             if let Some(data) = self.deferred_decorate.pop_front() {
                 let pos = data.pos;
-                let snapshot = DecorateSnapshot::capture(world, pos, air);
-                let decorated = generator.decorate_chunk_offline(
+                apply_pass2_decorate(
+                    world,
+                    terrain,
+                    generator,
                     column_blocks,
                     biomes,
                     registry,
+                    air,
                     &data,
-                    &snapshot,
                 );
-                terrain.mark_chunk_generated(pos);
-                terrain.store_biome_grid(pos, decorated.biome_grid);
-                if !world.is_generated(pos) {
-                    world.set_blocks(decorated.blocks);
-                    world.finalize_generated_chunk(pos);
-                }
                 self.pass2_pending.remove(&pos);
                 if let Some(snapshot) = chunk_snapshot(world, pos, terrain, circuit) {
                     offer_snapshot_to_clients(
@@ -252,13 +252,14 @@ impl StreamingPipeline {
                 {
                     continue;
                 }
-                let data = generator.compute_chunk_density(column_blocks, pos);
+                let data = apply_pass1_density(
+                    world,
+                    terrain,
+                    generator,
+                    column_blocks,
+                    pos,
+                );
                 self.pass2_pending.insert(pos, data.clone());
-                let _ = terrain.mark_chunk_terrain_ready(pos);
-                if !world.is_generated(pos) {
-                    world.set_blocks(data.entries.clone());
-                    world.mark_chunk_terrain_ready(pos);
-                }
                 if !terrain.is_chunk_generated(pos) {
                     self.deferred_decorate.push_back(data);
                 }
@@ -547,6 +548,7 @@ pub struct ClientStreamDelta {
 #[derive(Default)]
 pub struct StreamingTickResult {
     pub per_client: HashMap<ClientId, ClientStreamDelta>,
+    pub persisted: Vec<ChunkPos>,
 }
 
 fn chunk_needed_by_any_client(

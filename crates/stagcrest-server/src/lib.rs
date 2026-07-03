@@ -1,9 +1,13 @@
+mod build_world;
+mod chunk_gen;
 mod client_session;
 mod export_minimap;
 mod interest;
 mod map_generation;
 mod map_streaming;
+mod map_tile_maintenance;
 mod net;
+mod offline_bootstrap;
 mod persistence;
 mod player;
 mod session;
@@ -22,7 +26,7 @@ use stagcrest_net::{
     send_message, spawn_tcp_session, BlockUpdate, CircuitPowerBatch, ClientMessage, GameMessage,
     GameTransport, InProcessTransport, NetConfig, ServerMessage,
 };
-use stagcrest_minimap::MapResolveContext;
+use stagcrest_minimap::{world_chunk_to_map_chunk, MapResolveContext};
 use stagcrest_protocol::{manifest::AtlasTransfer, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 
@@ -31,12 +35,15 @@ use crate::map_streaming::{ServerBlobCache, MAX_MAP_SNAPSHOT_SEND_PER_TICK};
 
 use tokio::net::TcpListener;
 
+pub use build_world::{build_world_region, iter_circle_chunk_positions, BuildMapConfig, BuildMapError, BuildMapReport};
 pub use client_session::{ClientId, ClientRegistry, ConnectedClient};
-pub use export_minimap::{
-    export_minimap, load_map_export_setup, open_world_session, rebuild_all_map_chunks,
-    ExportError, ExportMinimapConfig, MapExportSetup,
-};
+pub use export_minimap::{export_minimap, rebuild_all_map_chunks, ExportError, ExportMinimapConfig};
 pub use map_generation::make_map_resolve_context;
+pub use map_tile_maintenance::{rebuild_all_map_tiles, MapTileDirtySet, MapTileRebuildReport};
+pub use offline_bootstrap::{
+    bootstrap_offline, load_worldgen_context, open_offline_world, BootstrapError, OfflineWorld,
+    WorldSeedPolicy, WorldgenContext,
+};
 pub use player::apply_player_action;
 pub use session::{streaming_lru_capacity, WorldSession};
 pub use streaming::{StreamingPipeline, TerrainStreamState};
@@ -278,6 +285,8 @@ impl GameServer {
                 fair_rotate,
             );
 
+            self.queue_map_regen_for_persisted(&stream_result.persisted);
+
             for (client_id, delta) in stream_result.per_client {
                 let Some(client) = clients.get_mut(client_id) else {
                     continue;
@@ -339,13 +348,34 @@ impl GameServer {
         }
     }
 
+    fn queue_map_regen_for_persisted(&mut self, positions: &[ChunkPos]) {
+        if positions.is_empty() {
+            return;
+        }
+        let storage = self.session.storage.as_ref();
+        let mut seen = std::collections::HashSet::new();
+        for &pos in positions {
+            let (mx, mz) = world_chunk_to_map_chunk(pos.x, pos.z);
+            if seen.insert((mx, mz)) {
+                self.map_pipeline.ensure_fresh(
+                    mx,
+                    mz,
+                    &self.world,
+                    &self.map_y_chunks,
+                    storage,
+                );
+            }
+        }
+    }
+
     pub fn flush_persistence(&mut self) {
-        self.session.persistence.flush_all(
+        let persisted = self.session.persistence.flush_all(
             &mut self.world,
             &self.terrain,
             &self.circuit,
             &mut self.session.stored_chunks,
         );
+        self.queue_map_regen_for_persisted(&persisted);
         if let Err(err) = self.session.save_meta(self.circuit.current_tick()) {
             tracing::error!("failed to save world meta: {err}");
         }
