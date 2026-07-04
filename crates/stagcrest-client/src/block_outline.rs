@@ -7,7 +7,7 @@ use stagcrest_render::{block_outline_mesh, BlockOutlineMarker};
 use crate::targeting::{is_targetable_block, BlockTarget};
 use crate::world_replica::WorldReplica;
 
-const OUTLINE_INFLATE: f32 = 0.005;
+const OUTLINE_INFLATE: f32 = 0.001;
 
 /// Clears the active target and hides the outline overlay.
 pub fn hide_block_outline(

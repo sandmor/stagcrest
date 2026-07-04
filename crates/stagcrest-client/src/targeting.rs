@@ -1,6 +1,8 @@
 use bevy::prelude::*;
+use stagcrest_mesh::block_selection_bounds;
+use stagcrest_mod_client::resolve_block_model;
 use stagcrest_protocol::{BlockDef, BlockGeometry, BlockId};
-use stagcrest_world::RaycastHit;
+use stagcrest_world::{RaycastBounds, RaycastHit};
 
 use crate::game_session::GameCamera;
 use crate::world_replica::WorldReplica;
@@ -43,14 +45,40 @@ pub fn update_block_target(
     let dir = glam::Vec3::new(cam.forward().x, cam.forward().y, cam.forward().z);
     let air = world.air();
 
-    target.hit = stagcrest_world::raycast_blocks(origin, dir, 8.0, |pos| {
-        if !world.is_chunk_interactive(pos.chunk_pos()) {
-            return false;
-        }
-        let (id, _) = world.get_block(pos);
-        ctx.registry
-            .block(id)
-            .map(|d| is_targetable_block(id, d, air))
-            .unwrap_or(false)
-    });
+    target.hit = stagcrest_world::raycast_blocks(
+        origin,
+        dir,
+        8.0,
+        |pos| {
+            if !world.is_chunk_interactive(pos.chunk_pos()) {
+                return false;
+            }
+            let (id, _) = world.get_block(pos);
+            ctx.registry
+                .block(id)
+                .map(|d| is_targetable_block(id, d, air))
+                .unwrap_or(false)
+        },
+        |pos| {
+            let (id, state) = world.get_block(pos);
+            let def = ctx.registry.block(id)?;
+            if def.solid && matches!(def.geometry, BlockGeometry::Cube) {
+                return None;
+            }
+            let model = match def.geometry {
+                BlockGeometry::Model(model_id) => Some(resolve_block_model(
+                    &ctx.models,
+                    model_id,
+                    &def.namespaced_id,
+                    state,
+                )),
+                _ => None,
+            };
+            let sel = block_selection_bounds(def.geometry, model);
+            Some(RaycastBounds {
+                min: sel.min,
+                max: sel.max,
+            })
+        },
+    );
 }

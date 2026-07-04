@@ -36,6 +36,10 @@ pub struct OutlineMaterial {
 }
 
 impl Material for OutlineMaterial {
+    fn vertex_shader() -> ShaderRef {
+        OUTLINE_SHADER_HANDLE.into()
+    }
+
     fn fragment_shader() -> ShaderRef {
         OUTLINE_SHADER_HANDLE.into()
     }
