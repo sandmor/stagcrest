@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use stagcrest_protocol::{
     mount_face, mount_facing, mount_on, observer_facing, observer_powered, repeater_delay_ticks,
-    repeater_facing, repeater_powered, torch_attachment, torch_lit, AttachFace, BlockDef,
-    BlockGeometry, BlockPos, BlockState, ChunkPos, CircuitKind, Facing, ModelId, TorchAttachment,
+    repeater_facing, repeater_powered, torch_attachment, torch_burnt_out, torch_lit, AttachFace, BlockDef,
+    BlockGeometry, BlockId, BlockPos, BlockState, ChunkPos, CircuitKind, Facing, ModelId,
+    TorchAttachment,
 };
 use stagcrest_world::RaycastHit;
 
@@ -14,10 +15,20 @@ use crate::net_client::GameNetClient;
 use crate::player::{FlyCamera, SelectedBlock};
 use crate::targeting::BlockTarget;
 use crate::ui::UiTheme;
-use crate::world_replica::WorldReplica;
+use crate::world_replica::{CircuitPowerOverlay, WorldReplica};
+use stagcrest_mod_client::PowerLookup;
 use stagcrest_render::MeshCacheResource;
 
 const LABEL_WIDTH: usize = 7;
+
+const FACE_OFFSETS: [(i32, i32, i32); 6] = [
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+];
 
 pub struct DebugPlugin;
 
@@ -104,6 +115,7 @@ fn update_debug_overlay(
     selected: Res<SelectedBlock>,
     camera: Query<(&Transform, &FlyCamera), With<GameCamera>>,
     mesh_cache: Option<Res<MeshCacheResource>>,
+    power: Option<Res<CircuitPowerOverlay>>,
     mut text: Query<&mut Text, With<DebugOverlayText>>,
     mut fps_smooth: Local<f32>,
 ) {
@@ -141,6 +153,7 @@ fn update_debug_overlay(
         selected.0,
         *fps_smooth,
         mesh_cache.as_deref(),
+        power.as_deref(),
     );
 }
 
@@ -157,6 +170,7 @@ fn format_debug_text(
     selected_id: stagcrest_protocol::BlockId,
     fps: f32,
     mesh_cache: Option<&MeshCacheResource>,
+    power: Option<&CircuitPowerOverlay>,
 ) -> String {
     let pos = transform.translation;
     let block_pos = BlockPos::new(
@@ -211,6 +225,7 @@ fn format_debug_text(
         mod_ctx,
         world,
         biome_cache,
+        power,
     ));
     lines.push(String::new());
 
@@ -326,6 +341,7 @@ fn format_target_section(
     mod_ctx: Option<&ModContext>,
     world: Option<&WorldReplica>,
     biome_cache: Option<&BiomeGridCache>,
+    power: Option<&CircuitPowerOverlay>,
 ) -> Vec<String> {
     let Some(hit) = hit else {
         return vec![format!("{} -", pad_label("Target"))];
@@ -390,14 +406,188 @@ fn format_target_section(
         lines.push(format!("        {flags}"));
     }
 
+    if let Some(power) = power {
+        lines.extend(format_power_scan(
+            def, state, hit.block, world, ctx, power,
+        ));
+    }
+
     lines
+}
+
+/// Format a power scan of the targeted block and its neighbours.
+///
+/// Three cases:
+/// - **Redstone torch** – shows self power, support block position, and which
+///   adjacent circuit nodes provide strong or weak power to the support.
+/// - **Other circuit block** – shows self power and powered neighbours.
+/// - **Redstone-powerable opaque block** – shows powered circuit neighbours
+///   that contribute to block power.
+fn format_power_scan(
+    def: &BlockDef,
+    state: BlockState,
+    pos: BlockPos,
+    world: &WorldReplica,
+    ctx: &ModContext,
+    power: &CircuitPowerOverlay,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+
+    if matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch)) {
+        append_torch_power_info(&mut lines, state, pos, world, ctx, power);
+    } else if def.circuit.is_some() {
+        lines.push(format!("        power: {}", power.power_at(pos)));
+        append_neighbour_power_scan(&mut lines, pos, world, ctx, power, None);
+    } else if def.redstone_powerable {
+        append_neighbour_power_scan(&mut lines, pos, world, ctx, power, None);
+    }
+
+    lines
+}
+
+fn append_torch_power_info(
+    lines: &mut Vec<String>,
+    state: BlockState,
+    pos: BlockPos,
+    world: &WorldReplica,
+    ctx: &ModContext,
+    power: &CircuitPowerOverlay,
+) {
+    if torch_burnt_out(state) {
+        lines.push(format!("        power: {} (BURNT OUT)", power.power_at(pos)));
+    } else {
+        lines.push(format!("        power: {}", power.power_at(pos)));
+    }
+
+    let attachment = torch_attachment(state);
+    let (sdx, sdy, sdz) = attachment.support_offset();
+    let support = BlockPos::new(pos.x + sdx, pos.y + sdy, pos.z + sdz);
+
+    if !world.is_chunk_interactive(support.chunk_pos()) {
+        return;
+    }
+
+    let (sid, _) = world.get_block(support);
+    let Some(sdef) = ctx.registry.block(sid) else {
+        return;
+    };
+
+    let spowerable = if sdef.redstone_powerable {
+        "powerable"
+    } else {
+        "insulated"
+    };
+    lines.push(format!(
+        "        support {} [{}]  ({}, {}, {})",
+        sdef.namespaced_id, spowerable, support.x, support.y, support.z,
+    ));
+
+    append_neighbour_power_scan(
+        lines,
+        support,
+        world,
+        ctx,
+        power,
+        Some(&[(sdx, sdy, sdz)]),
+    );
+}
+
+fn append_neighbour_power_scan(
+    lines: &mut Vec<String>,
+    center: BlockPos,
+    world: &WorldReplica,
+    ctx: &ModContext,
+    power: &CircuitPowerOverlay,
+    skip: Option<&[(i32, i32, i32)]>,
+) {
+    let mut has_powered = false;
+    for &(dx, dy, dz) in &FACE_OFFSETS {
+        if skip.is_some_and(|s| s.contains(&(dx, dy, dz))) {
+            continue;
+        }
+
+        let npos = BlockPos::new(center.x + dx, center.y + dy, center.z + dz);
+        if !world.is_chunk_interactive(npos.chunk_pos()) {
+            continue;
+        }
+
+        let npower = power.power_at(npos);
+        if npower == 0 {
+            continue;
+        }
+
+        if !has_powered {
+            lines.push(format!("        circuit neighbours:"));
+            has_powered = true;
+        }
+
+        let (nid, _) = world.get_block(npos);
+        let nname = ctx
+            .registry
+            .block(nid)
+            .map(|d| d.namespaced_id.as_str())
+            .unwrap_or("?");
+        let tag = power_tag(ctx, nid, npos, center);
+        lines.push(format!(
+            "          {} {:>2} {}  {}",
+            face_dir(dx, dy, dz),
+            npower,
+            tag,
+            nname,
+        ));
+    }
+}
+
+/// Descriptive tag for the type of power a circuit node provides to an adjacent
+/// block: `(W)` for weak (dust), `(S)` for strong (source, repeater, …), or
+/// empty for nodes that provide no block power.
+fn power_tag(ctx: &ModContext, id: BlockId, source: BlockPos, target: BlockPos) -> &'static str {
+    let Some(def) = ctx.registry.block(id) else {
+        return "";
+    };
+    let Some(node) = def.circuit else {
+        return "";
+    };
+    match node.kind {
+        CircuitKind::Wire { .. } => "(W)",
+        CircuitKind::Inverter { .. } => {
+            if target.y == source.y + 1 {
+                "(S)"
+            } else {
+                ""
+            }
+        }
+        CircuitKind::Repeater { .. }
+        | CircuitKind::Observer { .. }
+        | CircuitKind::Source { .. }
+        | CircuitKind::Switch { .. } => "(S)",
+        CircuitKind::Piston { .. } => "",
+    }
+}
+
+fn face_dir(dx: i32, dy: i32, dz: i32) -> &'static str {
+    match (dx, dy, dz) {
+        (1, 0, 0) => "+x",
+        (-1, 0, 0) => "-x",
+        (0, 1, 0) => "+y",
+        (0, -1, 0) => "-y",
+        (0, 0, 1) => "+z",
+        (0, 0, -1) => "-z",
+        _ => "?",
+    }
 }
 
 pub fn format_block_state(def: &BlockDef, state: BlockState) -> Option<String> {
     match def.geometry {
         BlockGeometry::Model(ModelId::RedstoneTorch) => Some(format!(
             "{}, {}",
-            if torch_lit(state) { "lit" } else { "off" },
+            if torch_burnt_out(state) {
+                "burnt out"
+            } else if torch_lit(state) {
+                "lit"
+            } else {
+                "off"
+            },
             fmt_torch_attachment(torch_attachment(state))
         )),
         BlockGeometry::Model(ModelId::Lever | ModelId::Button) => Some(format!(

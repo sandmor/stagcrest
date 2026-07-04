@@ -143,7 +143,7 @@ pub(crate) fn net_poll_system(
     for msg in net.poll() {
         match msg {
             ServerMessage::CircuitPowerBatch(batch) => {
-                apply_power_batch(&mut power_overlay, batch.updates, &mut mesh_scheduler);
+                apply_power_batch(&mut power_overlay, &batch, &mut mesh_scheduler);
             }
             ServerMessage::MapChunkSnapshot(snap) => {
                 if let Some(q) = decode_queue.as_mut() {

@@ -1,8 +1,8 @@
 use crate::power::inverter_support_block;
 use crate::registry::BlockRegistry;
 use stagcrest_protocol::{
-    mount_on, observer_facing, observer_watches, set_torch_lit, BlockPos, BlockState, ChunkPos,
-    CircuitKind, LocalBlockPos,
+    mount_on, observer_facing, observer_watches, set_torch_burnt_out, set_torch_lit, torch_burnt_out,
+    BlockPos, BlockState, ChunkPos, CircuitKind, LocalBlockPos,
 };
 use stagcrest_storage::ChunkCircuitSnapshot;
 use stagcrest_world::World;
@@ -32,7 +32,6 @@ pub(crate) struct MovedNodeState {
     delay_input: Option<u8>,
     pending_delay: Option<crate::event::ScheduledEval>,
     button_release: Option<u64>,
-    torch_burnt_out: bool,
     torch_flicker: Option<TorchFlicker>,
 }
 
@@ -42,7 +41,6 @@ pub struct CircuitWorld {
     queue: EventQueue,
     delay_input: HashMap<BlockPos, u8>,
     pending_button_release: HashMap<BlockPos, u64>,
-    torch_burnt_out: HashSet<BlockPos>,
     torch_flicker: HashMap<BlockPos, TorchFlicker>,
     tick: u64,
     visual_updates: Vec<(stagcrest_protocol::BlockId, BlockPos, BlockState)>,
@@ -123,19 +121,11 @@ impl CircuitWorld {
             })
             .collect();
 
-        let torch_burnt_out = self
-            .torch_burnt_out
-            .iter()
-            .filter(|pos| pos.chunk_pos() == chunk)
-            .map(|pos| to_local(*pos))
-            .collect();
-
         ChunkCircuitSnapshot {
             power,
             delay_input,
             pending_delays,
             button_release,
-            torch_burnt_out,
         }
     }
 
@@ -159,7 +149,6 @@ impl CircuitWorld {
         self.delay_input.retain(|pos, _| pos.chunk_pos() != chunk);
         self.pending_button_release
             .retain(|pos, _| pos.chunk_pos() != chunk);
-        self.torch_burnt_out.retain(|pos| pos.chunk_pos() != chunk);
         self.torch_flicker.retain(|pos, _| pos.chunk_pos() != chunk);
         for eval in self.queue.pending_delays_in_chunk(chunk) {
             self.queue.cancel_delay(eval.pos);
@@ -188,10 +177,6 @@ impl CircuitWorld {
             let pos = to_world(local);
             let fire_tick = global_tick.saturating_add(u64::from(remaining));
             self.pending_button_release.insert(pos, fire_tick);
-        }
-
-        for local in snapshot.torch_burnt_out {
-            self.torch_burnt_out.insert(to_world(local));
         }
     }
 
@@ -236,7 +221,6 @@ impl CircuitWorld {
             delay_input: self.delay_input.remove(&pos),
             pending_delay: self.queue.take_delay(pos),
             button_release: self.pending_button_release.remove(&pos),
-            torch_burnt_out: self.torch_burnt_out.remove(&pos),
             torch_flicker: self.torch_flicker.remove(&pos),
         }
     }
@@ -249,7 +233,7 @@ impl CircuitWorld {
         &mut self,
         pos: BlockPos,
         moved: MovedNodeState,
-        world: &World,
+        world: &mut World,
         registry: &BlockRegistry,
     ) {
         let had_power = moved.power.is_some();
@@ -270,9 +254,6 @@ impl CircuitWorld {
         }
         if let Some(t) = moved.button_release {
             self.pending_button_release.insert(pos, t);
-        }
-        if moved.torch_burnt_out {
-            self.torch_burnt_out.insert(pos);
         }
         if let Some(f) = moved.torch_flicker {
             self.torch_flicker.insert(pos, f);
@@ -295,6 +276,7 @@ impl CircuitWorld {
     ) {
         self.queue.cancel_delay(pos);
         self.delay_input.remove(&pos);
+        self.torch_flicker.remove(&pos);
 
         let (id, _) = world.get_block(pos);
         if registry.block(id).and_then(|d| d.circuit).is_none() {
@@ -494,7 +476,7 @@ impl CircuitWorld {
             registry,
         };
 
-        let burnt_out = self.torch_burnt_out.contains(&pos);
+        let burnt_out = torch_burnt_out(state) && is_torch_geometry(def);
         match dispatch(&ctx, node.kind, prev_input, burnt_out) {
             EvalResult::Unchanged => {}
             EvalResult::Publish(power) => {
@@ -544,7 +526,7 @@ impl CircuitWorld {
         if let Some(new_state) = sync_block_state(world, pos, id, def, kind, state, new_power) {
             self.visual_updates.push((id, pos, new_state));
             if matches!(kind, CircuitKind::Inverter { .. }) && is_torch_geometry(def) {
-                self.record_torch_toggle(pos);
+                self.record_torch_toggle(pos, id, new_state, world);
             }
             self.notify_observers_watching(pos, world, registry);
         }
@@ -555,8 +537,14 @@ impl CircuitWorld {
         self.enqueue_block_power_dependents(pos, world, registry);
     }
 
-    fn record_torch_toggle(&mut self, pos: BlockPos) {
-        if self.torch_burnt_out.contains(&pos) {
+    fn record_torch_toggle(
+        &mut self,
+        pos: BlockPos,
+        id: stagcrest_protocol::BlockId,
+        state: BlockState,
+        world: &mut World,
+    ) {
+        if torch_burnt_out(state) {
             return;
         }
         let entry = self.torch_flicker.entry(pos).or_default();
@@ -566,7 +554,9 @@ impl CircuitWorld {
         }
         entry.count = entry.count.saturating_add(1);
         if entry.count > BURNOUT_TOGGLE_LIMIT {
-            self.torch_burnt_out.insert(pos);
+            let new_state = set_torch_burnt_out(set_torch_lit(state, false), true);
+            world.set_block(pos, id, new_state);
+            self.visual_updates.push((id, pos, new_state));
             self.torch_flicker.remove(&pos);
         }
     }
@@ -653,15 +643,23 @@ impl CircuitWorld {
     fn enqueue_circuit_neighbors(
         &mut self,
         pos: BlockPos,
-        world: &World,
+        world: &mut World,
         registry: &BlockRegistry,
     ) {
         for npos in crate::neighbors(pos) {
             if !world.is_chunk_interactive(npos.chunk_pos()) {
                 continue;
             }
-            let (nid, _) = world.get_block(npos);
+            let (nid, nstate) = world.get_block(npos);
             if registry.block(nid).and_then(|d| d.circuit).is_some() {
+                self.torch_flicker.remove(&npos);
+                if let Some(ndef) = registry.block(nid) {
+                    if is_torch_geometry(ndef) && torch_burnt_out(nstate) {
+                        let cleared = set_torch_burnt_out(nstate, false);
+                        world.set_block(npos, nid, cleared);
+                        self.visual_updates.push((nid, npos, cleared));
+                    }
+                }
                 self.queue.enqueue_evaluate(npos);
             }
         }
@@ -696,6 +694,9 @@ impl CircuitWorld {
         let new_state = match node.kind {
             CircuitKind::Source { .. } => return,
             CircuitKind::Inverter { .. } if is_torch_geometry(def) => {
+                if torch_burnt_out(state) {
+                    return;
+                }
                 set_torch_lit(state, !stagcrest_protocol::torch_lit(state))
             }
             CircuitKind::Switch { .. } => {

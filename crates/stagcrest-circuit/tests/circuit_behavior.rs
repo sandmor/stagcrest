@@ -5,8 +5,9 @@ use stagcrest_circuit::{
     block_power_at, wire_network::wire_connections_at, CircuitWorld, WireLink,
 };
 use stagcrest_protocol::{
-    mount_on, mount_state, observer_state, repeater_state, torch_state, AttachFace, BlockId,
-    BlockPos, BlockState, Facing, TorchAttachment, CHUNK_SIZE,
+    mount_on, mount_state, observer_state, repeater_state, torch_burnt_out, torch_lit, torch_state,
+    torch_state_full, AttachFace, BlockId, BlockPos, BlockState, Facing, TorchAttachment,
+    CHUNK_SIZE,
 };
 use stagcrest_world::World;
 

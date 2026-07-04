@@ -117,16 +117,18 @@ impl PowerLookup for CircuitPowerOverlay {
     }
 }
 
+use stagcrest_net::CircuitPowerBatch;
+
 pub fn apply_power_batch(
     overlay: &mut CircuitPowerOverlay,
-    updates: Vec<(BlockPos, u8)>,
+    batch: &CircuitPowerBatch,
     mesh_scheduler: &mut MeshScheduler,
 ) {
-    for (pos, power) in updates {
-        if power == 0 {
-            overlay.0.remove(&pos);
+    for (pos, power) in &batch.updates {
+        if *power == 0 {
+            overlay.0.remove(pos);
         } else {
-            overlay.0.insert(pos, power);
+            overlay.0.insert(*pos, *power);
         }
         mesh_scheduler.request(pos.chunk_pos(), RemeshUrgency::Circuit, 0);
     }

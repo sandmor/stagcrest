@@ -16,7 +16,6 @@ pub struct ChunkCircuitSnapshot {
     pub delay_input: Vec<(LocalBlockPos, u8)>,
     pub pending_delays: Vec<PendingDelaySnapshot>,
     pub button_release: Vec<(LocalBlockPos, u8)>,
-    pub torch_burnt_out: Vec<LocalBlockPos>,
 }
 
 impl ChunkCircuitSnapshot {
@@ -40,10 +39,6 @@ impl ChunkCircuitSnapshot {
         for (local, remaining) in &self.button_release {
             write_u16(&mut out, local.index() as u16);
             out.push(*remaining);
-        }
-        out.push(self.torch_burnt_out.len() as u8);
-        for local in &self.torch_burnt_out {
-            write_u16(&mut out, local.index() as u16);
         }
         out
     }
@@ -91,19 +86,11 @@ impl ChunkCircuitSnapshot {
             button_release.push((local, remaining));
         }
 
-        let burnt_count = read_u8(bytes, &mut cursor)? as usize;
-        let mut torch_burnt_out = Vec::with_capacity(burnt_count);
-        for _ in 0..burnt_count {
-            let index = read_u16(bytes, &mut cursor)? as usize;
-            torch_burnt_out.push(local_from_index(index)?);
-        }
-
         Ok(Self {
             power,
             delay_input,
             pending_delays,
             button_release,
-            torch_burnt_out,
         })
     }
 }
@@ -181,7 +168,6 @@ mod tests {
                 output: 15,
             }],
             button_release: vec![(LocalBlockPos { x: 1, y: 0, z: 0 }, 20)],
-            torch_burnt_out: vec![LocalBlockPos { x: 3, y: 3, z: 3 }],
         };
         let wire = snapshot.encode_wire();
         let decoded = ChunkCircuitSnapshot::decode_wire(&wire).unwrap();

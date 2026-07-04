@@ -137,11 +137,19 @@ impl TorchAttachment {
 pub const TORCH_LIT_BIT: u16 = 1;
 pub const TORCH_ATTACHMENT_SHIFT: u16 = 1;
 pub const TORCH_ATTACHMENT_MASK: u16 = 0b1110;
+pub const TORCH_BURNT_OUT_BIT: u16 = 0b1_0000;
 
 pub fn torch_state(lit: bool, attachment: TorchAttachment) -> BlockState {
+    torch_state_full(lit, attachment, false)
+}
+
+pub fn torch_state_full(lit: bool, attachment: TorchAttachment, burnt: bool) -> BlockState {
     let mut bits = attachment.to_bits() << TORCH_ATTACHMENT_SHIFT;
-    if lit {
+    if lit && !burnt {
         bits |= TORCH_LIT_BIT;
+    }
+    if burnt {
+        bits |= TORCH_BURNT_OUT_BIT;
     }
     BlockState(bits)
 }
@@ -150,15 +158,27 @@ pub fn torch_lit(state: BlockState) -> bool {
     state.0 & TORCH_LIT_BIT != 0
 }
 
+pub fn torch_burnt_out(state: BlockState) -> bool {
+    state.0 & TORCH_BURNT_OUT_BIT != 0
+}
+
 pub fn torch_attachment(state: BlockState) -> TorchAttachment {
     TorchAttachment::from_bits((state.0 & TORCH_ATTACHMENT_MASK) >> TORCH_ATTACHMENT_SHIFT)
 }
 
 pub fn set_torch_lit(state: BlockState, lit: bool) -> BlockState {
-    if lit {
-        BlockState(state.0 | TORCH_LIT_BIT)
-    } else {
+    if torch_burnt_out(state) || !lit {
         BlockState(state.0 & !TORCH_LIT_BIT)
+    } else {
+        BlockState(state.0 | TORCH_LIT_BIT)
+    }
+}
+
+pub fn set_torch_burnt_out(state: BlockState, burnt: bool) -> BlockState {
+    if burnt {
+        BlockState((state.0 | TORCH_BURNT_OUT_BIT) & !TORCH_LIT_BIT)
+    } else {
+        BlockState(state.0 & !TORCH_BURNT_OUT_BIT)
     }
 }
 

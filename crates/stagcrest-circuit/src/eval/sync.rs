@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
-    set_torch_lit, torch_lit, BlockDef, BlockGeometry, BlockId, BlockPos, BlockState, CircuitKind,
-    CircuitNodeDef, ModelId,
+    set_torch_lit, torch_burnt_out, torch_lit, BlockDef, BlockGeometry, BlockId, BlockPos,
+    BlockState, CircuitKind, CircuitNodeDef, ModelId,
 };
 use stagcrest_world::World;
 
@@ -28,7 +28,7 @@ pub fn sync_block_state(
         }
         CircuitKind::Inverter { .. } => {
             if matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch)) {
-                let lit = new_power > 0;
+                let lit = new_power > 0 && !torch_burnt_out(state);
                 if torch_lit(state) != lit {
                     let new_state = set_torch_lit(state, lit);
                     world_blocks.set_block(pos, id, new_state);
