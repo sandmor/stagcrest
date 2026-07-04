@@ -26,7 +26,10 @@ impl WorldSession {
         world_seed: Option<u64>,
     ) -> Result<Self, StorageError> {
         let world_name = world_name.into();
-        let path = Path::new(DATA_DIR).join("worlds").join(&world_name).join("world.redb");
+        let path = Path::new(DATA_DIR)
+            .join("worlds")
+            .join(&world_name)
+            .join("world.redb");
         let storage = Arc::new(RedbChunkStorage::open(path)?);
         let mut meta = WorldMeta::load(storage.as_ref())?;
         meta.world_seed = match world_seed {

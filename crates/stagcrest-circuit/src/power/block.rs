@@ -24,33 +24,20 @@ impl BlockPower {
     }
 }
 
-pub fn is_opaque_block(def: &BlockDef) -> bool {
-    def.solid && def.opaque && !def.fluid
+pub fn is_redstone_powerable_block(def: &BlockDef) -> bool {
+    def.redstone_powerable
 }
 
-/// Strong and weak power levels contributed to an opaque block cell.
-///
-/// `strong` comes from mounted switches, lit inverters above, repeater output faces, and
-/// adjacent source blocks. `weak` comes from powered wire neighbors and wire sitting on top.
-pub fn block_power_at(
+/// Strong power on a redstone-powerable opaque block from adjacent components.
+/// Sources: mounted switches (attachment), source blocks, inverter/torch (above only),
+/// repeater (output face), observer (output face). No wire/dust contribution.
+fn block_strong_power(
     circuit: &CircuitWorld,
     block_pos: BlockPos,
     world_blocks: &World,
     registry: &BlockRegistry,
-) -> BlockPower {
-    let mut power = BlockPower::default();
-
-    if !world_blocks.is_chunk_interactive(block_pos.chunk_pos()) {
-        return power;
-    }
-
-    let (block_id, _) = world_blocks.get_block(block_pos);
-    let Some(block_def) = registry.block(block_id) else {
-        return power;
-    };
-    if !is_opaque_block(block_def) {
-        return power;
-    }
+) -> u8 {
+    let mut strong = 0u8;
 
     for npos in crate::neighbors(block_pos) {
         if !world_blocks.is_chunk_interactive(npos.chunk_pos()) {
@@ -67,25 +54,21 @@ pub fn block_power_at(
         match node.kind {
             CircuitKind::Switch { output } => {
                 if mount_on(state) {
-                    let (dx, dy, dz) =
-                        mount_support_offset(mount_face(state), mount_facing(state));
+                    let (dx, dy, dz) = mount_support_offset(mount_face(state), mount_facing(state));
                     let support = BlockPos::new(npos.x + dx, npos.y + dy, npos.z + dz);
                     if support == block_pos {
-                        power.strong = power.strong.max(output);
+                        strong = strong.max(output);
                     }
                 }
             }
             CircuitKind::Source { level } => {
-                power.strong = power.strong.max(level);
-            }
-            CircuitKind::Wire { .. } => {
-                power.weak = power.weak.max(circuit.power_at(npos));
+                strong = strong.max(level);
             }
             CircuitKind::Inverter { .. } => {
                 if is_torch_geometry(def) && circuit.power_at(npos) > 0 {
                     let above = BlockPos::new(npos.x, npos.y + 1, npos.z);
                     if block_pos == above {
-                        power.strong = power.strong.max(15);
+                        strong = strong.max(15);
                     }
                 }
             }
@@ -94,7 +77,7 @@ pub fn block_power_at(
                 let (fx, _, fz) = facing_delta(facing);
                 let output_pos = BlockPos::new(npos.x + fx, npos.y, npos.z + fz);
                 if block_pos == output_pos {
-                    power.strong = power.strong.max(circuit.power_at(npos));
+                    strong = strong.max(circuit.power_at(npos));
                 }
             }
             CircuitKind::Observer { .. } => {
@@ -102,25 +85,88 @@ pub fn block_power_at(
                 let (fx, _, fz) = facing_delta(facing);
                 let output_pos = BlockPos::new(npos.x + fx, npos.y, npos.z + fz);
                 if block_pos == output_pos {
-                    power.strong = power.strong.max(circuit.power_at(npos));
+                    strong = strong.max(circuit.power_at(npos));
                 }
             }
-            CircuitKind::Piston { .. } => {}
+            CircuitKind::Wire { .. } | CircuitKind::Piston { .. } => {}
         }
     }
 
-    let wire_above = BlockPos::new(block_pos.x, block_pos.y + 1, block_pos.z);
-    if world_blocks.is_chunk_interactive(wire_above.chunk_pos()) {
-        let (id, _) = world_blocks.get_block(wire_above);
-        if let Some(def) = registry.block(id) {
-            if def
-                .circuit
-                .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
-            {
-                power.weak = power.weak.max(circuit.power_at(wire_above));
-            }
+    strong
+}
+
+/// Full power (strong + weak) on a redstone-powerable opaque block.
+///
+/// Strong power comes from adjacent circuit components (see `block_strong_power`).
+/// Weak power comes only from redstone dust. Powered blocks do not charge other
+/// opaque blocks directly; strong blocks can power adjacent dust, while weak
+/// blocks can still activate adjacent components.
+pub fn block_power_at(
+    circuit: &CircuitWorld,
+    block_pos: BlockPos,
+    world_blocks: &World,
+    registry: &BlockRegistry,
+) -> BlockPower {
+    if !world_blocks.is_chunk_interactive(block_pos.chunk_pos()) {
+        return BlockPower::default();
+    }
+
+    let (block_id, _) = world_blocks.get_block(block_pos);
+    let Some(block_def) = registry.block(block_id) else {
+        return BlockPower::default();
+    };
+    if !is_redstone_powerable_block(block_def) {
+        return BlockPower::default();
+    }
+
+    let strong = block_strong_power(circuit, block_pos, world_blocks, registry);
+    let mut weak = 0u8;
+
+    for npos in crate::neighbors(block_pos) {
+        if !world_blocks.is_chunk_interactive(npos.chunk_pos()) {
+            continue;
+        }
+        if dust_power_to_block(circuit, npos, block_pos, world_blocks, registry).is_some() {
+            weak = weak.max(circuit.power_at(npos));
         }
     }
 
-    power
+    BlockPower { strong, weak }
+}
+
+fn dust_power_to_block(
+    circuit: &CircuitWorld,
+    dust_pos: BlockPos,
+    block_pos: BlockPos,
+    world_blocks: &World,
+    registry: &BlockRegistry,
+) -> Option<u8> {
+    if circuit.power_at(dust_pos) == 0 || !world_blocks.is_chunk_interactive(dust_pos.chunk_pos()) {
+        return None;
+    }
+    let (id, _) = world_blocks.get_block(dust_pos);
+    let def = registry.block(id)?;
+    if !def
+        .circuit
+        .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
+    {
+        return None;
+    }
+
+    if dust_pos.x == block_pos.x && dust_pos.z == block_pos.z && dust_pos.y == block_pos.y + 1 {
+        return Some(circuit.power_at(dust_pos));
+    }
+
+    if dust_pos.y == block_pos.y
+        && crate::wire_network::wire_connects_toward_neighbor(
+            registry,
+            world_blocks,
+            dust_pos,
+            block_pos,
+        )
+    {
+        return Some(circuit.power_at(dust_pos));
+    }
+
+    None
 }

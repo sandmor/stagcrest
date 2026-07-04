@@ -81,11 +81,9 @@ pub fn apply_player_action(
 
             for pos in break_positions {
                 server.world.set_block(pos, air, BlockState(0));
-                server.circuit.notify_block_changed(
-                    pos,
-                    &mut server.world,
-                    &server.registry,
-                );
+                server
+                    .circuit
+                    .notify_block_changed(pos, &mut server.world, &server.registry);
                 server.mark_chunk_dirty(pos.chunk_pos());
                 server.fanout_block_update(
                     clients,
@@ -171,23 +169,36 @@ pub fn apply_player_action(
                     state
                 }
                 Some("stagcrest:repeater") => {
-                    let Some(state) =
-                        validate_repeater_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
-                    else {
+                    let Some(state) = validate_repeater_placement(
+                        is_solid_at,
+                        place_pos,
+                        nx,
+                        ny,
+                        nz,
+                        dir_x,
+                        dir_z,
+                    ) else {
                         return ack(false, "invalid repeater placement");
                     };
                     state
                 }
                 Some("stagcrest:observer") => {
-                    let Some(state) =
-                        validate_observer_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
-                    else {
+                    let Some(state) = validate_observer_placement(
+                        is_solid_at,
+                        place_pos,
+                        nx,
+                        ny,
+                        nz,
+                        dir_x,
+                        dir_z,
+                    ) else {
                         return ack(false, "invalid observer placement");
                     };
                     state
                 }
                 Some("stagcrest:piston") | Some("stagcrest:sticky_piston") => {
-                    let Some(state) = validate_piston_placement(place_pos, dir_x, dir_y, dir_z) else {
+                    let Some(state) = validate_piston_placement(place_pos, dir_x, dir_y, dir_z)
+                    else {
                         return ack(false, "invalid piston placement");
                     };
                     state

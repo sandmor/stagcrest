@@ -1,7 +1,7 @@
 use stagcrest_protocol::{facing_delta, repeater_delay_ticks, repeater_facing, repeater_powered};
 
-use crate::power::repeater_input_power;
 use super::{EvalContext, EvalResult};
+use crate::power::repeater_input_power;
 
 pub fn evaluate(ctx: &EvalContext<'_>, output: u8, prev_input: u8) -> EvalResult {
     if is_locked(ctx) {
@@ -30,7 +30,8 @@ fn is_locked(ctx: &EvalContext<'_>) -> bool {
     };
 
     for (sx, sy, sz) in side_offsets {
-        let side_pos = stagcrest_protocol::BlockPos::new(ctx.pos.x + sx, ctx.pos.y + sy, ctx.pos.z + sz);
+        let side_pos =
+            stagcrest_protocol::BlockPos::new(ctx.pos.x + sx, ctx.pos.y + sy, ctx.pos.z + sz);
         if !ctx.world.is_chunk_interactive(side_pos.chunk_pos()) {
             continue;
         }
@@ -49,7 +50,8 @@ fn is_locked(ctx: &EvalContext<'_>) -> bool {
         }
         let side_facing = repeater_facing(state);
         let (ofx, _, ofz) = facing_delta(side_facing);
-        let output_pos = stagcrest_protocol::BlockPos::new(side_pos.x + ofx, side_pos.y, side_pos.z + ofz);
+        let output_pos =
+            stagcrest_protocol::BlockPos::new(side_pos.x + ofx, side_pos.y, side_pos.z + ofz);
         if output_pos == ctx.pos {
             return true;
         }

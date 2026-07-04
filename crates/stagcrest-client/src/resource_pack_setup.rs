@@ -17,14 +17,13 @@ impl Plugin for ResourcePackSetupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SetupState>()
             .add_systems(OnEnter(AppState::ResourcePackSetup), spawn_setup_ui)
-            .add_systems(OnExit(AppState::ResourcePackSetup), cleanup_screen::<SetupRoot>)
+            .add_systems(
+                OnExit(AppState::ResourcePackSetup),
+                cleanup_screen::<SetupRoot>,
+            )
             .add_systems(
                 Update,
-                (
-                    setup_button_system,
-                    poll_setup_download,
-                    refresh_setup_ui,
-                )
+                (setup_button_system, poll_setup_download, refresh_setup_ui)
                     .run_if(in_state(AppState::ResourcePackSetup)),
             );
     }
@@ -252,5 +251,3 @@ fn refresh_setup_ui(
     }
     build_setup_ui(&mut commands, &theme, &snapshot);
 }
-
-

@@ -1,10 +1,10 @@
 use crate::eval::EvalContext;
-use crate::power::{block_power_at, is_opaque_block, signal_into};
+use crate::power::{block_power_at, is_redstone_powerable_block, signal_into};
 use crate::registry::BlockRegistry;
 use crate::world::CircuitWorld;
 use stagcrest_protocol::{
-    piston_extended, piston_facing, piston_front_pos, piston_head_state, piston_state, BlockGeometry,
-    BlockPos, BlockState, ModelId, PushReaction,
+    piston_extended, piston_facing, piston_front_pos, piston_head_state, piston_state,
+    BlockGeometry, BlockPos, BlockState, ModelId, PushReaction,
 };
 use stagcrest_world::World;
 
@@ -28,8 +28,9 @@ pub fn piston_is_powered(ctx: &EvalContext<'_>) -> bool {
         let (nid, _) = ctx.world.get_block(npos);
         let mut bp_powered = false;
         if let Some(ndef) = ctx.registry.block(nid) {
-            if is_opaque_block(ndef) {
-                bp_powered = block_power_at(ctx.circuit, npos, ctx.world, ctx.registry).is_powered();
+            if is_redstone_powerable_block(ndef) {
+                bp_powered =
+                    block_power_at(ctx.circuit, npos, ctx.world, ctx.registry).is_powered();
             }
         }
         if sig > 0 || bp_powered {
@@ -159,9 +160,9 @@ fn expand_slime_honey_group(
         .iter()
         .filter(|pos| {
             let (id, _) = world.get_block(**pos);
-            registry
-                .block(id)
-                .is_some_and(|d| is_slime_block(&d.namespaced_id) || is_honey_block(&d.namespaced_id))
+            registry.block(id).is_some_and(|d| {
+                is_slime_block(&d.namespaced_id) || is_honey_block(&d.namespaced_id)
+            })
         })
         .copied()
         .collect();
@@ -236,7 +237,8 @@ pub fn try_extend(
     let head_id = piston_head_id(registry);
 
     let front = piston_front_pos(piston_pos, facing);
-    let plan = match compute_push_plan(world, registry, air, front, (dx, dy, dz), Some(piston_pos)) {
+    let plan = match compute_push_plan(world, registry, air, front, (dx, dy, dz), Some(piston_pos))
+    {
         Some(plan) => plan,
         None => return,
     };
@@ -318,9 +320,13 @@ pub fn try_retract(
         let pull_reaction = push_reaction_for(registry, pull_id);
         if pull_id != air && pull_reaction == PushReaction::Normal {
             let mut pull_set = vec![pull_start];
-            if expand_slime_honey_group(world, registry, air, &mut pull_set, Some(piston_pos)).is_some() {
+            if expand_slime_honey_group(world, registry, air, &mut pull_set, Some(piston_pos))
+                .is_some()
+            {
                 pull_set.sort_by_key(|p| {
-                    (p.x - piston_pos.x) * dx + (p.y - piston_pos.y) * dy + (p.z - piston_pos.z) * dz
+                    (p.x - piston_pos.x) * dx
+                        + (p.y - piston_pos.y) * dy
+                        + (p.z - piston_pos.z) * dz
                 });
 
                 let mut moved_observers: Vec<BlockPos> = Vec::new();

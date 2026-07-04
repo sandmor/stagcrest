@@ -126,7 +126,10 @@ pub fn hotbar_keyboard(
 
 pub fn hotbar_scroll(
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
-    mut query: Query<(&RelativeCursorPosition, &mut ScrollPosition), With<crate::inventory::screen::CatalogScrollArea>>,
+    mut query: Query<
+        (&RelativeCursorPosition, &mut ScrollPosition),
+        With<crate::inventory::screen::CatalogScrollArea>,
+    >,
     mut inventory: ResMut<CreativeInventory>,
 ) {
     let delta_y: f32 = wheel.read().map(|e| e.y).sum();

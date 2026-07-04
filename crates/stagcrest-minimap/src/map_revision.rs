@@ -39,7 +39,11 @@ pub fn compute_layer_source_revision(
                 if chunk_y1 < min_y || chunk_y0 > max_y {
                     continue;
                 }
-                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                let pos = ChunkPos {
+                    x: cx,
+                    y: cy,
+                    z: cz,
+                };
                 let rev = storage.get_chunk_revision(pos);
                 max_rev = max_rev.max(if modified_live.contains(&pos) {
                     rev.saturating_add(1)
@@ -66,7 +70,11 @@ pub fn map_tile_has_live_edits(
             let cx = base_cx + dx;
             let cz = base_cz + dz;
             for &cy in y_chunks {
-                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                let pos = ChunkPos {
+                    x: cx,
+                    y: cy,
+                    z: cz,
+                };
                 if world.has_chunk(pos) && world.is_populated(pos) && world.is_modified(pos) {
                     return true;
                 }
@@ -96,15 +104,7 @@ mod tests {
         revs.insert(ChunkPos { x: 1, y: 0, z: 0 }, 7);
         let storage = FakeRev(revs);
         let y_chunks = vec![0];
-        let rev = compute_layer_source_revision(
-            &storage,
-            0,
-            0,
-            0,
-            256,
-            &y_chunks,
-            &HashSet::new(),
-        );
+        let rev = compute_layer_source_revision(&storage, 0, 0, 0, 256, &y_chunks, &HashSet::new());
         assert_eq!(rev, 7);
     }
 
@@ -116,15 +116,7 @@ mod tests {
         let y_chunks = vec![0];
         let mut modified = HashSet::new();
         modified.insert(ChunkPos { x: 0, y: 0, z: 0 });
-        let rev = compute_layer_source_revision(
-            &storage,
-            0,
-            0,
-            0,
-            256,
-            &y_chunks,
-            &modified,
-        );
+        let rev = compute_layer_source_revision(&storage, 0, 0, 0, 256, &y_chunks, &modified);
         assert_eq!(rev, 4);
     }
 }

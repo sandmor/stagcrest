@@ -1,8 +1,7 @@
 //! Piston body and head geometry. Canonical front points toward -Z; rotation maps Facing6.
 
 use stagcrest_protocol::{
-    BlockModel, Facing6, ModelElement, ModelFace,
-    ModelRenderLayer, ModelTexture,
+    BlockModel, Facing6, ModelElement, ModelFace, ModelRenderLayer, ModelTexture,
 };
 
 const S: f32 = 1.0 / 16.0;
@@ -140,7 +139,9 @@ pub fn build_piston_head_models() -> Vec<BlockModel> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stagcrest_protocol::{piston_head_state, piston_head_variant, piston_state, piston_variant};
+    use stagcrest_protocol::{
+        piston_head_state, piston_head_variant, piston_state, piston_variant,
+    };
 
     #[test]
     fn piston_variant_count_matches_models() {

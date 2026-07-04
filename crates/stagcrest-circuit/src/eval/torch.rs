@@ -1,8 +1,8 @@
 //! Evaluates [`CircuitKind::Inverter`] blocks with torch attachment geometry:
 //! input from support-block power, 2-tick output delay, burnout after rapid toggling.
 
-use crate::power::{block_power_at, inverter_support_block};
 use crate::eval::sync::is_torch_geometry;
+use crate::power::{block_power_at, inverter_support_block};
 
 use super::{EvalContext, EvalResult};
 

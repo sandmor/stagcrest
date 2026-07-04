@@ -189,6 +189,7 @@ fn register_layered_cross_plant(
         circuit: None,
         push_reaction: None,
         map_color: default_map_color(id),
+        redstone_powerable: None,
     });
 }
 
@@ -222,6 +223,7 @@ pub(crate) fn register_solid_block(
         circuit,
         push_reaction: None,
         map_color: default_map_color(id),
+        redstone_powerable: None,
     });
 }
 
@@ -282,6 +284,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:grass_block"),
+        redstone_powerable: None,
     });
     register_solid_block(
         reg,
@@ -339,6 +342,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: Some(RenderLayer::Blend),
         push_reaction: None,
         map_color: default_map_color("stagcrest:water"),
+        redstone_powerable: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:bedrock".into(),
@@ -357,6 +361,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: Some(PushReaction::Block),
         map_color: default_map_color("stagcrest:bedrock"),
+        redstone_powerable: None,
     });
     register_solid_block(
         reg,
@@ -388,21 +393,27 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         }),
         Some("model:redstone_torch"),
     );
-    register_solid_block(
-        reg,
-        "stagcrest:redstone_block",
-        "Redstone Block",
-        "stagcrest:redstone_block",
-        true,
-        false,
-        true,
-        true,
-        None,
-        Some(RegisterCircuitRequest {
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:redstone_block".into(),
+        display_name: "Redstone Block".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 1.0,
+        top_texture: "stagcrest:redstone_block".into(),
+        bottom_texture: "stagcrest:redstone_block".into(),
+        sides_texture: "stagcrest:redstone_block".into(),
+        placeable: true,
+        geometry: None,
+        circuit: Some(RegisterCircuitRequest {
             kind: CircuitKindRequest::Source { level: 15 },
         }),
-        None,
-    );
+        render_layer: None,
+        push_reaction: None,
+        map_color: default_map_color("stagcrest:redstone_block"),
+        redstone_powerable: Some(false),
+    });
     // Lever: cobblestone base (top/bottom slots) + lever handle (sides slot),
     // rendered as a cutout model. Non-opaque so it doesn't cull neighbors, but
     // solid so it can be targeted for breaking/toggling.
@@ -425,6 +436,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:lever"),
+        redstone_powerable: None,
     });
     // Stone button: a small stone box that sinks when pressed.
     reg.register_block(RegisterBlockRequest {
@@ -446,6 +458,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:stone_button"),
+        redstone_powerable: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:repeater".into(),
@@ -466,6 +479,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:repeater"),
+        redstone_powerable: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:observer".into(),
@@ -486,6 +500,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:observer"),
+        redstone_powerable: Some(false),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:piston".into(),
@@ -506,6 +521,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:piston"),
+        redstone_powerable: Some(false),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:sticky_piston".into(),
@@ -526,6 +542,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:sticky_piston"),
+        redstone_powerable: Some(false),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:piston_head".into(),
@@ -542,8 +559,9 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         geometry: Some("model:piston_head".into()),
         circuit: None,
         render_layer: None,
-        push_reaction: None,
+        push_reaction: Some(PushReaction::Block),
         map_color: default_map_color("stagcrest:piston_head"),
+        redstone_powerable: Some(false),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:slime_block".into(),
@@ -562,6 +580,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: Some(RenderLayer::Blend),
         push_reaction: None,
         map_color: default_map_color("stagcrest:slime_block"),
+        redstone_powerable: Some(true),
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:honey_block".into(),
@@ -580,6 +599,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: Some(RenderLayer::Blend),
         push_reaction: None,
         map_color: default_map_color("stagcrest:honey_block"),
+        redstone_powerable: Some(true),
     });
     register_solid_block(
         reg,
@@ -624,6 +644,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:oak_log"),
+        redstone_powerable: None,
     });
     register_solid_block(
         reg,
@@ -701,6 +722,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         render_layer: None,
         push_reaction: None,
         map_color: default_map_color("stagcrest:cactus"),
+        redstone_powerable: None,
     });
     register_solid_block(
         reg,

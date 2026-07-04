@@ -1,6 +1,4 @@
-use stagcrest_net::{
-    BlockUpdate, CircuitPowerBatch, GameMessage, ServerMessage,
-};
+use stagcrest_net::{BlockUpdate, CircuitPowerBatch, GameMessage, ServerMessage};
 use stagcrest_protocol::{BlockPos, ChunkPos};
 
 use crate::client_session::{ClientRegistry, ConnectedClient};
@@ -25,17 +23,11 @@ pub fn client_interested_in_block(
     h_radius: i32,
     v_radius: i32,
 ) -> bool {
-    client.handshake_complete
-        && chunk_in_client_radius(pos.chunk_pos(), client, h_radius, v_radius)
+    client.handshake_complete && chunk_in_client_radius(pos.chunk_pos(), client, h_radius, v_radius)
 }
 
 impl ClientRegistry {
-    pub fn fanout_block_update(
-        &mut self,
-        update: BlockUpdate,
-        h_radius: i32,
-        v_radius: i32,
-    ) {
+    pub fn fanout_block_update(&mut self, update: BlockUpdate, h_radius: i32, v_radius: i32) {
         let pos = update.pos;
         let msg = GameMessage::Server(ServerMessage::BlockUpdate(update));
         for client in self.clients_mut() {
@@ -49,12 +41,7 @@ impl ClientRegistry {
     ///
     /// Redstone wires spanning beyond a client's interest radius won't replicate until
     /// they stream the connecting chunks.
-    pub fn fanout_circuit_batch(
-        &mut self,
-        batch: CircuitPowerBatch,
-        h_radius: i32,
-        v_radius: i32,
-    ) {
+    pub fn fanout_circuit_batch(&mut self, batch: CircuitPowerBatch, h_radius: i32, v_radius: i32) {
         for client in self.clients_mut() {
             let updates: Vec<_> = batch
                 .updates

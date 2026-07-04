@@ -270,8 +270,7 @@ impl ChunkStorage for RedbChunkStorage {
                 Ok(None) => 0,
                 Err(e) => return Err(StorageError::Database(e.to_string())),
             };
-            revs
-                .insert(&key, current.saturating_add(1).to_be_bytes())
+            revs.insert(&key, current.saturating_add(1).to_be_bytes())
                 .map_err(|e| StorageError::Database(e.to_string()))?;
         }
         txn.commit()
@@ -368,8 +367,7 @@ mod tests {
 
     #[test]
     fn map_chunk_roundtrip() {
-        let dir =
-            std::env::temp_dir().join(format!("stagcrest_redb_map_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stagcrest_redb_map_{}", std::process::id()));
         let _ = std::fs::remove_file(dir.join("world.redb"));
         let storage = RedbChunkStorage::open(dir.join("world.redb")).unwrap();
         let data = vec![1u8, 2, 3, 4];

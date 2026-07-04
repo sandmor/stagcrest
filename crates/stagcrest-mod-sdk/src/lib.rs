@@ -32,6 +32,10 @@ pub struct RegisterBlockRequest {
     #[serde(default)]
     pub push_reaction: Option<PushReaction>,
     pub map_color: [u8; 3],
+    /// Overrides whether this block behaves like a redstone opaque block.
+    /// If omitted, the host derives it from solid/opaque/transparent/fluid.
+    #[serde(default)]
+    pub redstone_powerable: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]

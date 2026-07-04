@@ -6,7 +6,11 @@ use stagcrest_protocol::{BlockId, ChunkPos};
 use stagcrest_world::World;
 
 /// Apply precomputed density results to the in-memory world (sequential).
-pub fn apply_density_batch(world: &mut World, terrain: &mut WorldGenState, results: &[ChunkGenData]) {
+pub fn apply_density_batch(
+    world: &mut World,
+    terrain: &mut WorldGenState,
+    results: &[ChunkGenData],
+) {
     for data in results {
         world.ensure_chunk(data.pos);
         if !world.is_generated(data.pos) {
@@ -48,13 +52,8 @@ pub fn apply_pass2_decorate(
 ) {
     let pos = data.pos;
     let snapshot = DecorateSnapshot::capture(world, pos, air);
-    let decorated = generator.decorate_chunk_offline(
-        column_blocks,
-        biomes,
-        registry,
-        data,
-        &snapshot,
-    );
+    let decorated =
+        generator.decorate_chunk_offline(column_blocks, biomes, registry, data, &snapshot);
     terrain.mark_chunk_generated(pos);
     terrain.store_biome_grid(pos, decorated.biome_grid);
     if !world.is_generated(pos) {

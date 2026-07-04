@@ -11,12 +11,7 @@ extern "C" {
     #[link_name = "register_texture"]
     fn host_register_texture(ptr: i32, len: i32) -> i32;
     #[link_name = "register_texture_from_pack"]
-    fn host_register_texture_from_pack(
-        id_ptr: i32,
-        id_len: i32,
-        mc_ptr: i32,
-        mc_len: i32,
-    ) -> i32;
+    fn host_register_texture_from_pack(id_ptr: i32, id_len: i32, mc_ptr: i32, mc_len: i32) -> i32;
     #[link_name = "log_message"]
     fn host_log_message(ptr: i32, len: i32);
     #[link_name = "register_biome"]

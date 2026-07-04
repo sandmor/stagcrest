@@ -23,9 +23,13 @@ struct MergeKey {
 
 fn face_tex_key(tex: &FaceTexture) -> u64 {
     let mut h = tex.texture.0 as u64;
-    h = h.wrapping_mul(31).wrapping_add(tex.overlay.map(|t| t.0 as u64).unwrap_or(0));
+    h = h
+        .wrapping_mul(31)
+        .wrapping_add(tex.overlay.map(|t| t.0 as u64).unwrap_or(0));
     h = h.wrapping_mul(31).wrapping_add(tex.tint as u32 as u64);
-    h = h.wrapping_mul(31).wrapping_add(tex.overlay_tint as u32 as u64);
+    h = h
+        .wrapping_mul(31)
+        .wrapping_add(tex.overlay_tint as u32 as u64);
     h
 }
 
@@ -75,9 +79,7 @@ pub(crate) struct GreedyGrid {
 impl GreedyGrid {
     pub fn new() -> Self {
         Self {
-            cells: std::array::from_fn(|_| {
-                std::array::from_fn(|_| std::array::from_fn(|_| None))
-            }),
+            cells: std::array::from_fn(|_| std::array::from_fn(|_| std::array::from_fn(|_| None))),
         }
     }
 
@@ -98,7 +100,9 @@ impl GreedyGrid {
     }
 
     fn get(&self, x: i32, y: i32, z: i32) -> Option<&CubeCell> {
-        if !(0..CHUNK_SIZE).contains(&x) || !(0..CHUNK_SIZE).contains(&y) || !(0..CHUNK_SIZE).contains(&z)
+        if !(0..CHUNK_SIZE).contains(&x)
+            || !(0..CHUNK_SIZE).contains(&y)
+            || !(0..CHUNK_SIZE).contains(&z)
         {
             return None;
         }
@@ -128,8 +132,7 @@ pub(crate) fn emit_greedy_cubes(
 
         for direction in 0..2u8 {
             for slice in 0..CHUNK_SIZE {
-                let mut mask: Vec<Option<MergeKey>> =
-                    vec![None; (dims[u] * dims[v]) as usize];
+                let mut mask: Vec<Option<MergeKey>> = vec![None; (dims[u] * dims[v]) as usize];
 
                 for j in 0..dims[u] {
                     for k in 0..dims[v] {
@@ -159,11 +162,7 @@ pub(crate) fn emit_greedy_cubes(
                         );
                         if should_cull_face(
                             def,
-                            neighbor_at(
-                                neighbor_pos.0,
-                                neighbor_pos.1,
-                                neighbor_pos.2,
-                            ),
+                            neighbor_at(neighbor_pos.0, neighbor_pos.1, neighbor_pos.2),
                             air,
                             registry,
                             normal,
@@ -200,9 +199,7 @@ pub(crate) fn emit_greedy_cubes(
                     let k = (n as i32) % dims[v];
 
                     let mut width = 1i32;
-                    while (k + width) < dims[v]
-                        && mask[n + width as usize] == Some(key)
-                    {
+                    while (k + width) < dims[v] && mask[n + width as usize] == Some(key) {
                         width += 1;
                     }
 
@@ -322,10 +319,7 @@ fn merged_face_corners(
     corners
 }
 
-pub(crate) fn is_greedy_eligible(
-    geometry: BlockGeometry,
-    fluid: bool,
-) -> bool {
+pub(crate) fn is_greedy_eligible(geometry: BlockGeometry, fluid: bool) -> bool {
     geometry == BlockGeometry::Cube && !fluid && greedy_mesh_enabled()
 }
 
@@ -358,9 +352,7 @@ mod tests {
                 let expected_normal = Vec3::from_array(expected_normal);
 
                 let block_lo = [4.0, 8.0, 12.0];
-                let merged = merged_face_corners(
-                    0, 0, 0, axis, direction, u, v, [4, 8, 12], 1, 1,
-                );
+                let merged = merged_face_corners(0, 0, 0, axis, direction, u, v, [4, 8, 12], 1, 1);
                 let per_face = face_corners(block_lo, expected_normal);
 
                 for i in 0..4 {

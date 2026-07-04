@@ -9,11 +9,11 @@ use stagcrest_world::World;
 use std::collections::{HashMap, HashSet};
 
 use crate::eval::{
-    dispatch, is_button_geometry, is_torch_geometry, sync_block_state, BURNOUT_TOGGLE_LIMIT,
-    BURNOUT_WINDOW_TICKS, EvalContext, EvalResult, OBSERVER_PULSE_TICKS,
+    dispatch, is_button_geometry, is_torch_geometry, sync_block_state, EvalContext, EvalResult,
+    BURNOUT_TOGGLE_LIMIT, BURNOUT_WINDOW_TICKS, OBSERVER_PULSE_TICKS,
 };
-use crate::piston::{try_extend, try_retract};
 use crate::event::{CircuitEvent, EventQueue};
+use crate::piston::{try_extend, try_retract};
 
 pub const MAX_EVALS_PER_TICK: usize = 4096;
 pub const BUTTON_HOLD_TICKS: u64 = 30;
@@ -118,9 +118,7 @@ impl CircuitWorld {
             .iter()
             .filter(|(pos, _)| pos.chunk_pos() == chunk)
             .map(|(pos, fire_tick)| {
-                let remaining = fire_tick
-                    .saturating_sub(self.tick)
-                    .min(u64::from(u8::MAX)) as u8;
+                let remaining = fire_tick.saturating_sub(self.tick).min(u64::from(u8::MAX)) as u8;
                 (to_local(*pos), remaining)
             })
             .collect();
@@ -421,12 +419,7 @@ impl CircuitWorld {
         self.trigger_observer(pos, world, registry);
     }
 
-    fn trigger_observer(
-        &mut self,
-        pos: BlockPos,
-        world: &mut World,
-        registry: &BlockRegistry,
-    ) {
+    fn trigger_observer(&mut self, pos: BlockPos, world: &mut World, registry: &BlockRegistry) {
         if !world.is_chunk_interactive(pos.chunk_pos()) {
             return;
         }
@@ -465,7 +458,10 @@ impl CircuitWorld {
             let Some(def) = registry.block(id) else {
                 continue;
             };
-            if !def.circuit.is_some_and(|n| matches!(n.kind, CircuitKind::Switch { .. })) {
+            if !def
+                .circuit
+                .is_some_and(|n| matches!(n.kind, CircuitKind::Switch { .. }))
+            {
                 continue;
             }
             if !mount_on(state) {
@@ -532,9 +528,7 @@ impl CircuitWorld {
 
         if matches!(
             kind,
-            CircuitKind::Wire { .. }
-                | CircuitKind::Repeater { .. }
-                | CircuitKind::Observer { .. }
+            CircuitKind::Wire { .. } | CircuitKind::Repeater { .. } | CircuitKind::Observer { .. }
         ) {
             world.mark_dirty_face_neighbors(pos.chunk_pos());
         }
@@ -583,10 +577,39 @@ impl CircuitWorld {
         world: &World,
         registry: &BlockRegistry,
     ) {
+        self.enqueue_dependents_of_powered_block(pos, world, registry);
         for npos in crate::neighbors(pos) {
-            self.enqueue_attachment_nodes_on_block(npos, world, registry);
+            self.enqueue_dependents_of_powered_block(npos, world, registry);
         }
-        self.enqueue_attachment_nodes_on_block(pos, world, registry);
+    }
+
+    fn enqueue_dependents_of_powered_block(
+        &mut self,
+        block_pos: BlockPos,
+        world: &World,
+        registry: &BlockRegistry,
+    ) {
+        if !world.is_chunk_interactive(block_pos.chunk_pos()) {
+            return;
+        }
+        let (id, _) = world.get_block(block_pos);
+        let Some(def) = registry.block(id) else {
+            return;
+        };
+        if !def.redstone_powerable {
+            return;
+        }
+
+        self.enqueue_attachment_nodes_on_block(block_pos, world, registry);
+        for npos in crate::neighbors(block_pos) {
+            if !world.is_chunk_interactive(npos.chunk_pos()) {
+                continue;
+            }
+            let (nid, _) = world.get_block(npos);
+            if registry.block(nid).and_then(|d| d.circuit).is_some() {
+                self.queue.enqueue_evaluate(npos);
+            }
+        }
     }
 
     fn enqueue_attachment_nodes_on_block(
@@ -728,4 +751,3 @@ impl CircuitWorld {
         world.set_block(pos, id, new_state);
     }
 }
-

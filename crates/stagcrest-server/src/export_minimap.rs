@@ -116,7 +116,9 @@ fn export_png_from_session(
         let Some(layer) = layers.first() else {
             continue;
         };
-        blit_map_tile(&layer.rgb, mx, mz, &mut rgba, width, height, world_x0, world_z0);
+        blit_map_tile(
+            &layer.rgb, mx, mz, &mut rgba, width, height, world_x0, world_z0,
+        );
         bar.inc(1);
     }
     bar.finish_with_message("done");

@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use bevy::picking::hover::Hovered;
+use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use bevy::text::{EditableText, TextCursorStyle, TextLayout};
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
@@ -20,9 +20,7 @@ impl ClientContentSettings {
         let settings = match ContentSettings::load(&data_dir) {
             Ok(settings) => settings,
             Err(e) => {
-                tracing::warn!(
-                    "failed to load content settings, using defaults: {e}"
-                );
+                tracing::warn!("failed to load content settings, using defaults: {e}");
                 ContentSettings::empty(&data_dir)
             }
         };
@@ -39,9 +37,7 @@ pub fn content_data_dir() -> PathBuf {
 }
 
 /// Run blocking network/disk work off the main thread.
-pub fn spawn_blocking_task<T: Send + 'static>(
-    f: impl FnOnce() -> T + Send + 'static,
-) -> Task<T> {
+pub fn spawn_blocking_task<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Task<T> {
     AsyncComputeTaskPool::get().spawn(async move { f() })
 }
 
@@ -176,7 +172,11 @@ pub fn update_scrollbar_thumb(
     }
 }
 
-pub fn spawn_screen_title(parent: &mut ChildSpawnerCommands, title: &str, theme: &crate::ui::UiTheme) {
+pub fn spawn_screen_title(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    theme: &crate::ui::UiTheme,
+) {
     parent.spawn((
         Text::new(title),
         theme.text_font(FontSize::Px(32.0)),
@@ -184,7 +184,11 @@ pub fn spawn_screen_title(parent: &mut ChildSpawnerCommands, title: &str, theme:
     ));
 }
 
-pub fn spawn_screen_subtitle(parent: &mut ChildSpawnerCommands, text: &str, theme: &crate::ui::UiTheme) {
+pub fn spawn_screen_subtitle(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    theme: &crate::ui::UiTheme,
+) {
     parent.spawn((
         Text::new(text),
         theme.text_font(theme.body_size),
@@ -204,7 +208,11 @@ pub fn spawn_divider(parent: &mut ChildSpawnerCommands, theme: &crate::ui::UiThe
         .insert(BackgroundColor(theme.divider));
 }
 
-pub fn spawn_section_label(parent: &mut ChildSpawnerCommands, label: &str, theme: &crate::ui::UiTheme) {
+pub fn spawn_section_label(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    theme: &crate::ui::UiTheme,
+) {
     parent.spawn((
         Text::new(label),
         theme.text_font(theme.caption_size),
@@ -285,7 +293,10 @@ where
         .with_children(build);
 }
 
-pub fn spawn_row_actions(parent: &mut ChildSpawnerCommands, build: impl FnOnce(&mut ChildSpawnerCommands)) {
+pub fn spawn_row_actions(
+    parent: &mut ChildSpawnerCommands,
+    build: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Row,
@@ -488,10 +499,7 @@ pub fn spawn_text_input(
     ));
 }
 
-pub fn cleanup_screen<T: Component>(
-    mut commands: Commands,
-    query: Query<Entity, With<T>>,
-) {
+pub fn cleanup_screen<T: Component>(mut commands: Commands, query: Query<Entity, With<T>>) {
     for e in &query {
         commands.entity(e).despawn();
     }

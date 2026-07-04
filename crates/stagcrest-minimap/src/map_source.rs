@@ -24,9 +24,8 @@ pub fn load_strips_for_map_chunk(
 ) -> Result<[[StorageStripSource; 4]; 4], StorageError> {
     let base_cx = input.mx * WORLD_CHUNKS_PER_MAP;
     let base_cz = input.mz * WORLD_CHUNKS_PER_MAP;
-    let mut strips = std::array::from_fn(|_| {
-        std::array::from_fn(|_| StorageStripSource::new(0, 0))
-    });
+    let mut strips =
+        std::array::from_fn(|_| std::array::from_fn(|_| StorageStripSource::new(0, 0)));
 
     for dz in 0..WORLD_CHUNKS_PER_MAP {
         for dx in 0..WORLD_CHUNKS_PER_MAP {
@@ -34,7 +33,11 @@ pub fn load_strips_for_map_chunk(
             let cz = base_cz + dz;
             let mut strip = StorageStripSource::new(cx, cz);
             for &cy in input.y_chunks {
-                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                let pos = ChunkPos {
+                    x: cx,
+                    y: cy,
+                    z: cz,
+                };
                 if let Some(chunk) = input.overrides.get(&pos) {
                     strip.insert(cy, chunk.clone());
                     continue;

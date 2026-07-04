@@ -373,15 +373,7 @@ fn is_beach(
     let near_sea = surface_y >= (ref_level - 1) as f64 && surface_y <= (ref_level + 1) as f64;
     near_sea
         && has_adjacent_water(
-            buffer,
-            snapshot,
-            base_x,
-            base_y,
-            base_z,
-            lx,
-            lz,
-            ref_level,
-            water,
+            buffer, snapshot, base_x, base_y, base_z, lx, lz, ref_level, water,
         )
 }
 

@@ -71,10 +71,7 @@ pub struct VoxelMaterial {
 }
 
 impl VoxelMaterial {
-    pub fn with_atlas_handles(
-        mut base: Self,
-        handles: &[Handle<Image>],
-    ) -> Self {
+    pub fn with_atlas_handles(mut base: Self, handles: &[Handle<Image>]) -> Self {
         let fallback = handles.first().cloned().unwrap_or(base.atlas0.clone());
         let pick = |i: usize| handles.get(i).cloned().unwrap_or_else(|| fallback.clone());
         base.atlas0 = pick(0);

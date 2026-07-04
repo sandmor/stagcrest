@@ -11,7 +11,9 @@ use stagcrest_protocol::BlockId;
 use thiserror::Error;
 
 use crate::map_generation::make_map_resolve_context;
-use crate::map_tile_maintenance::{rebuild_all_map_tiles, with_rayon_pool, MapTileError, MapTileRebuildReport};
+use crate::map_tile_maintenance::{
+    rebuild_all_map_tiles, with_rayon_pool, MapTileError, MapTileRebuildReport,
+};
 use crate::session::WorldSession;
 
 /// How offline tools resolve the world generation seed when opening storage.
@@ -113,7 +115,10 @@ pub fn load_worldgen_context(mods_root: &Path) -> Result<WorldgenContext, Bootst
     Ok(ctx)
 }
 
-fn worldgen_context_from_host(host: &ModHost, mods_root: &Path) -> Result<WorldgenContext, BootstrapError> {
+fn worldgen_context_from_host(
+    host: &ModHost,
+    mods_root: &Path,
+) -> Result<WorldgenContext, BootstrapError> {
     let colormaps = ColormapSet::load(&FsAssetReader::new(mods_root), None);
     let air = host.air_block();
     let terrain_config = TerrainConfig::default();
@@ -147,8 +152,6 @@ pub fn rebuild_all_minimap_tiles(
     let storage = offline.session.storage.as_ref();
     let map_ctx = offline.worldgen.map_ctx();
     let y_chunks = offline.worldgen.map_y_chunks();
-    let report = with_rayon_pool(jobs, || {
-        rebuild_all_map_tiles(storage, &map_ctx, &y_chunks)
-    })?;
+    let report = with_rayon_pool(jobs, || rebuild_all_map_tiles(storage, &map_ctx, &y_chunks))?;
     Ok(report)
 }

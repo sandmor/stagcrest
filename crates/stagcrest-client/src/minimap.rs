@@ -197,10 +197,7 @@ impl MinimapState {
     }
 }
 
-pub(crate) fn cleanup_minimap(
-    commands: &mut Commands,
-    roots: &Query<Entity, With<MinimapRoot>>,
-) {
+pub(crate) fn cleanup_minimap(commands: &mut Commands, roots: &Query<Entity, With<MinimapRoot>>) {
     for entity in roots {
         commands.entity(entity).despawn();
     }
@@ -220,11 +217,7 @@ fn fill_unloaded_rgba(len: usize) -> Vec<u8> {
     rgba
 }
 
-pub fn spawn_minimap(
-    commands: &mut Commands,
-    theme: &UiTheme,
-    images: &mut Assets<Image>,
-) {
+pub fn spawn_minimap(commands: &mut Commands, theme: &UiTheme, images: &mut Assets<Image>) {
     let rgba = fill_unloaded_rgba((TEX_SIZE * TEX_SIZE * 4) as usize);
     let texture = images.add(Image::new(
         Extent3d {
@@ -432,12 +425,7 @@ fn minimap_apply(
 ) {
     if state.visible && !state.dirty.is_empty() {
         let region = std::mem::take(&mut state.dirty);
-        composite_tiles_into_framebuffer(
-            &mut state.framebuffer,
-            &tiles.0,
-            &region,
-            false,
-        );
+        composite_tiles_into_framebuffer(&mut state.framebuffer, &tiles.0, &region, false);
         state.needs_upload = true;
     }
 

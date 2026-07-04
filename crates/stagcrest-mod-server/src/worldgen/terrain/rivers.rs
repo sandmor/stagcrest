@@ -20,8 +20,8 @@ impl<'a> RiverSampler<'a> {
         let d = n.abs();
         let grad = river_gradient_magnitude(self.noise, sx, sz);
         // w = B * f * |∇n|: block width in sample space scaled by local contour slope.
-        let width = (self.config.river_width_blocks as f64 * self.config.river_frequency * grad)
-            .max(0.001);
+        let width =
+            (self.config.river_width_blocks as f64 * self.config.river_frequency * grad).max(0.001);
         let mut strength = (1.0 - d / width).clamp(0.0, 1.0) as f32;
 
         // Suppress rivers in steep/mountainous terrain (low erosion).
@@ -54,10 +54,9 @@ fn river_gradient_magnitude(noise: &NoiseBank, sx: f64, sz: f64) -> f64 {
 fn sample_space(noise: &NoiseBank, config: &TerrainConfig, wx: i32, wz: i32) -> (f64, f64) {
     let x = wx as f64;
     let z = wz as f64;
-    let warp_x = noise.get(TerrainLayer::RiverB).sample2d(
-        x * config.river_b_frequency,
-        z * config.river_b_frequency,
-    );
+    let warp_x = noise
+        .get(TerrainLayer::RiverB)
+        .sample2d(x * config.river_b_frequency, z * config.river_b_frequency);
     let warp_z = noise.get(TerrainLayer::RiverB).sample2d(
         (x + 1000.0) * config.river_b_frequency,
         (z + 1000.0) * config.river_b_frequency,
@@ -80,12 +79,10 @@ mod tests {
     use std::collections::VecDeque;
 
     fn erosion_at(noise: &NoiseBank, config: &TerrainConfig, wx: i32, wz: i32) -> f32 {
-        noise
-            .get(TerrainLayer::Erosion)
-            .sample2d(
-                wx as f64 * config.erosion_frequency,
-                wz as f64 * config.erosion_frequency,
-            ) as f32
+        noise.get(TerrainLayer::Erosion).sample2d(
+            wx as f64 * config.erosion_frequency,
+            wz as f64 * config.erosion_frequency,
+        ) as f32
     }
 
     fn full_river_span_axis(
@@ -160,7 +157,10 @@ mod tests {
         }
 
         let total_rivers: usize = river_map.iter().filter(|&&r| r).count();
-        assert!(total_rivers > 100, "expected meaningful river coverage, got {total_rivers}");
+        assert!(
+            total_rivers > 100,
+            "expected meaningful river coverage, got {total_rivers}"
+        );
 
         let mut largest = 0usize;
         let mut visited = vec![false; size * size];

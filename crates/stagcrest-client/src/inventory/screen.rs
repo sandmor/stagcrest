@@ -4,8 +4,8 @@ use super::state::{filtered_placeable, InventoryUiState, HOTBAR_SLOTS, MAIN_SLOT
 use crate::block_icons::BlockIconCache;
 use crate::game::ModContext;
 use crate::ui::UiTheme;
-use bevy::prelude::*;
 use bevy::picking::hover::Hovered;
+use bevy::prelude::*;
 use bevy::text::{EditableText, TextCursorStyle, TextEditChange, TextLayout};
 use bevy::ui::widget::NodeImageMode;
 use bevy::ui::{FocusPolicy, RelativeCursorPosition};
@@ -386,7 +386,15 @@ pub fn on_search_text_changed(
         return;
     };
 
-    rebuild_catalog(&search, &ctx, &icons, &theme, &mut commands, &grids, &children_q);
+    rebuild_catalog(
+        &search,
+        &ctx,
+        &icons,
+        &theme,
+        &mut commands,
+        &grids,
+        &children_q,
+    );
 }
 
 fn rebuild_catalog(

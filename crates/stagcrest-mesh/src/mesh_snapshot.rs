@@ -174,4 +174,3 @@ pub(crate) fn mesh_from_snapshot(snapshot: &MeshSnapshot) -> crate::ChunkMesh {
         neighbor_at,
     )
 }
-

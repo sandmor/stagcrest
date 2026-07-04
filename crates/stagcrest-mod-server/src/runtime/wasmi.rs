@@ -184,7 +184,12 @@ fn link_host_functions(linker: &mut Linker<HostState>) -> Result<(), Error> {
     linker.func_wrap(
         "stagcrest_host",
         "register_texture_from_pack",
-        |caller: Caller<'_, HostState>, id_ptr: i32, id_len: i32, mc_ptr: i32, mc_len: i32| -> Result<i32, Error> {
+        |caller: Caller<'_, HostState>,
+         id_ptr: i32,
+         id_len: i32,
+         mc_ptr: i32,
+         mc_len: i32|
+         -> Result<i32, Error> {
             let memory = guest_memory(&caller).ok_or_else(|| Error::new("missing guest memory"))?;
             let namespaced_id = read_utf8(&memory, &caller, id_ptr, id_len)
                 .ok_or_else(|| Error::new("invalid namespaced_id"))?;

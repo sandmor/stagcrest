@@ -166,24 +166,36 @@ impl ModelRegistry {
             let m = &self.redstone_torch[(i % TORCH_ATTACHMENT_COUNT).min(4) as usize];
             (ModelId::RedstoneTorch, i as ModelVariant, m)
         });
-        let lever = self.lever.iter().enumerate().map(|(i, m)| {
-            (ModelId::Lever, i as ModelVariant, m)
-        });
-        let button = self.button.iter().enumerate().map(|(i, m)| {
-            (ModelId::Button, i as ModelVariant, m)
-        });
-        let repeater = self.repeater.iter().enumerate().map(|(i, m)| {
-            (ModelId::Repeater, i as ModelVariant, m)
-        });
-        let observer = self.observer.iter().enumerate().map(|(i, m)| {
-            (ModelId::Observer, i as ModelVariant, m)
-        });
-        let piston = self.piston.iter().enumerate().map(|(i, m)| {
-            (ModelId::Piston, i as ModelVariant, m)
-        });
-        let piston_head = self.piston_head.iter().enumerate().map(|(i, m)| {
-            (ModelId::PistonHead, i as ModelVariant, m)
-        });
+        let lever = self
+            .lever
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (ModelId::Lever, i as ModelVariant, m));
+        let button = self
+            .button
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (ModelId::Button, i as ModelVariant, m));
+        let repeater = self
+            .repeater
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (ModelId::Repeater, i as ModelVariant, m));
+        let observer = self
+            .observer
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (ModelId::Observer, i as ModelVariant, m));
+        let piston = self
+            .piston
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (ModelId::Piston, i as ModelVariant, m));
+        let piston_head = self
+            .piston_head
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (ModelId::PistonHead, i as ModelVariant, m));
         torch
             .chain(lever)
             .chain(button)

@@ -3,11 +3,11 @@ mod column;
 mod column_cache;
 mod column_slice;
 mod framebuffer;
-mod map_revision;
 mod map_build;
 mod map_encode;
 mod map_format;
 mod map_raster;
+mod map_revision;
 mod map_source;
 mod map_tile;
 mod map_tile_rgb;
@@ -30,14 +30,14 @@ pub use map_build::{
 };
 pub use map_encode::{decode_layer_rgb, encode_layer_rgb, MapEncodeError};
 pub use map_format::{MapChunkBlob, MapFormatError, MapLayer, MapLayerMeta};
+pub use map_raster::rasterize_map_chunk;
 pub use map_revision::{
     compute_layer_source_revision, map_tile_has_live_edits, ChunkRevisionSource,
 };
-pub use map_raster::rasterize_map_chunk;
 pub use map_source::{load_strips_for_map_chunk, MapChunkLoadInput};
 pub use map_tile::{
-    map_chunk_block_bounds, map_chunk_world_chunk_base, world_chunk_to_map_chunk,
-    MAP_CHUNK_PIXELS, MAP_CHUNK_RGB_BYTES, MAP_CHUNK_SIZE, WORLD_CHUNKS_PER_MAP,
+    map_chunk_block_bounds, map_chunk_world_chunk_base, world_chunk_to_map_chunk, MAP_CHUNK_PIXELS,
+    MAP_CHUNK_RGB_BYTES, MAP_CHUNK_SIZE, WORLD_CHUNKS_PER_MAP,
 };
 pub use map_tile_rgb::{build_tile_mips, mip_level_from_bpp, MapTileRgb};
 pub use map_view::{

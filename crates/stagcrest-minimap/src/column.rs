@@ -86,6 +86,7 @@ mod tests {
                 render_layer: ModelRenderLayer::Opaque,
                 push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [0, 0, 0],
+                redstone_powerable: false,
             },
             BlockDef {
                 id: stone,
@@ -103,6 +104,7 @@ mod tests {
                 render_layer: ModelRenderLayer::Opaque,
                 push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [120, 120, 120],
+                redstone_powerable: true,
             },
             BlockDef {
                 id: grass_plant,
@@ -120,6 +122,7 @@ mod tests {
                 render_layer: ModelRenderLayer::Cutout,
                 push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [95, 159, 53],
+                redstone_powerable: false,
             },
         ]
     }

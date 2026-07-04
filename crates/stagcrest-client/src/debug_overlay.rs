@@ -201,12 +201,7 @@ fn format_debug_text(
     ];
 
     lines.extend(format_environment_section(env, config));
-    lines.extend(format_biome_section(
-        mod_ctx,
-        biome_cache,
-        block_pos,
-        chunk,
-    ));
+    lines.extend(format_biome_section(mod_ctx, biome_cache, block_pos, chunk));
     lines.push(String::new());
     lines.extend(format_net_section(net));
     lines.push(String::new());

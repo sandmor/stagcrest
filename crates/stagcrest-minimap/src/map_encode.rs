@@ -28,7 +28,9 @@ pub fn encode_layer_rgb(rgb: &[u8; crate::map_tile::MAP_CHUNK_RGB_BYTES]) -> Vec
 }
 
 /// Decompress a layer payload back to 12288 RGB bytes.
-pub fn decode_layer_rgb(compressed: &[u8]) -> Result<[u8; crate::map_tile::MAP_CHUNK_RGB_BYTES], MapEncodeError> {
+pub fn decode_layer_rgb(
+    compressed: &[u8],
+) -> Result<[u8; crate::map_tile::MAP_CHUNK_RGB_BYTES], MapEncodeError> {
     if compressed.is_empty() {
         return Err(MapEncodeError::Empty);
     }
@@ -73,7 +75,9 @@ fn build_pre_zstd_payload(rgb: &[u8; crate::map_tile::MAP_CHUNK_RGB_BYTES]) -> V
     out
 }
 
-fn decode_pre_zstd_payload(pre: &[u8]) -> Result<[u8; crate::map_tile::MAP_CHUNK_RGB_BYTES], MapEncodeError> {
+fn decode_pre_zstd_payload(
+    pre: &[u8],
+) -> Result<[u8; crate::map_tile::MAP_CHUNK_RGB_BYTES], MapEncodeError> {
     let mode = *pre.first().ok_or(MapEncodeError::Truncated)?;
     match mode {
         MODE_RAW => {
@@ -150,10 +154,7 @@ mod tests {
 
     #[test]
     fn corrupt_input_errors() {
-        assert!(matches!(
-            decode_layer_rgb(&[]),
-            Err(MapEncodeError::Empty)
-        ));
+        assert!(matches!(decode_layer_rgb(&[]), Err(MapEncodeError::Empty)));
         let bad = zstd::bulk::compress(&[99u8], 3).unwrap();
         assert!(decode_layer_rgb(&bad).is_err());
     }

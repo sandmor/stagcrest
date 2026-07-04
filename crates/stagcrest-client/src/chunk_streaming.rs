@@ -93,7 +93,9 @@ mod tests {
         let mut queue = CommandQueue::default();
         let mut commands = Commands::new(&mut queue, &bevy_world);
         let pos = ChunkPos { x: 0, y: 0, z: 0 };
-        cache.0.commit_mesh(pos, stagcrest_mesh::ChunkMesh::default());
+        cache
+            .0
+            .commit_mesh(pos, stagcrest_mesh::ChunkMesh::default());
         scheduler.request(pos, RemeshUrgency::Visible, 0);
         drop_chunk_assets(pos, &mut scheduler, &mut cache, &mut power, &mut commands);
         queue.apply(&mut bevy_world);

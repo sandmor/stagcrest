@@ -1,4 +1,6 @@
-use crate::client_content::{cleanup_screen, handle_button_hover, spawn_primary_button, ClientContentSettings};
+use crate::client_content::{
+    cleanup_screen, handle_button_hover, spawn_primary_button, ClientContentSettings,
+};
 use crate::game::AppState;
 use crate::ui::UiTheme;
 use crate::LaunchConfig;
@@ -34,8 +36,7 @@ fn on_enter_main_menu(
     theme: Res<UiTheme>,
 ) {
     let settings = ClientContentSettings::reload();
-    let needs_setup =
-        !settings.0.has_enabled_pack() && !settings.0.resource_pack_setup_dismissed();
+    let needs_setup = !settings.0.has_enabled_pack() && !settings.0.resource_pack_setup_dismissed();
     commands.insert_resource(settings);
 
     if needs_setup {

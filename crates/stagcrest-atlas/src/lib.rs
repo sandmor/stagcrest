@@ -86,11 +86,8 @@ mod tests {
         let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::from_pixel(w, h, Rgba([r, r, r, 255]));
         let mut png = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut png),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         png
     }
 
@@ -112,13 +109,7 @@ mod tests {
     #[test]
     fn decodes_png_to_texture_def() {
         let png = solid_png(64, 64, 40);
-        let tex = texture_def_from_png(
-            TextureId(1),
-            "stagcrest:stone".into(),
-            &png,
-            None,
-        )
-        .unwrap();
+        let tex = texture_def_from_png(TextureId(1), "stagcrest:stone".into(), &png, None).unwrap();
         assert_eq!(tex.width, 64);
         assert_eq!(tex.height, 64);
         assert_eq!(tex.rgba.len(), 64 * 64 * 4);

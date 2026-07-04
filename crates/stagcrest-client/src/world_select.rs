@@ -54,7 +54,11 @@ impl Plugin for WorldSelectPlugin {
             )
             .add_systems(
                 OnExit(AppState::WorldSelect),
-                (cleanup_screen::<WorldSelectRoot>, cleanup_screen::<DeleteConfirmOverlay>, cleanup_form_resources),
+                (
+                    cleanup_screen::<WorldSelectRoot>,
+                    cleanup_screen::<DeleteConfirmOverlay>,
+                    cleanup_form_resources,
+                ),
             )
             .add_systems(
                 Update,
@@ -112,11 +116,7 @@ fn scan_worlds(list: &mut Vec<WorldEntry>) {
             if !db_path.exists() {
                 continue;
             }
-            let name = entry
-                .file_name()
-                .to_str()
-                .unwrap_or("?")
-                .to_string();
+            let name = entry.file_name().to_str().unwrap_or("?").to_string();
             match RedbChunkStorage::open(&db_path) {
                 Ok(storage) => match WorldMeta::load(&storage) {
                     Ok(meta) => list.push(WorldEntry {
@@ -295,10 +295,7 @@ fn spawn_world_entry_inline(
         });
 }
 
-fn spawn_create_world_ui(
-    mut commands: Commands,
-    theme: &UiTheme,
-) {
+fn spawn_create_world_ui(mut commands: Commands, theme: &UiTheme) {
     commands
         .spawn((
             WorldSelectRoot,
@@ -445,9 +442,10 @@ fn world_select_button_system(
         match *interaction {
             Interaction::Pressed => match action {
                 WorldSelectAction::Play => {
-                    let name = selected_entry.0.as_deref().or_else(|| {
-                        world_list.0.first().map(|e| e.name.as_str())
-                    });
+                    let name = selected_entry
+                        .0
+                        .as_deref()
+                        .or_else(|| world_list.0.first().map(|e| e.name.as_str()));
                     if let Some(name) = name {
                         if let Some(entry) = world_list.0.iter().find(|e| e.name == name) {
                             selected_world.world_name = entry.name.clone();

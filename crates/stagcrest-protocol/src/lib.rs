@@ -8,8 +8,8 @@ pub use colormap::sample_colormap_rgb;
 pub use map_colors::default_map_color;
 
 pub use manifest::{
-    ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot, TextureAssetTransfer,
-    TextureAssetsChunk, TextureWireDef,
+    ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot,
+    TextureAssetTransfer, TextureAssetsChunk, TextureWireDef,
 };
 
 use serde::{Deserialize, Serialize};
@@ -709,6 +709,18 @@ pub struct BlockDef {
     #[serde(default)]
     pub push_reaction: PushReaction,
     pub map_color: [u8; 3],
+    /// Whether this block behaves like a redstone opaque/full block: it can
+    /// receive strong or weak block power and pass strong power to dust.
+    #[serde(default)]
+    pub redstone_powerable: bool,
+}
+
+/// Default Bedrock-style redstone conductor flag when a mod omits an explicit override.
+///
+/// Full opaque solids conduct; transparent and fluid blocks do not. Mods can still
+/// mark exceptions (e.g. slime/honey as conductors despite being translucent).
+pub fn default_redstone_powerable(solid: bool, opaque: bool, fluid: bool, transparent: bool) -> bool {
+    solid && opaque && !fluid && !transparent
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

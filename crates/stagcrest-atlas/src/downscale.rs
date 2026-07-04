@@ -30,11 +30,7 @@ fn downscale_uniform(tex: &TextureDef, max_dim: u32) -> TextureDef {
     resize_nearest(tex, nw, nh, tex.animation.clone())
 }
 
-fn downscale_vertical_strip(
-    tex: &TextureDef,
-    anim: &TextureAnimation,
-    max_dim: u32,
-) -> TextureDef {
+fn downscale_vertical_strip(tex: &TextureDef, anim: &TextureAnimation, max_dim: u32) -> TextureDef {
     let fw = anim.frame_width.max(1);
     let fh = anim.frame_height.max(1);
     let frame_count = anim.frame_count.max(1);

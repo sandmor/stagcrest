@@ -1,4 +1,6 @@
-use crate::client_content::{cleanup_screen, handle_button_hover, spawn_divider, spawn_screen_button, spawn_text_input};
+use crate::client_content::{
+    cleanup_screen, handle_button_hover, spawn_divider, spawn_screen_button, spawn_text_input,
+};
 use crate::game::AppState;
 use crate::net_client::GameNetClient;
 use crate::ui::UiTheme;
@@ -65,7 +67,12 @@ pub struct ConnectScreenPlugin;
 impl Plugin for ConnectScreenPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(AppState::Connect), spawn_connect_ui)
-            .add_systems(OnExit(AppState::Connect), (cleanup_screen::<ConnectRoot>, |mut commands: Commands| { commands.remove_resource::<ConnectionHistory>(); }))
+            .add_systems(
+                OnExit(AppState::Connect),
+                (cleanup_screen::<ConnectRoot>, |mut commands: Commands| {
+                    commands.remove_resource::<ConnectionHistory>();
+                }),
+            )
             .add_systems(
                 Update,
                 connect_button_system.run_if(in_state(AppState::Connect)),
@@ -271,5 +278,3 @@ fn connect_button_system(
         }
     }
 }
-
-

@@ -134,12 +134,7 @@ impl ClientMapState {
         out
     }
 
-    pub fn fan_out_regen(
-        &self,
-        mx: i32,
-        mz: i32,
-        blob: Vec<u8>,
-    ) -> Option<GameMessage> {
+    pub fn fan_out_regen(&self, mx: i32, mz: i32, blob: Vec<u8>) -> Option<GameMessage> {
         if !self.is_subscribed(mx, mz) {
             return None;
         }

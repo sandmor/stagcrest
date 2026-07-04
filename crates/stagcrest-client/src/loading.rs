@@ -1,18 +1,17 @@
 use crate::client_content::{cleanup_screen, spawn_screen_button};
 use crate::game::{AppState, GameConfig, ModContext};
-use crate::world_select::SelectedWorld;
+use crate::net_client::{connect_tcp, GameNetClient};
 use crate::ui::UiTheme;
+use crate::world_replica::WorldReplica;
+use crate::world_select::SelectedWorld;
 use bevy::prelude::*;
 use bevy::tasks::{block_on, IoTaskPool, Task};
 use futures_lite::future;
 use stagcrest_atlas::AtlasLimits;
 use stagcrest_mod_client::content::ContentRuntime;
-use crate::net_client::{connect_tcp, GameNetClient};
-use crate::world_replica::WorldReplica;
 use stagcrest_protocol::manifest::{ContentManifest, TextureAssetTransfer};
 use stagcrest_protocol::BlockId;
 use stagcrest_render::{next_atlas_revision, BlockAtlasResource, MeshCacheResource};
-
 
 pub struct LoadingPlugin;
 

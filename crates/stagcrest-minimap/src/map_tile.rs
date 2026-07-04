@@ -17,12 +17,7 @@ pub fn world_chunk_to_map_chunk(cx: i32, cz: i32) -> (i32, i32) {
 pub fn map_chunk_block_bounds(mx: i32, mz: i32) -> (i32, i32, i32, i32) {
     let x0 = mx * MAP_CHUNK_SIZE;
     let z0 = mz * MAP_CHUNK_SIZE;
-    (
-        x0,
-        z0,
-        x0 + MAP_CHUNK_SIZE - 1,
-        z0 + MAP_CHUNK_SIZE - 1,
-    )
+    (x0, z0, x0 + MAP_CHUNK_SIZE - 1, z0 + MAP_CHUNK_SIZE - 1)
 }
 
 /// Base world chunk coordinates for the 4×4 strip grid inside map chunk `(mx, mz)`.

@@ -60,6 +60,7 @@ fn reg_faced_block(
         circuit: None,
         push_reaction: None,
         map_color: default_map_color(&full_id),
+        redstone_powerable: None,
     });
 }
 
@@ -118,6 +119,7 @@ fn reg_log(reg: &mut impl ContentRegistrar, wood: &str) {
         circuit: None,
         push_reaction: None,
         map_color: default_map_color(&id),
+        redstone_powerable: None,
     });
 }
 

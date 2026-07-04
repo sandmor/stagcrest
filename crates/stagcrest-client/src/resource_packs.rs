@@ -2,8 +2,8 @@ use crate::client_content::{
     cleanup_screen, content_data_dir, handle_button_hover, spawn_blocking_task,
     spawn_compact_button, spawn_confirm_delete_overlay, spawn_delete_icon_button, spawn_divider,
     spawn_list_row, spawn_row_actions, spawn_screen_button, spawn_screen_root,
-    spawn_screen_subtitle, spawn_screen_title, spawn_section_label,
-    with_screen_panel, with_scroll_area, ClientContentSettings, DeleteConfirmOverlay,
+    spawn_screen_subtitle, spawn_screen_title, spawn_section_label, with_screen_panel,
+    with_scroll_area, ClientContentSettings, DeleteConfirmOverlay,
 };
 use crate::game::AppState;
 use crate::ui::UiTheme;
@@ -12,7 +12,7 @@ use bevy::tasks::{block_on, Task};
 use bevy::text::{EditableText, TextCursorStyle, TextLayout};
 use futures_lite::future;
 use stagcrest_content::{ContentInstaller, MoveDirection};
-use stagcrest_modrinth::{ModrinthClient, RECOMMENDED, SearchHit};
+use stagcrest_modrinth::{ModrinthClient, SearchHit, RECOMMENDED};
 
 pub struct ResourcePacksPlugin;
 
@@ -20,7 +20,13 @@ impl Plugin for ResourcePacksPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PackManagerState>()
             .add_systems(OnEnter(AppState::ResourcePacks), spawn_manager_ui)
-            .add_systems(OnExit(AppState::ResourcePacks), (cleanup_screen::<ManagerRoot>, cleanup_screen::<DeleteConfirmOverlay>))
+            .add_systems(
+                OnExit(AppState::ResourcePacks),
+                (
+                    cleanup_screen::<ManagerRoot>,
+                    cleanup_screen::<DeleteConfirmOverlay>,
+                ),
+            )
             .add_systems(
                 Update,
                 (
@@ -64,7 +70,11 @@ enum ManagerAction {
     CancelDelete,
 }
 
-fn spawn_manager_ui(mut commands: Commands, theme: Res<UiTheme>, mut state: ResMut<PackManagerState>) {
+fn spawn_manager_ui(
+    mut commands: Commands,
+    theme: Res<UiTheme>,
+    mut state: ResMut<PackManagerState>,
+) {
     *state = PackManagerState::default();
     let settings = ClientContentSettings::reload();
     build_manager_ui(&mut commands, &theme, &settings, &state);
@@ -78,49 +88,80 @@ fn build_manager_ui(
     state: &PackManagerState,
 ) {
     let root = spawn_screen_root(commands, theme);
-    commands.entity(root).insert(ManagerRoot).with_children(|root| {
-        with_screen_panel(root, theme, 480.0, 560.0, |panel| {
-            spawn_screen_title(panel, "Resource Packs", theme);
-            spawn_screen_subtitle(
-                panel,
-                "Higher entries override textures below. Re-enter a world after changes.",
-                theme,
-            );
-            spawn_divider(panel, theme);
+    commands
+        .entity(root)
+        .insert(ManagerRoot)
+        .with_children(|root| {
+            with_screen_panel(root, theme, 480.0, 560.0, |panel| {
+                spawn_screen_title(panel, "Resource Packs", theme);
+                spawn_screen_subtitle(
+                    panel,
+                    "Higher entries override textures below. Re-enter a world after changes.",
+                    theme,
+                );
+                spawn_divider(panel, theme);
 
-            if state.busy {
-                panel.spawn((
-                    Text::new(state.status.as_str()),
-                    theme.text_font(theme.body_size),
-                    TextColor(theme.accent),
-                ));
-            } else if !state.status.is_empty() {
-                panel.spawn((
-                    Text::new(state.status.as_str()),
-                    theme.text_font(theme.caption_size),
-                    TextColor(if state.status.contains("failed") {
-                        theme.error_text
-                    } else {
-                        theme.text_muted
-                    }),
-                ));
-            }
+                if state.busy {
+                    panel.spawn((
+                        Text::new(state.status.as_str()),
+                        theme.text_font(theme.body_size),
+                        TextColor(theme.accent),
+                    ));
+                } else if !state.status.is_empty() {
+                    panel.spawn((
+                        Text::new(state.status.as_str()),
+                        theme.text_font(theme.caption_size),
+                        TextColor(if state.status.contains("failed") {
+                            theme.error_text
+                        } else {
+                            theme.text_muted
+                        }),
+                    ));
+                }
 
-            with_scroll_area(panel, theme, |body| {
-                let installed_ids: std::collections::HashSet<_> = settings
-                    .0
-                    .content()
-                    .resource_packs
-                    .iter()
-                    .map(|p| p.id.as_str())
-                    .collect();
-                let missing_rec: Vec<_> = RECOMMENDED
-                    .iter()
-                    .filter(|p| !installed_ids.contains(p.slug))
-                    .collect();
+                with_scroll_area(panel, theme, |body| {
+                    let installed_ids: std::collections::HashSet<_> = settings
+                        .0
+                        .content()
+                        .resource_packs
+                        .iter()
+                        .map(|p| p.id.as_str())
+                        .collect();
+                    let missing_rec: Vec<_> = RECOMMENDED
+                        .iter()
+                        .filter(|p| !installed_ids.contains(p.slug))
+                        .collect();
 
-                if !missing_rec.is_empty() && !state.busy {
-                    spawn_section_label(body, "Recommended", theme);
+                    if !missing_rec.is_empty() && !state.busy {
+                        spawn_section_label(body, "Recommended", theme);
+                        body.spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
+                            width: Val::Percent(100.0),
+                            ..default()
+                        })
+                        .with_children(|list| {
+                            for pack in missing_rec {
+                                spawn_list_row(list, theme, |row| {
+                                    row.spawn((
+                                        Text::new(pack.title),
+                                        theme.text_font(theme.body_size),
+                                        TextColor(theme.text_primary),
+                                    ));
+                                    spawn_compact_button(
+                                        row,
+                                        "Install",
+                                        ManagerAction::InstallSlug(pack.slug.to_string()),
+                                        theme,
+                                        72.0,
+                                    );
+                                });
+                            }
+                        });
+                        spawn_divider(body, theme);
+                    }
+
+                    spawn_section_label(body, "Installed", theme);
                     body.spawn(Node {
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(6.0),
@@ -128,191 +169,164 @@ fn build_manager_ui(
                         ..default()
                     })
                     .with_children(|list| {
-                        for pack in missing_rec {
+                        let order = &settings.0.content().resource_pack_order;
+                        if order.is_empty() {
+                            list.spawn((
+                                Text::new("No packs installed yet."),
+                                theme.text_font(theme.body_size),
+                                TextColor(theme.text_hint),
+                            ));
+                        }
+                        for id in order {
+                            let Some(entry) = settings.0.pack_by_id(id) else {
+                                continue;
+                            };
+                            let source_label = if entry.source.is_modrinth() {
+                                "Modrinth"
+                            } else {
+                                "Local"
+                            };
+                            let valid = settings.0.is_pack_valid(entry);
                             spawn_list_row(list, theme, |row| {
-                                row.spawn((
-                                    Text::new(pack.title),
-                                    theme.text_font(theme.body_size),
-                                    TextColor(theme.text_primary),
-                                ));
-                                spawn_compact_button(
-                                    row,
-                                    "Install",
-                                    ManagerAction::InstallSlug(pack.slug.to_string()),
-                                    theme,
-                                    72.0,
-                                );
+                                row.spawn(Node {
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: Val::Px(2.0),
+                                    flex_grow: 1.0,
+                                    ..default()
+                                })
+                                .with_children(|info| {
+                                    info.spawn((
+                                        Text::new(&entry.id),
+                                        theme.text_font(theme.body_size),
+                                        TextColor(theme.text_primary),
+                                    ));
+                                    let detail = if valid {
+                                        format!("{source_label} · {}", entry.path)
+                                    } else {
+                                        format!(
+                                            "{source_label} · {} · invalid — missing pack.mcmeta",
+                                            entry.path
+                                        )
+                                    };
+                                    info.spawn((
+                                        Text::new(detail),
+                                        theme.text_font(FontSize::Px(13.0)),
+                                        TextColor(theme.text_muted),
+                                    ));
+                                });
+                                if !state.busy {
+                                    spawn_row_actions(row, |actions| {
+                                        let enabled_label =
+                                            if entry.enabled { "On" } else { "Off" };
+                                        spawn_compact_button(
+                                            actions,
+                                            enabled_label,
+                                            ManagerAction::ToggleEnabled(id.clone()),
+                                            theme,
+                                            40.0,
+                                        );
+                                        spawn_compact_button(
+                                            actions,
+                                            "Up",
+                                            ManagerAction::MoveUp(id.clone()),
+                                            theme,
+                                            36.0,
+                                        );
+                                        spawn_compact_button(
+                                            actions,
+                                            "Dn",
+                                            ManagerAction::MoveDown(id.clone()),
+                                            theme,
+                                            36.0,
+                                        );
+                                        spawn_delete_icon_button(
+                                            actions,
+                                            ManagerAction::Delete(id.clone()),
+                                            theme,
+                                        );
+                                    });
+                                }
                             });
                         }
                     });
-                    spawn_divider(body, theme);
-                }
 
-                spawn_section_label(body, "Installed", theme);
-                body.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    width: Val::Percent(100.0),
-                    ..default()
-                })
-                .with_children(|list| {
-                    let order = &settings.0.content().resource_pack_order;
-                    if order.is_empty() {
-                        list.spawn((
-                            Text::new("No packs installed yet."),
-                            theme.text_font(theme.body_size),
-                            TextColor(theme.text_hint),
-                        ));
-                    }
-                    for id in order {
-                        let Some(entry) = settings.0.pack_by_id(id) else {
-                            continue;
-                        };
-                        let source_label = if entry.source.is_modrinth() {
-                            "Modrinth"
-                        } else {
-                            "Local"
-                        };
-                        let valid = settings.0.is_pack_valid(entry);
-                        spawn_list_row(list, theme, |row| {
-                            row.spawn(Node {
+                    if !state.busy {
+                        spawn_divider(body, theme);
+                        spawn_section_label(body, "Search Modrinth", theme);
+                        body.spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(8.0),
+                            align_items: AlignItems::Center,
+                            width: Val::Percent(100.0),
+                            ..default()
+                        })
+                        .with_children(|search_row| {
+                            let mut search_field = EditableText::new(state.search_query.as_str());
+                            search_field.visible_width = Some(28.0);
+                            search_field.allow_newlines = false;
+                            search_row.spawn((
+                                SearchField,
+                                search_field,
+                                TextLayout::no_wrap(),
+                                theme.text_font(theme.body_size),
+                                TextCursorStyle::default(),
+                                Node {
+                                    padding: UiRect::all(Val::Px(8.0)),
+                                    flex_grow: 1.0,
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(theme.search_bg),
+                                BorderColor::all(theme.slot_border),
+                            ));
+                            spawn_screen_button(search_row, "Search", ManagerAction::Search, theme);
+                        });
+
+                        if !state.search_results.is_empty() {
+                            body.spawn(Node {
                                 flex_direction: FlexDirection::Column,
-                                row_gap: Val::Px(2.0),
-                                flex_grow: 1.0,
+                                row_gap: Val::Px(6.0),
+                                width: Val::Percent(100.0),
+                                margin: UiRect::top(Val::Px(8.0)),
                                 ..default()
                             })
-                            .with_children(|info| {
-                                info.spawn((
-                                    Text::new(&entry.id),
-                                    theme.text_font(theme.body_size),
-                                    TextColor(theme.text_primary),
-                                ));
-                                let detail = if valid {
-                                    format!("{source_label} · {}", entry.path)
-                                } else {
-                                    format!(
-                                        "{source_label} · {} · invalid — missing pack.mcmeta",
-                                        entry.path
-                                    )
-                                };
-                                info.spawn((
-                                    Text::new(detail),
-                                    theme.text_font(FontSize::Px(13.0)),
-                                    TextColor(theme.text_muted),
-                                ));
+                            .with_children(|results| {
+                                for hit in &state.search_results {
+                                    spawn_list_row(results, theme, |row| {
+                                        row.spawn((
+                                            Text::new(hit.title.as_str()),
+                                            theme.text_font(theme.body_size),
+                                            TextColor(theme.text_primary),
+                                        ));
+                                        spawn_compact_button(
+                                            row,
+                                            "Install",
+                                            ManagerAction::InstallSlug(hit.slug.clone()),
+                                            theme,
+                                            72.0,
+                                        );
+                                    });
+                                }
                             });
-                            if !state.busy {
-                                spawn_row_actions(row, |actions| {
-                                    let enabled_label = if entry.enabled { "On" } else { "Off" };
-                                    spawn_compact_button(
-                                        actions,
-                                        enabled_label,
-                                        ManagerAction::ToggleEnabled(id.clone()),
-                                        theme,
-                                        40.0,
-                                    );
-                                    spawn_compact_button(
-                                        actions,
-                                        "Up",
-                                        ManagerAction::MoveUp(id.clone()),
-                                        theme,
-                                        36.0,
-                                    );
-                                    spawn_compact_button(
-                                        actions,
-                                        "Dn",
-                                        ManagerAction::MoveDown(id.clone()),
-                                        theme,
-                                        36.0,
-                                    );
-                                    spawn_delete_icon_button(
-                                        actions,
-                                        ManagerAction::Delete(id.clone()),
-                                        theme,
-                                    );
-                                });
-                            }
-                        });
+                        }
                     }
                 });
 
                 if !state.busy {
-                    spawn_divider(body, theme);
-                    spawn_section_label(body, "Search Modrinth", theme);
-                    body.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(8.0),
-                        align_items: AlignItems::Center,
-                        width: Val::Percent(100.0),
-                        ..default()
-                    })
-                    .with_children(|search_row| {
-                        let mut search_field = EditableText::new(state.search_query.as_str());
-                        search_field.visible_width = Some(28.0);
-                        search_field.allow_newlines = false;
-                        search_row.spawn((
-                            SearchField,
-                            search_field,
-                            TextLayout::no_wrap(),
-                            theme.text_font(theme.body_size),
-                            TextCursorStyle::default(),
-                            Node {
-                                padding: UiRect::all(Val::Px(8.0)),
-                                flex_grow: 1.0,
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(theme.search_bg),
-                            BorderColor::all(theme.slot_border),
-                        ));
-                        spawn_screen_button(search_row, "Search", ManagerAction::Search, theme);
-                    });
-
-                    if !state.search_results.is_empty() {
-                        body.spawn(Node {
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(6.0),
+                    spawn_divider(panel, theme);
+                    panel
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::Center,
                             width: Val::Percent(100.0),
-                            margin: UiRect::top(Val::Px(8.0)),
                             ..default()
                         })
-                        .with_children(|results| {
-                            for hit in &state.search_results {
-                                spawn_list_row(results, theme, |row| {
-                                    row.spawn((
-                                        Text::new(hit.title.as_str()),
-                                        theme.text_font(theme.body_size),
-                                        TextColor(theme.text_primary),
-                                    ));
-                                    spawn_compact_button(
-                                        row,
-                                        "Install",
-                                        ManagerAction::InstallSlug(hit.slug.clone()),
-                                        theme,
-                                        72.0,
-                                    );
-                                });
-                            }
+                        .with_children(|row| {
+                            spawn_screen_button(row, "Back", ManagerAction::Back, theme);
                         });
-                    }
                 }
             });
-
-            if !state.busy {
-                spawn_divider(panel, theme);
-                panel
-                    .spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::Center,
-                        width: Val::Percent(100.0),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        spawn_screen_button(row, "Back", ManagerAction::Back, theme);
-                    });
-            }
         });
-    });
 }
 
 fn manager_button_system(
@@ -493,5 +507,3 @@ fn refresh_manager_ui(
     }
     build_manager_ui(&mut commands, &theme, &settings, &state);
 }
-
-

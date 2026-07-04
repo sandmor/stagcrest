@@ -184,8 +184,7 @@ impl MeshScheduler {
                 continue;
             }
 
-            let Some(snapshot) =
-                capture_mesh_snapshot(req.pos, world, ctx, power, biome_cache)
+            let Some(snapshot) = capture_mesh_snapshot(req.pos, world, ctx, power, biome_cache)
             else {
                 deferred.push(req);
                 continue;
@@ -312,12 +311,7 @@ pub fn mesh_dispatch(
     scheduler.rebuild_heap_from_pending();
     let mut spins = 0;
     while spins < 64
-        && scheduler.dispatch_one(
-            &*world,
-            &ctx,
-            power.as_deref(),
-            biome_cache.as_deref(),
-        )
+        && scheduler.dispatch_one(&*world, &ctx, power.as_deref(), biome_cache.as_deref())
     {
         spins += 1;
     }

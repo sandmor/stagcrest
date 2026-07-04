@@ -2,8 +2,8 @@
 
 use stagcrest_mod_client::BlockRegistry;
 use stagcrest_protocol::{
-    AtlasRect, BlockFaceTextures, BlockModel, FaceTexture, ModelElement, ModelFace,
-    ModelRotation, ModelTexture,
+    AtlasRect, BlockFaceTextures, BlockModel, FaceTexture, ModelElement, ModelFace, ModelRotation,
+    ModelTexture,
 };
 
 #[repr(C)]

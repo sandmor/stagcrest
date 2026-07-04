@@ -73,9 +73,21 @@ pub fn raycast_blocks(
 ) -> Option<RaycastHit> {
     let dir = direction.normalize();
     let inv_dir = Vec3::new(
-        if dir.x != 0.0 { 1.0 / dir.x } else { f32::INFINITY },
-        if dir.y != 0.0 { 1.0 / dir.y } else { f32::INFINITY },
-        if dir.z != 0.0 { 1.0 / dir.z } else { f32::INFINITY },
+        if dir.x != 0.0 {
+            1.0 / dir.x
+        } else {
+            f32::INFINITY
+        },
+        if dir.y != 0.0 {
+            1.0 / dir.y
+        } else {
+            f32::INFINITY
+        },
+        if dir.z != 0.0 {
+            1.0 / dir.z
+        } else {
+            f32::INFINITY
+        },
     );
     let mut t = 0.0f32;
     let mut current = BlockPos::new(
@@ -131,11 +143,7 @@ pub fn raycast_blocks(
     while t <= max_distance {
         if is_solid(current) {
             if let Some(rb) = bounds(current) {
-                let block_origin = Vec3::new(
-                    current.x as f32,
-                    current.y as f32,
-                    current.z as f32,
-                );
+                let block_origin = Vec3::new(current.x as f32, current.y as f32, current.z as f32);
                 let aabb_min = block_origin + Vec3::from_array(rb.min);
                 let aabb_max = block_origin + Vec3::from_array(rb.max);
                 if let Some((t_hit, axis)) = ray_aabb(origin, inv_dir, aabb_min, aabb_max) {

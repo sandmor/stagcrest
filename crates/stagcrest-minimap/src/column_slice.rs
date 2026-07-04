@@ -52,9 +52,6 @@ impl ColumnBlockSource for ColumnSlice {
             return (BlockId(0), stagcrest_protocol::BlockState(0));
         }
         let idx = (wy - self.y_min) as usize;
-        (
-            self.blocks[idx],
-            stagcrest_protocol::BlockState(0),
-        )
+        (self.blocks[idx], stagcrest_protocol::BlockState(0))
     }
 }

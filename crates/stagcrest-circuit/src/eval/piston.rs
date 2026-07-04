@@ -1,7 +1,7 @@
 use stagcrest_protocol::piston_extended;
 
-use crate::piston::piston_is_powered;
 use super::{EvalContext, EvalResult};
+use crate::piston::piston_is_powered;
 
 pub const PISTON_DELAY_TICKS: u64 = 1;
 

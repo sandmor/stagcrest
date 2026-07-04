@@ -178,9 +178,10 @@ pub fn sync_chunk_meshes(
             handles.push(images.add(block_atlas_image(page)));
         }
         while handles.len() < MAX_ATLAS_PAGES {
-            let fallback = handles.first().cloned().unwrap_or_else(|| {
-                images.add(Image::default())
-            });
+            let fallback = handles
+                .first()
+                .cloned()
+                .unwrap_or_else(|| images.add(Image::default()));
             handles.push(fallback);
         }
         *atlas_image_handles = handles;

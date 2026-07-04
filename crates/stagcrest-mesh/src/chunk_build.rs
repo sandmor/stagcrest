@@ -210,6 +210,7 @@ mod tests {
             circuit: None,
             push_reaction: stagcrest_protocol::PushReaction::Block,
             map_color: [128, 128, 128],
+            redstone_powerable: true,
         });
         reg
     }
@@ -290,6 +291,7 @@ mod tests {
             circuit: None,
             push_reaction: PushReaction::Destroy,
             map_color: [128, 128, 128],
+            redstone_powerable: false,
         });
 
         let air = BlockId(0);

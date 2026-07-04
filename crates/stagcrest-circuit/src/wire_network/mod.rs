@@ -14,26 +14,15 @@ use stagcrest_protocol::{
 };
 use stagcrest_world::World;
 
-/// Whether this block participates in the wire network (extends or receives wire signals).
-pub fn is_wire_network_node(registry: &BlockRegistry, id: BlockId) -> bool {
+pub fn is_wire_block(registry: &BlockRegistry, id: BlockId) -> bool {
     let Some(def) = registry.block(id) else {
         return false;
     };
     if def.namespaced_id == "stagcrest:redstone_dust" {
         return true;
     }
-    let Some(node) = def.circuit else {
-        return false;
-    };
-    matches!(
-        node.kind,
-        CircuitKind::Wire { .. }
-            | CircuitKind::Switch { .. }
-            | CircuitKind::Source { .. }
-            | CircuitKind::Inverter { .. }
-            | CircuitKind::Repeater { .. }
-            | CircuitKind::Observer { .. }
-    ) || matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch))
+    def.circuit
+        .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
 }
 
 /// Whether a neighbor may link to a wire cell from direction `(toward_wire_dx, toward_wire_dz)`.
@@ -42,18 +31,39 @@ pub fn is_wire_network_neighbor(
     id: BlockId,
     state: BlockState,
     toward_wire_dx: i32,
+    toward_wire_dy: i32,
     toward_wire_dz: i32,
 ) -> bool {
     let Some(def) = registry.block(id) else {
+        return false;
+    };
+    if is_wire_block(registry, id) {
+        return true;
+    }
+    if toward_wire_dy != 0 {
+        return false;
+    }
+    if def.redstone_powerable && def.circuit.is_none() {
+        return true;
+    }
+    let Some(node) = def.circuit else {
         return false;
     };
     if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
         return repeater_connects_toward(repeater_facing(state), toward_wire_dx, toward_wire_dz);
     }
     if matches!(def.geometry, BlockGeometry::Model(ModelId::Observer)) {
-        return repeater_connects_toward(observer_facing(state), toward_wire_dx, toward_wire_dz);
+        let (fx, _, fz) = stagcrest_protocol::facing_delta(observer_facing(state));
+        return toward_wire_dx == fx && toward_wire_dz == fz;
     }
-    is_wire_network_node(registry, id)
+    if matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch)) {
+        let (sx, sy, sz) = stagcrest_protocol::torch_attachment(state).support_offset();
+        return (toward_wire_dx, toward_wire_dy, toward_wire_dz) != (sx, sy, sz);
+    }
+    matches!(
+        node.kind,
+        CircuitKind::Source { .. } | CircuitKind::Switch { .. } | CircuitKind::Piston { .. }
+    )
 }
 
 pub fn connects_toward(state: BlockState, toward_dx: i32, toward_dz: i32) -> bool {
@@ -67,22 +77,50 @@ pub fn wire_connections_at(
 ) -> WireConnections {
     compute_wire_connections(
         |dx, dy, dz| {
-            let npos = stagcrest_protocol::BlockPos::new(wire_pos.x + dx, wire_pos.y + dy, wire_pos.z + dz);
+            let npos = stagcrest_protocol::BlockPos::new(
+                wire_pos.x + dx,
+                wire_pos.y + dy,
+                wire_pos.z + dz,
+            );
             if !world.is_chunk_interactive(npos.chunk_pos()) {
                 return false;
             }
             let (id, state) = world.get_block(npos);
-            is_wire_network_neighbor(registry, id, state, -dx, -dz)
+            if dy == 0 {
+                if registry
+                    .block(id)
+                    .is_some_and(|d| d.redstone_powerable && d.circuit.is_none())
+                {
+                    let above = stagcrest_protocol::BlockPos::new(npos.x, npos.y + 1, npos.z);
+                    if world.is_chunk_interactive(above.chunk_pos()) {
+                        let (above_id, _) = world.get_block(above);
+                        if is_wire_block(registry, above_id) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            is_wire_network_neighbor(registry, id, state, -dx, -dy, -dz)
         },
         |dx, dy, dz| {
-            let npos = stagcrest_protocol::BlockPos::new(wire_pos.x + dx, wire_pos.y + dy, wire_pos.z + dz);
+            let npos = stagcrest_protocol::BlockPos::new(
+                wire_pos.x + dx,
+                wire_pos.y + dy,
+                wire_pos.z + dz,
+            );
             if !world.is_chunk_interactive(npos.chunk_pos()) {
                 return false;
             }
             let (id, _) = world.get_block(npos);
-            registry
-                .block(id)
-                .is_some_and(|d| d.solid && d.opaque && !d.fluid)
+            let Some(def) = registry.block(id) else {
+                return false;
+            };
+            // Conductive block above the wire prevents diagonal climb (Bedrock wire cutting).
+            if dx == 0 && dy == 1 && dz == 0 {
+                return def.redstone_powerable;
+            }
+            // Solid obstruction at the same Y level that dust can climb over.
+            def.solid && def.opaque && !def.fluid
         },
     )
 }

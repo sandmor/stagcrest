@@ -16,8 +16,8 @@ use bevy::render::render_resource::{
     binding_types::{sampler, texture_2d, uniform_buffer},
     BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedRenderPipelineId,
     ColorTargetState, ColorWrites, FragmentState, Operations, PipelineCache,
-    RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-    Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, TextureFormat,
+    RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler,
+    SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, TextureFormat,
     TextureSampleType,
 };
 use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};

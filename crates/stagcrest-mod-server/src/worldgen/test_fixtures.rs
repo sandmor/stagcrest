@@ -77,6 +77,12 @@ pub fn test_registry() -> BlockRegistry {
                 stagcrest_protocol::PushReaction::Normal
             },
             map_color: [128, 128, 128],
+            redstone_powerable: stagcrest_protocol::default_redstone_powerable(
+                solid,
+                opaque,
+                false,
+                transparent,
+            ),
         });
     }
     reg

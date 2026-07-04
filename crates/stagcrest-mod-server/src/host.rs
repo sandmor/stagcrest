@@ -136,6 +136,15 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         .map(render_layer_from_sdk)
         .unwrap_or_else(|| resolve_render_layer(json.transparent));
 
+    let redstone_powerable = json.redstone_powerable.unwrap_or(
+        stagcrest_protocol::default_redstone_powerable(
+            json.solid,
+            json.opaque,
+            json.fluid,
+            json.transparent,
+        ),
+    );
+
     reg.register_block(BlockDef {
         id,
         namespaced_id: json.namespaced_id,
@@ -156,6 +165,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         render_layer,
         push_reaction,
         map_color: json.map_color,
+        redstone_powerable,
     });
 }
 

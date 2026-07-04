@@ -362,8 +362,8 @@ impl BlockRegistry {
 fn encode_rgba_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     use image::{ImageBuffer, Rgba};
     use std::io::Cursor;
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(width, height, rgba.to_vec()).unwrap_or_else(|| {
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba.to_vec())
+        .unwrap_or_else(|| {
             ImageBuffer::from_pixel(width.max(1), height.max(1), Rgba([0, 0, 0, 255]))
         });
     let mut png = Vec::new();

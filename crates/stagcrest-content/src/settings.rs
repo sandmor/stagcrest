@@ -179,9 +179,7 @@ impl ContentSettings {
             return Err(SettingsError::InvalidPath("empty path".into()));
         }
         if path.contains('\\') {
-            return Err(SettingsError::InvalidPath(
-                "backslash not allowed".into(),
-            ));
+            return Err(SettingsError::InvalidPath("backslash not allowed".into()));
         }
         let p = Path::new(path);
         if p.is_absolute() {
@@ -260,9 +258,7 @@ impl ContentSettings {
     }
 
     pub fn resource_pack_root(&self, entry: &ResourcePackEntry) -> PathBuf {
-        self.data_dir
-            .join(RESOURCE_PACKS_DIR)
-            .join(&entry.path)
+        self.data_dir.join(RESOURCE_PACKS_DIR).join(&entry.path)
     }
 
     /// Ordered enabled pack directory paths relative to repo/data root (for AssetReader).
@@ -358,8 +354,13 @@ impl ContentSettings {
     }
 
     fn normalize_order(&mut self) {
-        let known: std::collections::HashSet<_> =
-            self.file.content.resource_packs.iter().map(|p| p.id.clone()).collect();
+        let known: std::collections::HashSet<_> = self
+            .file
+            .content
+            .resource_packs
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
         self.file
             .content
             .resource_pack_order
@@ -397,14 +398,15 @@ mod tests {
     fn settings_round_trip() {
         let dir = TempDir::new().unwrap();
         let mut settings = ContentSettings::empty(dir.path());
-        settings.upsert_pack(ResourcePackEntry {
-            id: "a".into(),
-            path: "Pack A".into(),
-            enabled: true,
-            source: ContentSource::local(),
-            installed_at: None,
-        })
-        .unwrap();
+        settings
+            .upsert_pack(ResourcePackEntry {
+                id: "a".into(),
+                path: "Pack A".into(),
+                enabled: true,
+                source: ContentSource::local(),
+                installed_at: None,
+            })
+            .unwrap();
         settings.save().unwrap();
 
         let loaded = ContentSettings::load(dir.path()).unwrap();
@@ -461,9 +463,6 @@ mod tests {
         }
         settings.move_pack("c", MoveDirection::Up).unwrap();
         settings.move_pack("c", MoveDirection::Up).unwrap();
-        assert_eq!(
-            settings.content().resource_pack_order,
-            vec!["c", "a", "b"]
-        );
+        assert_eq!(settings.content().resource_pack_order, vec!["c", "a", "b"]);
     }
 }

@@ -237,18 +237,14 @@ mod tests {
         let b = ChunkPos { x: 1, y: 0, z: 0 };
         let c = ChunkPos { x: 2, y: 0, z: 0 };
 
-        assert!(
-            arena
-                .insert_inactive(a, dummy_inactive())
-                .lru_evicted
-                .is_none()
-        );
-        assert!(
-            arena
-                .insert_inactive(b, dummy_inactive())
-                .lru_evicted
-                .is_none()
-        );
+        assert!(arena
+            .insert_inactive(a, dummy_inactive())
+            .lru_evicted
+            .is_none());
+        assert!(arena
+            .insert_inactive(b, dummy_inactive())
+            .lru_evicted
+            .is_none());
         let result = arena.insert_inactive(c, dummy_inactive());
         assert_eq!(result.lru_evicted, Some(a));
         assert!(!arena.contains(a));

@@ -185,15 +185,14 @@ pub fn blit_tile_into_framebuffer(
     for (px0, pz0, px1, pz1) in rects {
         for pz in pz0..=pz1.min(size - 1) {
             for px in px0..=px1.min(size - 1) {
-                let out = match sample_pixel_from_tile(
-                    tile, mx, mz, world_x0, world_z0, px, pz, bpp,
-                ) {
-                    Some(rgb) => rgb,
-                    None if preserve_base => {
-                        read_framebuffer_pixel(&framebuffer.data, px, pz, size)
-                    }
-                    None => continue,
-                };
+                let out =
+                    match sample_pixel_from_tile(tile, mx, mz, world_x0, world_z0, px, pz, bpp) {
+                        Some(rgb) => rgb,
+                        None if preserve_base => {
+                            read_framebuffer_pixel(&framebuffer.data, px, pz, size)
+                        }
+                        None => continue,
+                    };
                 write_framebuffer_pixel(&mut framebuffer.data, px, pz, size, out);
             }
         }
@@ -245,9 +244,7 @@ pub fn composite_tiles_into_framebuffer(
         for mz in mz0..=mz1 {
             for mx in mx0..=mx1 {
                 if let Some(tile) = tiles.get(&(mx, mz)) {
-                    blit_tile_into_framebuffer(
-                        tile, mx, mz, framebuffer, &clip, preserve_base,
-                    );
+                    blit_tile_into_framebuffer(tile, mx, mz, framebuffer, &clip, preserve_base);
                 }
             }
         }

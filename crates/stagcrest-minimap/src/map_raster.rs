@@ -32,8 +32,7 @@ pub fn rasterize_map_chunk(
             let cx = base_cx + dx;
             let cz = base_cz + dz;
             let strip = &strips[dz as usize][dx as usize];
-            let strip_biome =
-                |wx: i32, wy: i32, wz: i32| biome_at(wx, wy, wz);
+            let strip_biome = |wx: i32, wy: i32, wz: i32| biome_at(wx, wy, wz);
             let cache = resolver.resolve_strip(strip, cx, cz, &strip_biome);
             blit_strip_into_map(&cache, cx, cz, map_x0, map_z0, &mut rgb);
         }

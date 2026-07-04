@@ -252,13 +252,7 @@ impl StreamingPipeline {
                 {
                     continue;
                 }
-                let data = apply_pass1_density(
-                    world,
-                    terrain,
-                    generator,
-                    column_blocks,
-                    pos,
-                );
+                let data = apply_pass1_density(world, terrain, generator, column_blocks, pos);
                 self.pass2_pending.insert(pos, data.clone());
                 if !terrain.is_chunk_generated(pos) {
                     self.deferred_decorate.push_back(data);
@@ -332,9 +326,11 @@ impl StreamingPipeline {
         let n = eligible.len();
         for offset in 0..n {
             let client = eligible[(fair_rotate + offset) % n];
-            if let Some(idx) = self.pending_load.iter().position(|pos| {
-                chunk_in_client_radius(*pos, client, h_radius, v_radius)
-            }) {
+            if let Some(idx) = self
+                .pending_load
+                .iter()
+                .position(|pos| chunk_in_client_radius(*pos, client, h_radius, v_radius))
+            {
                 return self.pending_load.remove(idx);
             }
         }
@@ -358,9 +354,11 @@ impl StreamingPipeline {
         let n = eligible.len();
         for offset in 0..n {
             let client = eligible[(fair_rotate + offset) % n];
-            if let Some(idx) = self.pending_generate.iter().position(|pos| {
-                chunk_in_client_radius(*pos, client, h_radius, v_radius)
-            }) {
+            if let Some(idx) = self
+                .pending_generate
+                .iter()
+                .position(|pos| chunk_in_client_radius(*pos, client, h_radius, v_radius))
+            {
                 return self.pending_generate.remove(idx);
             }
         }
@@ -557,9 +555,9 @@ fn chunk_needed_by_any_client(
     h_radius: i32,
     v_radius: i32,
 ) -> bool {
-    clients.iter().any(|c| {
-        c.handshake_complete && chunk_in_client_radius(pos, c, h_radius, v_radius)
-    })
+    clients
+        .iter()
+        .any(|c| c.handshake_complete && chunk_in_client_radius(pos, c, h_radius, v_radius))
 }
 
 fn unload_outside_all_clients(

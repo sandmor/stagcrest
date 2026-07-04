@@ -1,5 +1,5 @@
-use crate::wire_network::max_wire_input;
 use crate::power::signal_into;
+use crate::wire_network::max_wire_input;
 
 use super::{EvalContext, EvalResult};
 

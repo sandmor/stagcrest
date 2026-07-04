@@ -1,9 +1,9 @@
 use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_server::BlockRegistry;
 use stagcrest_protocol::{
-    torch_state, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, BlockPos, BlockState,
-    CircuitKind, CircuitNodeDef, ModelId, ModelRenderLayer, PushReaction, TextureId,
-    TorchAttachment,
+    mount_state, torch_state, AttachFace, BlockDef, BlockFaceTextures, BlockGeometry, BlockId,
+    BlockPos, BlockState, CircuitKind, CircuitNodeDef, Facing, ModelId, ModelRenderLayer,
+    PushReaction, TextureId, TorchAttachment,
 };
 use stagcrest_world::World;
 
@@ -21,6 +21,7 @@ pub struct TestBlocks {
     pub piston_head: BlockId,
     pub slime: BlockId,
     pub honey: BlockId,
+    pub glass: BlockId,
     pub bedrock: BlockId,
 }
 
@@ -40,6 +41,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         piston_head: BlockId(12),
         slime: BlockId(13),
         honey: BlockId(14),
+        glass: BlockId(16),
         bedrock: BlockId(15),
     };
 
@@ -95,17 +97,19 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
+        redstone_powerable: false,
     });
-    reg.register_block(cube_block(
+    reg.register_block(transparent_conductor_block(
         blocks.slime,
         "test:slime_block",
         PushReaction::Normal,
     ));
-    reg.register_block(cube_block(
+    reg.register_block(transparent_conductor_block(
         blocks.honey,
         "test:honey_block",
         PushReaction::Normal,
     ));
+    reg.register_block(transparent_insulator_block(blocks.glass, "test:glass"));
     reg.register_block(cube_block(
         blocks.bedrock,
         "test:bedrock",
@@ -127,6 +131,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: stagcrest_protocol::PushReaction::Normal,
         map_color: [128, 128, 128],
+        redstone_powerable: true,
     });
 
     (reg, blocks)
@@ -149,6 +154,7 @@ fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
+        redstone_powerable: false,
     }
 }
 
@@ -169,6 +175,53 @@ fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef 
         render_layer: ModelRenderLayer::Opaque,
         push_reaction,
         map_color: [128, 128, 128],
+        redstone_powerable: true,
+    }
+}
+
+fn transparent_insulator_block(id: BlockId, name: &str) -> BlockDef {
+    BlockDef {
+        id,
+        namespaced_id: name.into(),
+        display_name: name.into(),
+        opaque: false,
+        transparent: true,
+        solid: true,
+        hardness: 1.0,
+        face_textures: BlockFaceTextures::uniform(TextureId(0)),
+        circuit: None,
+        placeable: true,
+        geometry: BlockGeometry::Cube,
+        fluid: false,
+        render_layer: ModelRenderLayer::Blend,
+        push_reaction: PushReaction::Normal,
+        map_color: [128, 128, 128],
+        redstone_powerable: false,
+    }
+}
+
+fn transparent_conductor_block(
+    id: BlockId,
+    name: &str,
+    push_reaction: PushReaction,
+) -> BlockDef {
+    BlockDef {
+        id,
+        namespaced_id: name.into(),
+        display_name: name.into(),
+        opaque: true,
+        transparent: true,
+        solid: true,
+        hardness: 1.0,
+        face_textures: BlockFaceTextures::uniform(TextureId(0)),
+        circuit: None,
+        placeable: true,
+        geometry: BlockGeometry::Cube,
+        fluid: false,
+        render_layer: ModelRenderLayer::Blend,
+        push_reaction,
+        map_color: [128, 128, 128],
+        redstone_powerable: true,
     }
 }
 
@@ -193,6 +246,7 @@ fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeome
         render_layer: ModelRenderLayer::Opaque,
         push_reaction: stagcrest_protocol::PushReaction::Normal,
         map_color: [128, 128, 128],
+        redstone_powerable: false,
     }
 }
 
@@ -218,20 +272,22 @@ pub fn place_wall_torch_not_gate(
     blocks: &TestBlocks,
     lever_on: bool,
 ) -> (BlockPos, BlockPos) {
-    let lever_pos = BlockPos::new(0, 0, 0);
-    let wire_pos = BlockPos::new(1, 0, 0);
+    let lever_pos = BlockPos::new(1, 0, 0);
     let block_pos = BlockPos::new(2, 0, 0);
     let torch_pos = BlockPos::new(3, 0, 0);
 
-    world.set_block(lever_pos, blocks.switch, BlockState(u16::from(lever_on)));
-    world.set_block(wire_pos, blocks.wire, BlockState(0));
+    world.set_block(
+        lever_pos,
+        blocks.switch,
+        mount_state(lever_on, AttachFace::Wall, Facing::West),
+    );
     world.set_block(block_pos, blocks.stone, BlockState(0));
     world.set_block(
         torch_pos,
         blocks.torch,
         torch_state(false, TorchAttachment::WallEast),
     );
-    populate_chunks(world, &[lever_pos, wire_pos, block_pos, torch_pos]);
+    populate_chunks(world, &[lever_pos, block_pos, torch_pos]);
 
     (torch_pos, lever_pos)
 }

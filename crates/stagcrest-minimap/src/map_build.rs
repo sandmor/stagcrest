@@ -113,10 +113,7 @@ fn rasterize_map_chunk_with_ctx(
         if (0..4).contains(&dx) && (0..4).contains(&dz) {
             let strip = &strips[dz as usize][dx as usize];
             return strip_biome_at(strip, wx, wy, wz, &|idx| {
-                climate
-                    .get(idx as usize)
-                    .copied()
-                    .unwrap_or_default()
+                climate.get(idx as usize).copied().unwrap_or_default()
             });
         }
         MinimapBiomeClimate::default()
@@ -141,7 +138,11 @@ pub fn collect_modified_positions(
             let cx = base_cx + dx;
             let cz = base_cz + dz;
             for &cy in y_chunks {
-                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                let pos = ChunkPos {
+                    x: cx,
+                    y: cy,
+                    z: cz,
+                };
                 if world.has_chunk(pos) && world.is_populated(pos) && world.is_modified(pos) {
                     out.insert(pos);
                 }
@@ -166,7 +167,11 @@ pub fn collect_world_overrides(
             let cx = base_cx + dx;
             let cz = base_cz + dz;
             for &cy in y_chunks {
-                let pos = ChunkPos { x: cx, y: cy, z: cz };
+                let pos = ChunkPos {
+                    x: cx,
+                    y: cy,
+                    z: cz,
+                };
                 if world.has_chunk(pos) && world.is_populated(pos) {
                     if let Some(chunk) = world.pack_chunk_for_storage(pos) {
                         out.insert(pos, chunk);

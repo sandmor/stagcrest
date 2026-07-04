@@ -108,11 +108,7 @@ impl<'a> HydrologySampler<'a> {
 
         let (flow, downstream_water_y, fall_drop) =
             self.flow_and_drop(wx, wz, water_surface_y, erosion, |nx, nz| {
-                self.coastal_clamp(
-                    nx,
-                    nz,
-                    self.pool_water_y(self.shaper.surface_y(nx, nz)),
-                )
+                self.coastal_clamp(nx, nz, self.pool_water_y(self.shaper.surface_y(nx, nz)))
             });
 
         let segment = self.segment_for_fall_drop(fall_drop);
@@ -190,7 +186,13 @@ impl<'a> HydrologySampler<'a> {
         pool.clamp(min_y, max_y)
     }
 
-    fn drainage_column(&self, wx: i32, wz: i32, strength: f32, erosion: f32) -> Option<RiverColumn> {
+    fn drainage_column(
+        &self,
+        wx: i32,
+        wz: i32,
+        strength: f32,
+        erosion: f32,
+    ) -> Option<RiverColumn> {
         let cell_size = self.config.drainage_cell_size.max(1);
         let cx = floor_div(wx, cell_size);
         let cz = floor_div(wz, cell_size);
@@ -211,11 +213,7 @@ impl<'a> HydrologySampler<'a> {
 
         let (flow, downstream_water_y, local_drop) =
             self.flow_and_drop(wx, wz, water_surface_y, erosion, |nx, nz| {
-                self.coastal_clamp(
-                    nx,
-                    nz,
-                    self.pool_water_y(self.shaper.surface_y(nx, nz)),
-                )
+                self.coastal_clamp(nx, nz, self.pool_water_y(self.shaper.surface_y(nx, nz)))
             });
 
         let cell_drop = if cell.river_mask {
@@ -346,9 +344,7 @@ impl<'a> HydrologySampler<'a> {
         }
 
         if river_mask && min_surface_y == f64::MAX {
-            min_surface_y = self
-                .shaper
-                .surface_y(cx * cell_size, cz * cell_size);
+            min_surface_y = self.shaper.surface_y(cx * cell_size, cz * cell_size);
         }
 
         (river_mask, min_surface_y)
@@ -413,8 +409,7 @@ impl<'a> HydrologySampler<'a> {
                         .get(&(fcx, fcz))
                         .copied()
                         .unwrap_or(cell);
-                    let local_cap =
-                        cell.min_surface_y - self.config.river_channel_depth as f64;
+                    let local_cap = cell.min_surface_y - self.config.river_channel_depth as f64;
                     let new_level = local_cap.min(downstream.water_level);
                     if let Some(c) = self.cache.borrow_mut().cells.get_mut(&(cx, cz)) {
                         c.water_level = new_level;
@@ -425,12 +420,10 @@ impl<'a> HydrologySampler<'a> {
     }
 
     fn erosion_at(&self, wx: i32, wz: i32) -> f32 {
-        self.noise
-            .get(TerrainLayer::Erosion)
-            .sample2d(
-                wx as f64 * self.config.erosion_frequency,
-                wz as f64 * self.config.erosion_frequency,
-            ) as f32
+        self.noise.get(TerrainLayer::Erosion).sample2d(
+            wx as f64 * self.config.erosion_frequency,
+            wz as f64 * self.config.erosion_frequency,
+        ) as f32
     }
 
     fn continentalness_at(&self, cx: i32, cz: i32) -> f64 {
@@ -611,9 +604,12 @@ mod tests {
                     .cells
                     .get(&(cx, cz))
                     .is_some_and(|c| c.is_mouth);
-                let borders_ocean = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-                    .into_iter()
-                    .any(|(dx, dz)| hydro.shaper().surface_y(wx + dx, wz + dz) < config.sea_level as f64);
+                let borders_ocean =
+                    [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .into_iter()
+                        .any(|(dx, dz)| {
+                            hydro.shaper().surface_y(wx + dx, wz + dz) < config.sea_level as f64
+                        });
                 if is_mouth && borders_ocean {
                     assert_eq!(
                         col.water_surface_y, config.sea_level,
@@ -630,7 +626,10 @@ mod tests {
                 }
             }
         }
-        assert!(mouth_cols > 0 || coastal_cols > 0, "expected coastal/mouth river columns");
+        assert!(
+            mouth_cols > 0 || coastal_cols > 0,
+            "expected coastal/mouth river columns"
+        );
     }
 
     #[test]
@@ -731,7 +730,10 @@ mod tests {
                 }
             }
         }
-        assert!(water_count > 0, "expected river water blocks in fill_density output");
+        assert!(
+            water_count > 0,
+            "expected river water blocks in fill_density output"
+        );
 
         let mut river_cols = 0u32;
         let mut air_above = 0u32;

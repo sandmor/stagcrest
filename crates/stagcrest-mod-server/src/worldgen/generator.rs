@@ -6,7 +6,9 @@ use crate::worldgen::features::FeaturePlacer;
 use crate::worldgen::noise::NoiseBank;
 use crate::worldgen::occupancy::OccupancyMap;
 use crate::worldgen::seed::WorldSeed;
-use crate::worldgen::terrain::{CaveDecorator, ChunkFiller, ColumnBlocks, DensitySampler, RiverFeaturePlacer};
+use crate::worldgen::terrain::{
+    CaveDecorator, ChunkFiller, ColumnBlocks, DensitySampler, RiverFeaturePlacer,
+};
 use stagcrest_protocol::manifest::BIOME_GRID_VOLUME;
 use stagcrest_protocol::{BlockId, BlockPos, BlockState, ChunkPos, CHUNK_SIZE};
 use std::collections::HashMap;
@@ -152,18 +154,11 @@ impl TerrainGenerator {
         let filler = ChunkFiller::new(&self.config, &density, climate, biomes, blocks);
         let surface = filler.decorate(snapshot, data.pos, &data.entries, &biome_grid);
 
-        let mut occupancy =
-            OccupancyMap::from_surface_entries(&surface, data.pos, blocks.air);
+        let mut occupancy = OccupancyMap::from_surface_entries(&surface, data.pos, blocks.air);
 
-        let river_placer = RiverFeaturePlacer::new(
-            &density,
-            biomes.river_config(),
-            blocks,
-            registry,
-            self.seed,
-        );
-        let river_features =
-            river_placer.place(snapshot, data.pos, &surface, &mut occupancy);
+        let river_placer =
+            RiverFeaturePlacer::new(&density, biomes.river_config(), blocks, registry, self.seed);
+        let river_features = river_placer.place(snapshot, data.pos, &surface, &mut occupancy);
 
         let placer = FeaturePlacer::new(
             &self.config,

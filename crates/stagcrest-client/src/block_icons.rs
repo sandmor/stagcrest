@@ -408,7 +408,10 @@ fn sample_atlas(
     u: f32,
     v: f32,
 ) -> [u8; 4] {
-    let Some(page) = atlases.get(atlas_index as usize).or_else(|| atlases.first()) else {
+    let Some(page) = atlases
+        .get(atlas_index as usize)
+        .or_else(|| atlases.first())
+    else {
         return [128, 128, 128, 255];
     };
     let aw = page.width;

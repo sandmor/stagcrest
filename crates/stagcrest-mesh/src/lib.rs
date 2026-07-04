@@ -1267,6 +1267,12 @@ mod tests {
             },
             push_reaction: stagcrest_protocol::PushReaction::Normal,
             map_color: [128, 128, 128],
+            redstone_powerable: stagcrest_protocol::default_redstone_powerable(
+                solid,
+                opaque,
+                fluid,
+                false,
+            ),
         }
     }
 
@@ -1294,17 +1300,14 @@ mod tests {
             let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
                 ImageBuffer::from_pixel(w, h, Rgba([40, 80, 120, 255]));
             let mut png = Vec::new();
-            img.write_to(
-                &mut std::io::Cursor::new(&mut png),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
+            img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .unwrap();
             png
         }
 
         let png = solid_png(64, 64);
-        let stone = texture_def_from_png(TextureId(1), "stagcrest:stone".into(), &png, None)
-            .unwrap();
+        let stone =
+            texture_def_from_png(TextureId(1), "stagcrest:stone".into(), &png, None).unwrap();
         let water_png = solid_png(64, 2048);
         let water = texture_def_from_png(
             TextureId(2),

@@ -1,8 +1,8 @@
+use crate::eval::is_torch_geometry;
+use crate::registry::BlockRegistry;
 use crate::wire_network::{
     connects_toward, is_wire_network_neighbor, wire_connects_toward_neighbor,
 };
-use crate::eval::is_torch_geometry;
-use crate::registry::BlockRegistry;
 use stagcrest_protocol::{
     facing_delta, mount_on, observer_facing, repeater_facing, torch_attachment, BlockPos,
     BlockState, CircuitKind,
@@ -14,7 +14,11 @@ use crate::world::CircuitWorld;
 /// Opaque block cell an attachment-based inverter is mounted on.
 pub fn inverter_support_block(inverter_pos: BlockPos, state: BlockState) -> BlockPos {
     let (dx, dy, dz) = torch_attachment(state).support_offset();
-    BlockPos::new(inverter_pos.x + dx, inverter_pos.y + dy, inverter_pos.z + dz)
+    BlockPos::new(
+        inverter_pos.x + dx,
+        inverter_pos.y + dy,
+        inverter_pos.z + dz,
+    )
 }
 
 /// Directed signal level from `source` cell into `consumer` cell.
@@ -103,7 +107,22 @@ pub fn repeater_input_power(
     let facing = repeater_facing(state);
     let (fx, _, fz) = facing_delta(facing);
     let input_pos = BlockPos::new(pos.x - fx, pos.y, pos.z - fz);
-    signal_into(circuit, input_pos, pos, world_blocks, registry)
+
+    let sig = signal_into(circuit, input_pos, pos, world_blocks, registry);
+    if sig > 0 {
+        return sig;
+    }
+
+    if !world_blocks.is_chunk_interactive(input_pos.chunk_pos()) {
+        return 0;
+    }
+    let (input_id, _) = world_blocks.get_block(input_pos);
+    if let Some(input_def) = registry.block(input_id) {
+        if input_def.circuit.is_none() && super::is_redstone_powerable_block(input_def) {
+            return super::block_power_at(circuit, input_pos, world_blocks, registry).effective();
+        }
+    }
+    0
 }
 
 fn are_face_adjacent(a: BlockPos, b: BlockPos) -> bool {
@@ -162,7 +181,7 @@ fn switch_signal_into(
         }
     }
 
-    if is_wire_network_neighbor(registry, switch_id, switch_state, -dx, -dz)
+    if is_wire_network_neighbor(registry, switch_id, switch_state, -dx, -dy, -dz)
         && wire_connects_toward_neighbor(registry, world_blocks, consumer, source)
     {
         return output;

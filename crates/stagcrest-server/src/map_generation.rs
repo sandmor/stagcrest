@@ -4,8 +4,8 @@ use std::thread::{self, JoinHandle};
 
 use stagcrest_minimap::{
     build_map_chunk_blob, collect_modified_positions, collect_world_overrides,
-    compute_layer_source_revision, map_tile_has_live_edits,
-    MapChunkBlob, MapChunkLoadInput, MapResolveContext,
+    compute_layer_source_revision, map_tile_has_live_edits, MapChunkBlob, MapChunkLoadInput,
+    MapResolveContext,
 };
 use stagcrest_mod_server::{BiomeRegistry, BlockRegistry, ColormapSet, TerrainConfig};
 use stagcrest_protocol::{BlockDef, BlockId, ChunkPos};

@@ -1,7 +1,7 @@
 use stagcrest_minimap::{expected_subscribe_tiles, MINIMAP_ZOOM_LEVELS};
 use stagcrest_net::{
-    ClientHello, ClientMessage, GameMessage, InitialState, MapViewSubscribe, PlayerPose, ServerHello,
-    ServerMessage, PROTOCOL_VERSION,
+    ClientHello, ClientMessage, GameMessage, InitialState, MapViewSubscribe, PlayerPose,
+    ServerHello, ServerMessage, PROTOCOL_VERSION,
 };
 use stagcrest_protocol::BlockPos;
 
@@ -41,7 +41,9 @@ pub fn send_handshake(server: &GameServer, client: &mut ConnectedClient) {
     let manifest = server.cached_manifest.clone();
     client.queue_priority(GameMessage::Server(ServerMessage::Manifest(manifest)));
     for chunk in &server.cached_texture_chunks {
-        client.queue_priority(GameMessage::Server(ServerMessage::TextureAssets(chunk.clone())));
+        client.queue_priority(GameMessage::Server(ServerMessage::TextureAssets(
+            chunk.clone(),
+        )));
     }
     client.handshake_pending = true;
 }
@@ -116,8 +118,7 @@ fn validate_map_view_subscribe(sub: &MapViewSubscribe) -> bool {
         return false;
     }
     let expected = expected_subscribe_tiles(sub.center_x, sub.center_z, sub.bpp);
-    sub.tiles.len() == expected.len()
-        && sub.tiles.iter().all(|tile| expected.contains(tile))
+    sub.tiles.len() == expected.len() && sub.tiles.iter().all(|tile| expected.contains(tile))
 }
 
 fn handle_map_view_subscribe(client: &mut ConnectedClient, sub: MapViewSubscribe) {

@@ -99,7 +99,10 @@ impl ResourcePackLoader {
         &self.repo_root
     }
 
-    pub fn load(repo_root: impl AsRef<Path>, _reader: &dyn AssetReader) -> Result<Self, AssetError> {
+    pub fn load(
+        repo_root: impl AsRef<Path>,
+        _reader: &dyn AssetReader,
+    ) -> Result<Self, AssetError> {
         let pack_roots = Self::read_pack_roots(repo_root.as_ref())?;
         Ok(Self {
             repo_root: repo_root.as_ref().to_path_buf(),
@@ -279,14 +282,10 @@ impl ResourcePackLoader {
             return Some((e.width, e.height, e.png.clone(), e.animation.clone()));
         }
         self.try_load_block_texture(reader, name);
-        self.block_textures.borrow().get(name).map(|e| {
-            (
-                e.width,
-                e.height,
-                e.png.clone(),
-                e.animation.clone(),
-            )
-        })
+        self.block_textures
+            .borrow()
+            .get(name)
+            .map(|e| (e.width, e.height, e.png.clone(), e.animation.clone()))
     }
 
     fn load_mc_block_texture_with_reader(
@@ -378,7 +377,11 @@ mod tests {
         let pack_dir = dir.path().join("data/resourcepacks/test-pack");
         let block_dir = pack_dir.join("minecraft/textures/block");
         std::fs::create_dir_all(&block_dir).unwrap();
-        std::fs::write(pack_dir.join("pack.mcmeta"), r#"{"pack":{"pack_format":15}}"#).unwrap();
+        std::fs::write(
+            pack_dir.join("pack.mcmeta"),
+            r#"{"pack":{"pack_format":15}}"#,
+        )
+        .unwrap();
         let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::from_pixel(32, 32, Rgba([40, 40, 40, 255]));
         img.save(block_dir.join("stone.png")).unwrap();
@@ -401,7 +404,9 @@ source = "local"
 
         let reader = FsAssetReader::new(dir.path());
         let loader = ResourcePackLoader::load(dir.path(), &reader).unwrap();
-        let (w, h, png) = loader.load_mc_block_texture_with_reader(&reader, "stone").unwrap();
+        let (w, h, png) = loader
+            .load_mc_block_texture_with_reader(&reader, "stone")
+            .unwrap();
         assert_eq!((w, h), (32, 32));
         assert!(!png.is_empty());
     }

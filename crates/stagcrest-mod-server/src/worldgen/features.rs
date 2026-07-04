@@ -299,8 +299,7 @@ impl<'a> FeaturePlacer<'a> {
                     occupancy.place(pos, id);
                 }
             }
-            FeaturePlacement::WaterfallSheet { .. }
-            | FeaturePlacement::WaterfallPool { .. } => {}
+            FeaturePlacement::WaterfallSheet { .. } | FeaturePlacement::WaterfallPool { .. } => {}
             _ => {}
         }
     }

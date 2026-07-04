@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use stagcrest_circuit::{init_circuit_blocks, CircuitWorld};
+use stagcrest_minimap::{world_chunk_to_map_chunk, MapResolveContext};
 use stagcrest_mod_server::{
     load_mods, world_chunk_y_bounds, BiomeRegistry, BlockRegistry, ColormapSet, ColumnBlocks,
     ModHost, TerrainGenerator, WorldGenState, WorldSeed, SEA_LEVEL,
@@ -26,7 +27,6 @@ use stagcrest_net::{
     send_message, spawn_tcp_session, BlockUpdate, CircuitPowerBatch, ClientMessage, GameMessage,
     GameTransport, InProcessTransport, NetConfig, ServerMessage,
 };
-use stagcrest_minimap::{world_chunk_to_map_chunk, MapResolveContext};
 use stagcrest_protocol::{manifest::TextureAssetsChunk, BlockId, BlockPos, ChunkPos};
 use stagcrest_world::World;
 
@@ -35,9 +35,13 @@ use crate::map_streaming::{ServerBlobCache, MAX_MAP_SNAPSHOT_SEND_PER_TICK};
 
 use tokio::net::TcpListener;
 
-pub use build_world::{build_world_region, iter_circle_chunk_positions, BuildMapConfig, BuildMapError, BuildMapReport};
+pub use build_world::{
+    build_world_region, iter_circle_chunk_positions, BuildMapConfig, BuildMapError, BuildMapReport,
+};
 pub use client_session::{ClientId, ClientRegistry, ConnectedClient};
-pub use export_minimap::{export_minimap, rebuild_all_map_chunks, ExportError, ExportMinimapConfig};
+pub use export_minimap::{
+    export_minimap, rebuild_all_map_chunks, ExportError, ExportMinimapConfig,
+};
 pub use map_generation::make_map_resolve_context;
 pub use map_tile_maintenance::{rebuild_all_map_tiles, MapTileDirtySet, MapTileRebuildReport};
 pub use offline_bootstrap::{
@@ -166,8 +170,11 @@ impl GameServer {
             terrain.config(),
         ));
         let map_y_chunks: Vec<i32> = y_bounds.collect();
-        let map_pipeline =
-            MapChunkPipeline::new(Arc::clone(&session.storage), Arc::clone(&map_ctx), map_y_chunks.clone());
+        let map_pipeline = MapChunkPipeline::new(
+            Arc::clone(&session.storage),
+            Arc::clone(&map_ctx),
+            map_y_chunks.clone(),
+        );
 
         Ok(Self {
             config,
@@ -289,9 +296,7 @@ impl GameServer {
                 };
                 for snapshot in delta.snapshots {
                     let chunk = snapshot.pos;
-                    client.queue_bulk(GameMessage::Server(ServerMessage::ChunkSnapshot(
-                        snapshot,
-                    )));
+                    client.queue_bulk(GameMessage::Server(ServerMessage::ChunkSnapshot(snapshot)));
                     let seed = self.circuit.power_in_chunk(chunk);
                     if !seed.is_empty() {
                         client.queue_bulk(GameMessage::Server(ServerMessage::CircuitPowerBatch(
@@ -353,13 +358,8 @@ impl GameServer {
         for &pos in positions {
             let (mx, mz) = world_chunk_to_map_chunk(pos.x, pos.z);
             if seen.insert((mx, mz)) {
-                self.map_pipeline.ensure_fresh(
-                    mx,
-                    mz,
-                    &self.world,
-                    &self.map_y_chunks,
-                    storage,
-                );
+                self.map_pipeline
+                    .ensure_fresh(mx, mz, &self.world, &self.map_y_chunks, storage);
             }
         }
     }

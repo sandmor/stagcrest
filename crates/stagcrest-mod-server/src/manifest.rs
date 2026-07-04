@@ -1,6 +1,4 @@
-use stagcrest_protocol::manifest::{
-    ColormapSnapshot, ContentManifest, TextureAssetsChunk,
-};
+use stagcrest_protocol::manifest::{ColormapSnapshot, ContentManifest, TextureAssetsChunk};
 
 use crate::colormap::ColormapSet;
 use crate::host::ModHost;

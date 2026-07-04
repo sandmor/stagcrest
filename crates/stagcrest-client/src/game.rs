@@ -1,6 +1,6 @@
 use crate::chunk_streaming::{on_chunk_unloaded_remove_biome, BiomeGridCache};
 use crate::environment::{self, PlayerEnvironment};
-use crate::game_session::{self, GameCamera, in_active_gameplay};
+use crate::game_session::{self, in_active_gameplay, GameCamera};
 use crate::inventory::inventory_open;
 use crate::mesh_scheduler::{
     mesh_commit_meshes, mesh_dispatch, mesh_drain_dirty, mesh_poll,
@@ -16,7 +16,9 @@ use stagcrest_mod_client::{
     BiomeRegistryClient, BlockRegistry, ColormapSet, ModelRegistry, TextureAtlas,
 };
 use stagcrest_net::ServerMessage;
-use stagcrest_render::{BlockAtlasResource, MeshCacheResource, UnderwaterEffect, VoxelRenderPlugin};
+use stagcrest_render::{
+    BlockAtlasResource, MeshCacheResource, UnderwaterEffect, VoxelRenderPlugin,
+};
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -107,9 +109,7 @@ impl Plugin for GamePlugin {
                         .after(net_poll_system)
                         .after(mesh_rebuild_after_atlas_change)
                         .run_if(in_active_gameplay),
-                    mesh_poll
-                        .after(mesh_dispatch)
-                        .run_if(in_active_gameplay),
+                    mesh_poll.after(mesh_dispatch).run_if(in_active_gameplay),
                     mesh_commit_meshes
                         .after(mesh_poll)
                         .run_if(in_active_gameplay),
@@ -168,10 +168,7 @@ fn net_ping_system(time: Res<Time>, mut net: ResMut<GameNetClient>) {
     net.maybe_send_ping(time.delta());
 }
 
-fn send_pose_system(
-    mut net: ResMut<GameNetClient>,
-    camera: Query<&Transform, With<GameCamera>>,
-) {
+fn send_pose_system(mut net: ResMut<GameNetClient>, camera: Query<&Transform, With<GameCamera>>) {
     let Ok(transform) = camera.single() else {
         return;
     };
