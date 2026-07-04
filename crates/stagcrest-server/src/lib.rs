@@ -424,9 +424,12 @@ impl GameServer {
             self.tick(&mut clients, dt);
 
             if let Some(c) = clients.get_mut(embedded_id) {
-                c.finish_handshake_if_wire_ready(true);
+                let joined = c.finish_handshake_if_wire_ready(true);
                 let priority = c.take_priority();
                 let bulk = c.take_bulk();
+                if joined {
+                    clients.announce_join(embedded_id);
+                }
                 for msg in priority.into_iter().chain(bulk) {
                     if transport.send(msg).is_err() {
                         self.flush_persistence();
@@ -494,7 +497,10 @@ async fn drain_client_io(clients: &mut ClientRegistry, id: ClientId) -> bool {
             }
         }
         if let Some(c) = clients.get_mut(id) {
-            c.finish_handshake_if_wire_ready(true);
+            let joined = c.finish_handshake_if_wire_ready(true);
+            if joined {
+                clients.announce_join(id);
+            }
         }
     }
 
@@ -578,6 +584,17 @@ pub async fn run_standalone(
                 }
 
                 for id in disconnected {
+                    let announce_leave = clients.len() > 1;
+                    if announce_leave {
+                        if let Some(client) = clients.get(id) {
+                            if let Some(name) = client.username.clone() {
+                                clients.broadcast_chat(stagcrest_net::ChatLine {
+                                    kind: stagcrest_net::ChatKind::System,
+                                    text: format!("{name} left the game"),
+                                });
+                            }
+                        }
+                    }
                     tracing::info!("client {:?} disconnected", id);
                     clients.remove(id);
                 }

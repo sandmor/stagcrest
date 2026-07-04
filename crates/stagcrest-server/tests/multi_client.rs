@@ -1,4 +1,4 @@
-use stagcrest_net::{BlockUpdate, GameMessage, ServerMessage};
+use stagcrest_net::{BlockUpdate, ChatKind, ChatLine, GameMessage, ServerMessage};
 use stagcrest_protocol::{BlockId, BlockPos, BlockState};
 use stagcrest_server::{streaming_lru_capacity, ClientId, ClientRegistry, TerrainStreamState};
 
@@ -117,4 +117,29 @@ fn registry_respects_max_clients_capacity() {
     setup_client(&mut registry, 0, 0);
     setup_client(&mut registry, 1, 1);
     assert!(!registry.has_capacity());
+}
+
+#[test]
+fn chat_broadcast_reaches_all_connected_clients() {
+    let mut registry = ClientRegistry::new(16);
+    let a = setup_client(&mut registry, 0, 0);
+    let b = setup_client(&mut registry, 10, 10);
+
+    registry.broadcast_chat(ChatLine {
+        kind: ChatKind::Player {
+            sender: "Steve".into(),
+        },
+        text: "hello world".into(),
+    });
+
+    for id in [a, b] {
+        let msgs = registry.get_mut(id).unwrap().take_priority();
+        assert_eq!(msgs.len(), 1);
+        match &msgs[0] {
+            GameMessage::Server(ServerMessage::Chat(chat)) => {
+                assert_eq!(chat.text, "hello world");
+            }
+            other => panic!("expected chat, got {other:?}"),
+        }
+    }
 }

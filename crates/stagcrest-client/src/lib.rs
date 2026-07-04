@@ -7,6 +7,7 @@ use camera::UiCameraPlugin;
 pub mod block_icons;
 pub mod block_outline;
 pub mod camera;
+pub mod chat;
 pub mod chunk_streaming;
 pub mod client_content;
 pub mod connect_screen;
@@ -23,6 +24,7 @@ pub mod minimap;
 pub mod net_client;
 pub mod pause;
 pub mod player;
+pub mod player_profile;
 pub mod resource_pack_setup;
 pub mod resource_packs;
 pub mod targeting;
@@ -52,6 +54,7 @@ pub fn run_app(launch: LaunchConfig) {
         .add_plugins(DefaultPlugins.set(window_plugin()))
         .insert_resource(launch.clone())
         .insert_resource(GameNetClient::from_launch(&launch))
+        .insert_resource(player_profile::PlayerProfile::default())
         .init_state::<AppState>()
         .add_sub_state::<game::GameplayState>()
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
@@ -67,6 +70,7 @@ pub fn run_app(launch: LaunchConfig) {
             loading::LoadingPlugin,
             game::GamePlugin,
             game_session::GameSessionPlugin,
+            chat::ChatPlugin,
             debug_overlay::DebugPlugin,
             minimap::MinimapPlugin,
             pause::PausePlugin,

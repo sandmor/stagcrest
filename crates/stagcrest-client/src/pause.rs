@@ -1,4 +1,5 @@
 use crate::block_outline;
+use crate::chat::ChatUiState;
 use crate::client_content::{cleanup_screen, spawn_screen_button};
 use crate::game::{AppState, GameplayState};
 use crate::game_session::in_paused_gameplay;
@@ -41,11 +42,16 @@ impl Plugin for PausePlugin {
 fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     gameplay: Res<State<GameplayState>>,
+    chat: Res<ChatUiState>,
     mut next: ResMut<NextState<GameplayState>>,
     mut fly: Query<&mut player::FlyCamera, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+
+    if chat.input_open {
         return;
     }
 

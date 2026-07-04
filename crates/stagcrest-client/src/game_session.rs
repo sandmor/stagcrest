@@ -1,3 +1,4 @@
+use crate::chat;
 use crate::debug_overlay;
 use crate::game::{AppState, GameplayState, ModContext};
 use crate::inventory::{self, InventoryUiState};
@@ -106,6 +107,7 @@ pub fn spawn_game_session(
     commands.entity(outline).insert(GameSessionEntity);
 
     debug_overlay::spawn_debug_overlay(&mut commands, &theme);
+    chat::spawn_chat_overlay(&mut commands, &theme);
     minimap::spawn_minimap(&mut commands, &theme, &mut images);
     inventory::setup_inventory(
         &mut commands,

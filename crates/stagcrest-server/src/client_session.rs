@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use stagcrest_net::{AsyncTcpSession, GameMessage, PlayerPose};
+use stagcrest_net::{AsyncTcpSession, GameMessage, PlayerPose, ServerMessage};
 use stagcrest_protocol::ChunkPos;
 
 use crate::map_streaming::ClientMapState;
@@ -13,6 +13,8 @@ pub struct ClientId(pub u64);
 
 pub struct ConnectedClient {
     pub id: ClientId,
+    pub username: Option<String>,
+    pub join_announced: bool,
     pub pose: Option<PlayerPose>,
     pub stream: TerrainStreamState,
     pub last_center: Option<ChunkPos>,
@@ -29,6 +31,8 @@ impl ConnectedClient {
     pub fn new(id: ClientId) -> Self {
         Self {
             id,
+            username: None,
+            join_announced: false,
             pose: None,
             stream: TerrainStreamState::default(),
             last_center: None,
@@ -67,11 +71,13 @@ impl ConnectedClient {
         std::mem::take(&mut self.pending_bulk)
     }
 
-    pub fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) {
+    pub fn finish_handshake_if_wire_ready(&mut self, wire_ready: bool) -> bool {
         if self.handshake_pending && wire_ready {
             self.handshake_pending = false;
             self.handshake_complete = true;
+            return true;
         }
+        false
     }
 
     pub fn reset_streaming_state(&mut self) {
@@ -150,6 +156,37 @@ impl ClientRegistry {
 
     pub fn client_ids(&self) -> Vec<ClientId> {
         self.clients.iter().map(|c| c.id).collect()
+    }
+
+    pub fn broadcast_chat(&mut self, line: stagcrest_net::ChatLine) {
+        let msg = GameMessage::Server(ServerMessage::Chat(line));
+        for client in self.clients.iter_mut() {
+            if client.handshake_complete {
+                client.queue_priority(msg.clone());
+            }
+        }
+    }
+
+    pub fn announce_join(&mut self, client_id: ClientId) {
+        let Some(client) = self.get(client_id) else {
+            return;
+        };
+        if !client.handshake_complete || client.join_announced {
+            return;
+        }
+        let Some(name) = client.username.clone() else {
+            return;
+        };
+        if let Some(client) = self.get_mut(client_id) {
+            client.join_announced = true;
+        }
+        if self.clients().len() <= 1 {
+            return;
+        }
+        self.broadcast_chat(stagcrest_net::ChatLine {
+            kind: stagcrest_net::ChatKind::System,
+            text: format!("{name} joined the game"),
+        });
     }
 
     pub fn streaming_clients(&self) -> Vec<ClientId> {

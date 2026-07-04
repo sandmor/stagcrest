@@ -9,7 +9,21 @@ use stagcrest_protocol::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientHello {
     pub protocol_version: u32,
-    pub client_id: u64,
+    pub username: String,
+}
+
+/// Chat line kind for server → client broadcast.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ChatKind {
+    Player { sender: String },
+    System,
+}
+
+/// A single chat line broadcast to clients.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatLine {
+    pub kind: ChatKind,
+    pub text: String,
 }
 
 /// Handshake: server → client (success).
@@ -126,6 +140,7 @@ pub enum ClientMessage {
     ChunkUnsubscribe(ChunkPos),
     MapViewSubscribe(MapViewSubscribe),
     Ping { nonce: u32 },
+    Chat { text: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +157,7 @@ pub enum ServerMessage {
     MapChunkSnapshot(MapChunkSnapshot),
     PlayerAck(PlayerAck),
     Pong { nonce: u32 },
+    Chat(ChatLine),
 }
 
 /// Unified game message for transports.

@@ -113,27 +113,27 @@ impl GameNetClient {
         self.initial_received = false;
     }
 
-    pub fn start_embedded(&mut self, config: ServerConfig) -> Result<(), String> {
+    pub fn start_embedded(&mut self, config: ServerConfig, username: &str) -> Result<(), String> {
         self.shutdown_session();
         let (handle, client_transport) = spawn_local(config).map_err(|e| e.to_string())?;
         self.transport = Some(Box::new(client_transport));
         self.embedded = true;
         self._server_handle = Some(handle);
-        self.send_hello();
+        self.send_hello(username);
         Ok(())
     }
 
-    pub fn start_tcp(&mut self, transport: Box<dyn GameTransport>) {
+    pub fn start_tcp(&mut self, transport: Box<dyn GameTransport>, username: &str) {
         self.transport = Some(transport);
         self.embedded = false;
-        self.send_hello();
+        self.send_hello(username);
     }
 
-    pub fn send_hello(&mut self) {
+    pub fn send_hello(&mut self, username: &str) {
         if let Some(t) = self.transport.as_mut() {
             let _ = t.send(GameMessage::Client(ClientMessage::Hello(ClientHello {
                 protocol_version: PROTOCOL_VERSION,
-                client_id: 1,
+                username: username.to_string(),
             })));
         }
     }
@@ -188,6 +188,14 @@ impl GameNetClient {
     pub fn send_map_view_subscribe(&mut self, sub: MapViewSubscribe) {
         if let Some(t) = self.transport.as_mut() {
             let _ = t.send(GameMessage::Client(ClientMessage::MapViewSubscribe(sub)));
+        }
+    }
+
+    pub fn send_chat(&mut self, text: &str) {
+        if let Some(t) = self.transport.as_mut() {
+            let _ = t.send(GameMessage::Client(ClientMessage::Chat {
+                text: text.to_string(),
+            }));
         }
     }
 }

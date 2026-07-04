@@ -101,9 +101,10 @@ pub fn hotbar_keyboard(
     input_focus: Res<InputFocus>,
     editable: Query<Entity, With<EditableText>>,
     ui: Res<InventoryUiState>,
+    chat: Res<crate::chat::ChatUiState>,
     mut inventory: ResMut<CreativeInventory>,
 ) {
-    if ui.open || editable_text_has_focus(&input_focus, &editable) {
+    if ui.open || chat.input_open || editable_text_has_focus(&input_focus, &editable) {
         return;
     }
     for i in 0..HOTBAR_SLOTS {

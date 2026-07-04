@@ -1,4 +1,5 @@
 use crate::chunk_streaming::{on_chunk_unloaded_remove_biome, BiomeGridCache};
+use crate::chat::{self, chat_input_open, push_chat_line, ChatUiState};
 use crate::environment::{self, PlayerEnvironment};
 use crate::game_session::{self, in_active_gameplay, GameCamera};
 use crate::inventory::inventory_open;
@@ -90,7 +91,8 @@ impl Plugin for GamePlugin {
                         .run_if(in_active_gameplay),
                     player::capture_cursor
                         .run_if(in_active_gameplay)
-                        .run_if(not(inventory_open)),
+                        .run_if(not(inventory_open))
+                        .run_if(not(chat_input_open)),
                     player::camera_system.run_if(in_active_gameplay),
                     targeting::update_block_target
                         .after(player::capture_cursor)
@@ -132,6 +134,7 @@ impl Plugin for GamePlugin {
 
 pub(crate) fn net_poll_system(
     mut net: ResMut<GameNetClient>,
+    mut chat: ResMut<ChatUiState>,
     mut world: ResMut<WorldReplica>,
     mut mesh_scheduler: ResMut<MeshScheduler>,
     mut mesh_cache: ResMut<MeshCacheResource>,
@@ -144,6 +147,9 @@ pub(crate) fn net_poll_system(
         match msg {
             ServerMessage::CircuitPowerBatch(batch) => {
                 apply_power_batch(&mut power_overlay, &batch, &mut mesh_scheduler);
+            }
+            ServerMessage::Chat(line) => {
+                push_chat_line(&mut chat, line);
             }
             ServerMessage::MapChunkSnapshot(snap) => {
                 if let Some(q) = decode_queue.as_mut() {
@@ -189,6 +195,7 @@ fn cleanup_game_session(
     session_entities: Query<Entity, With<game_session::GameSessionEntity>>,
     debug_roots: Query<Entity, With<crate::debug_overlay::DebugOverlayRoot>>,
     minimap_roots: Query<Entity, With<crate::minimap::MinimapRoot>>,
+    chat_roots: Query<Entity, With<chat::ChatRoot>>,
     chunk_entities: Query<Entity, With<stagcrest_render::ChunkEntityMarker>>,
     inventory_screens: Query<Entity, With<crate::inventory::screen::InventoryScreenRoot>>,
     mut inventory_ui: ResMut<crate::inventory::InventoryUiState>,
@@ -207,6 +214,7 @@ fn cleanup_game_session(
         &mut inventory_ui,
         &inventory_screens,
     );
+    chat::cleanup_chat(&mut commands, &chat_roots);
     commands.remove_resource::<ModContext>();
     commands.remove_resource::<WorldReplica>();
     commands.remove_resource::<BlockAtlasResource>();

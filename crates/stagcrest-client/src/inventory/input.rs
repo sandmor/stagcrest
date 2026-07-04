@@ -2,6 +2,7 @@ use super::hotbar::InventoryScreenSlot;
 use super::screen::CatalogCell;
 use super::state::{CreativeInventory, InventoryUiState, SlotKind};
 use crate::block_icons::BlockIconCache;
+use crate::chat::ChatUiState;
 use crate::game_session::GameCamera;
 use crate::player::{release_cursor, FlyCamera, SelectedBlock};
 use crate::ui::UiTheme;
@@ -30,6 +31,7 @@ pub fn toggle_inventory_screen(
     keys: Res<ButtonInput<KeyCode>>,
     editable: Query<Entity, With<EditableText>>,
     mut ui: ResMut<InventoryUiState>,
+    chat: Res<ChatUiState>,
     mut commands: Commands,
     theme: Res<UiTheme>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
@@ -41,6 +43,9 @@ pub fn toggle_inventory_screen(
     mut input_focus: ResMut<InputFocus>,
 ) {
     if !keys.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+    if chat.input_open {
         return;
     }
     // Let the focused search field receive printable keys (including E).

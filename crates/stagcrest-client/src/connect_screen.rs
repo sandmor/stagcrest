@@ -3,10 +3,12 @@ use crate::client_content::{
 };
 use crate::game::AppState;
 use crate::net_client::GameNetClient;
+use crate::player_profile::{PlayerProfile, LOCAL_PLAYER_NAME};
 use crate::ui::UiTheme;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use serde::{Deserialize, Serialize};
+use stagcrest_content::ContentSettings;
 use stagcrest_storage::DATA_DIR;
 
 const MAX_HISTORY: usize = 10;
@@ -93,15 +95,29 @@ enum ConnectAction {
 struct ServerAddressField;
 
 #[derive(Component)]
+struct ConnectUsernameField;
+
+#[derive(Component)]
+struct ConnectUsernameHint;
+
+#[derive(Component)]
+struct ConnectAddressHint;
+
+#[derive(Component)]
 struct HistoryEntryButton;
 
 #[derive(Component)]
 struct HistoryEntryValue(String);
 
-fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>) {
+fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>, mut profile: ResMut<PlayerProfile>) {
     let history = ConnectionHistory::load();
     let entries: Vec<String> = history.0.clone();
     commands.insert_resource(history);
+
+    profile.username = ContentSettings::load(DATA_DIR)
+        .ok()
+        .map(|s| s.username().to_string())
+        .unwrap_or_else(|| LOCAL_PLAYER_NAME.to_string());
 
     commands
         .spawn((
@@ -144,11 +160,47 @@ fn spawn_connect_ui(mut commands: Commands, theme: Res<UiTheme>) {
                 })
                 .with_children(|field_row| {
                     field_row.spawn((
+                        Text::new("Username"),
+                        theme.text_font(theme.caption_size),
+                        TextColor(theme.text_muted),
+                    ));
+                    spawn_text_input(
+                        field_row,
+                        ConnectUsernameField,
+                        &theme,
+                        &profile.username,
+                        16.0,
+                        320.0,
+                    );
+                    field_row.spawn((
+                        ConnectUsernameHint,
+                        Text::new(""),
+                        theme.text_font(theme.hint_size),
+                        TextColor(theme.error_text),
+                        Visibility::Hidden,
+                    ));
+                });
+
+                menu.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                    width: Val::Percent(100.0),
+                    ..default()
+                })
+                .with_children(|field_row| {
+                    field_row.spawn((
                         Text::new("Server Address"),
                         theme.text_font(theme.caption_size),
                         TextColor(theme.text_muted),
                     ));
                     spawn_text_input(field_row, ServerAddressField, &theme, "", 32.0, 320.0);
+                    field_row.spawn((
+                        ConnectAddressHint,
+                        Text::new(""),
+                        theme.text_font(theme.hint_size),
+                        TextColor(theme.error_text),
+                        Visibility::Hidden,
+                    ));
                 });
 
                 if !entries.is_empty() {
@@ -215,6 +267,7 @@ fn connect_button_system(
     mut next_state: ResMut<NextState<AppState>>,
     mut net: ResMut<GameNetClient>,
     mut history: ResMut<ConnectionHistory>,
+    mut profile: ResMut<PlayerProfile>,
     theme: Res<UiTheme>,
     mut queries: ParamSet<(
         Query<
@@ -227,18 +280,51 @@ fn connect_button_system(
         >,
     )>,
     address_fields: Query<&EditableText, With<ServerAddressField>>,
+    username_fields: Query<&EditableText, With<ConnectUsernameField>>,
+    mut username_hints: Query<(&mut Text, &mut Visibility), (With<ConnectUsernameHint>, Without<ConnectAddressHint>)>,
+    mut address_hints: Query<(&mut Text, &mut Visibility), (With<ConnectAddressHint>, Without<ConnectUsernameHint>)>,
 ) {
+    let mut try_connect = |addr: String,
+                           net: &mut GameNetClient,
+                           history: &mut ConnectionHistory,
+                           next_state: &mut NextState<AppState>,
+                           profile: &mut PlayerProfile| {
+        clear_connect_hints(&mut username_hints, &mut address_hints);
+
+        let username = username_fields
+            .iter()
+            .next()
+            .map(|t| t.value().to_string().trim().to_string())
+            .unwrap_or_default();
+        if let Err(e) = profile.save_username(username) {
+            show_hint(&mut username_hints, &e.to_string());
+            return;
+        }
+
+        let addr = normalize_addr(&addr);
+        if addr.is_empty() || addr.starts_with(':') {
+            show_hint(&mut address_hints, "Enter a valid server address");
+            return;
+        }
+
+        history.push_front(addr.clone());
+        history.save();
+        net.connect_addr = Some(addr);
+        net.embedded = false;
+        next_state.set(AppState::Loading);
+    };
+
     // Handle history entry clicks (connect directly)
     for (interaction, addr, mut bg) in &mut queries.p0() {
         match *interaction {
             Interaction::Pressed => {
-                let addr = normalize_addr(&addr.0);
-                history.push_front(addr.clone());
-                history.save();
-
-                net.connect_addr = Some(addr);
-                net.embedded = false;
-                next_state.set(AppState::Loading);
+                try_connect(
+                    addr.0.clone(),
+                    &mut net,
+                    &mut history,
+                    &mut next_state,
+                    &mut profile,
+                );
             }
             Interaction::Hovered | Interaction::None => {
                 handle_button_hover(*interaction, &theme, &mut bg, theme.catalog_cell_bg);
@@ -256,17 +342,7 @@ fn connect_button_system(
                         .next()
                         .map(|t| t.value().to_string())
                         .unwrap_or_default();
-                    let addr = normalize_addr(&addr);
-                    if addr.is_empty() || addr.starts_with(':') {
-                        continue;
-                    }
-
-                    history.push_front(addr.clone());
-                    history.save();
-
-                    net.connect_addr = Some(addr);
-                    net.embedded = false;
-                    next_state.set(AppState::Loading);
+                    try_connect(addr, &mut net, &mut history, &mut next_state, &mut profile);
                 }
                 ConnectAction::Back => {
                     next_state.set(AppState::MainMenu);
@@ -276,5 +352,35 @@ fn connect_button_system(
                 handle_button_hover(*interaction, &theme, &mut bg, theme.button_bg);
             }
         }
+    }
+}
+
+fn clear_connect_hints(
+    username_hints: &mut Query<
+        (&mut Text, &mut Visibility),
+        (With<ConnectUsernameHint>, Without<ConnectAddressHint>),
+    >,
+    address_hints: &mut Query<
+        (&mut Text, &mut Visibility),
+        (With<ConnectAddressHint>, Without<ConnectUsernameHint>),
+    >,
+) {
+    if let Ok((mut hint, mut vis)) = username_hints.single_mut() {
+        hint.0 = String::new();
+        *vis = Visibility::Hidden;
+    }
+    if let Ok((mut hint, mut vis)) = address_hints.single_mut() {
+        hint.0 = String::new();
+        *vis = Visibility::Hidden;
+    }
+}
+
+fn show_hint(
+    hints: &mut Query<(&mut Text, &mut Visibility), impl bevy::ecs::query::QueryFilter>,
+    message: &str,
+) {
+    if let Ok((mut hint, mut vis)) = hints.single_mut() {
+        hint.0 = message.to_string();
+        *vis = Visibility::Visible;
     }
 }

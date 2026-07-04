@@ -8,10 +8,12 @@ use bevy::prelude::*;
 use bevy::tasks::{block_on, IoTaskPool, Task};
 use futures_lite::future;
 use stagcrest_atlas::AtlasLimits;
+use stagcrest_content::ContentSettings;
 use stagcrest_mod_client::content::ContentRuntime;
 use stagcrest_protocol::manifest::{ContentManifest, TextureAssetTransfer};
 use stagcrest_protocol::BlockId;
 use stagcrest_render::{next_atlas_revision, BlockAtlasResource, MeshCacheResource};
+use stagcrest_storage::DATA_DIR;
 
 pub struct LoadingPlugin;
 
@@ -21,6 +23,7 @@ struct LoadingState {
     done: bool,
     error: Option<String>,
     tcp_connect: Option<Task<Result<Box<dyn stagcrest_net::GameTransport>, String>>>,
+    pending_username: Option<String>,
     pending_manifest: Option<ContentManifest>,
     pending_textures: Vec<TextureAssetTransfer>,
     all_textures_received: bool,
@@ -63,6 +66,7 @@ fn start_connection_system(
     mut net: ResMut<GameNetClient>,
     config: Res<GameConfig>,
     selected: Res<SelectedWorld>,
+    profile: Res<crate::player_profile::PlayerProfile>,
 ) {
     if state.started {
         return;
@@ -91,14 +95,23 @@ fn start_connection_system(
         max_clients: 1,
     };
 
+    let username = ContentSettings::load(DATA_DIR)
+        .ok()
+        .map(|s| s.username().to_string())
+        .unwrap_or_else(|| profile.username.clone());
+
     if let Some(addr) = net.connect_addr.clone() {
         let net_config = net.net_config.clone();
         state.tcp_connect =
             Some(IoTaskPool::get().spawn(async move { connect_tcp(&addr, net_config).await }));
+        state.pending_username = Some(username);
         return;
     }
 
-    match net.start_embedded(server_config) {
+    match net.start_embedded(
+        server_config,
+        crate::player_profile::LOCAL_PLAYER_NAME,
+    ) {
         Ok(()) => {}
         Err(e) => {
             state.error = Some(e);
@@ -115,8 +128,11 @@ fn poll_tcp_connect_system(mut state: ResMut<LoadingState>, mut net: ResMut<Game
         return;
     }
     let mut finished = state.tcp_connect.take().unwrap();
+    let username = state.pending_username.take().unwrap_or_else(|| {
+        crate::player_profile::LOCAL_PLAYER_NAME.to_string()
+    });
     match block_on(future::poll_once(&mut finished)) {
-        Some(Ok(transport)) => net.start_tcp(transport),
+        Some(Ok(transport)) => net.start_tcp(transport, &username),
         Some(Err(err)) => {
             state.error = Some(err);
             state.done = true;
@@ -131,6 +147,7 @@ fn poll_tcp_connect_system(mut state: ResMut<LoadingState>, mut net: ResMut<Game
 fn poll_connection_system(
     mut state: ResMut<LoadingState>,
     mut net: ResMut<GameNetClient>,
+    mut chat: ResMut<crate::chat::ChatUiState>,
     mut commands: Commands,
     config: Res<GameConfig>,
     mut next_state: ResMut<NextState<AppState>>,
@@ -163,6 +180,9 @@ fn poll_connection_system(
             }
             ServerMessage::Initial(_) => {
                 net.initial_received = true;
+            }
+            ServerMessage::Chat(line) => {
+                crate::chat::push_chat_line(&mut chat, line);
             }
             _ => {}
         }

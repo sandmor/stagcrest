@@ -5244,6 +5244,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stagcrest-modrinth",
+ "stagcrest-protocol",
  "stagcrest-storage",
  "tempfile",
  "thiserror 2.0.18",

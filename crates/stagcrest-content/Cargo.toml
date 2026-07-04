@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 stagcrest-modrinth.workspace = true
+stagcrest-protocol.workspace = true
 stagcrest-storage.workspace = true
 serde.workspace = true
 serde_json.workspace = true

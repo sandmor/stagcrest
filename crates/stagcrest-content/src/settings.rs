@@ -18,12 +18,34 @@ pub enum SettingsError {
     UnknownPack(String),
     #[error("invalid resource pack path: {0}")]
     InvalidPath(String),
+    #[error("invalid username: {0}")]
+    InvalidUsername(String),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContentSettingsFile {
     #[serde(default)]
     pub content: ContentSection,
+    #[serde(default)]
+    pub player: PlayerSection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerSection {
+    #[serde(default = "default_username")]
+    pub username: String,
+}
+
+impl Default for PlayerSection {
+    fn default() -> Self {
+        Self {
+            username: default_username(),
+        }
+    }
+}
+
+fn default_username() -> String {
+    "Player".into()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -230,6 +252,20 @@ impl ContentSettings {
 
     pub fn content_mut(&mut self) -> &mut ContentSection {
         &mut self.file.content
+    }
+
+    pub fn player(&self) -> &PlayerSection {
+        &self.file.player
+    }
+
+    pub fn username(&self) -> &str {
+        &self.file.player.username
+    }
+
+    pub fn set_username(&mut self, username: String) -> Result<(), SettingsError> {
+        stagcrest_protocol::validate_username(&username).map_err(SettingsError::InvalidUsername)?;
+        self.file.player.username = username;
+        Ok(())
     }
 
     pub fn resource_pack_setup_dismissed(&self) -> bool {
@@ -464,5 +500,24 @@ mod tests {
         settings.move_pack("c", MoveDirection::Up).unwrap();
         settings.move_pack("c", MoveDirection::Up).unwrap();
         assert_eq!(settings.content().resource_pack_order, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn username_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let mut settings = ContentSettings::empty(dir.path());
+        settings.set_username("Steve".into()).unwrap();
+        settings.save().unwrap();
+
+        let loaded = ContentSettings::load(dir.path()).unwrap();
+        assert_eq!(loaded.username(), "Steve");
+    }
+
+    #[test]
+    fn username_validation_rejects_short_name() {
+        let dir = TempDir::new().unwrap();
+        let mut settings = ContentSettings::empty(dir.path());
+        let err = settings.set_username("ab".into()).unwrap_err();
+        assert!(matches!(err, SettingsError::InvalidUsername(_)));
     }
 }

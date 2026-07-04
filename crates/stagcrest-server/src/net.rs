@@ -1,19 +1,29 @@
 use stagcrest_minimap::{expected_subscribe_tiles, MINIMAP_ZOOM_LEVELS};
 use stagcrest_net::{
-    ClientHello, ClientMessage, GameMessage, InitialState, MapViewSubscribe, PlayerPose,
-    ServerHello, ServerMessage, PROTOCOL_VERSION,
+    validate_username, ChatKind, ChatLine, ClientHello, ClientMessage, GameMessage, InitialState,
+    MapViewSubscribe, PlayerPose, ServerHello, ServerMessage, PROTOCOL_VERSION,
 };
 use stagcrest_protocol::BlockPos;
 
 use crate::client_session::{ClientId, ClientRegistry, ConnectedClient};
 use crate::GameServer;
 
-pub fn handle_client_hello(_server: &GameServer, hello: ClientHello) -> Result<(), String> {
+pub fn handle_client_hello(
+    clients: &ClientRegistry,
+    client_id: ClientId,
+    hello: ClientHello,
+) -> Result<(), String> {
     if hello.protocol_version != PROTOCOL_VERSION {
         return Err(format!(
             "protocol mismatch: client {} server {}",
             hello.protocol_version, PROTOCOL_VERSION
         ));
+    }
+    validate_username(&hello.username)?;
+    if clients.clients().iter().any(|c| {
+        c.id != client_id && c.username.as_deref() == Some(hello.username.as_str())
+    }) {
+        return Err("username already in use".into());
     }
     Ok(())
 }
@@ -70,12 +80,17 @@ pub fn handle_client_message(
 ) {
     match msg {
         ClientMessage::Hello(hello) => {
-            let result = handle_client_hello(server, hello);
+            let username = hello.username.clone();
+            let result = handle_client_hello(clients, client_id, hello);
             let Some(client) = clients.get_mut(client_id) else {
                 return;
             };
             match result {
-                Ok(()) => send_handshake(server, client),
+                Ok(()) => {
+                    client.username = Some(username);
+                    client.join_announced = false;
+                    send_handshake(server, client);
+                }
                 Err(reason) => client.queue_priority(GameMessage::Server(ServerMessage::Reject(
                     stagcrest_net::HelloReject { reason },
                 ))),
@@ -106,6 +121,25 @@ pub fn handle_client_message(
             if let Some(client) = clients.get_mut(client_id) {
                 client.queue_priority(GameMessage::Server(ServerMessage::Pong { nonce }));
             }
+        }
+        ClientMessage::Chat { text } => {
+            let Some(client) = clients.get(client_id) else {
+                return;
+            };
+            if !client.handshake_complete {
+                return;
+            }
+            let Some(sender) = client.username.clone() else {
+                return;
+            };
+            let text = text.trim().to_string();
+            if text.is_empty() || text.len() > 256 {
+                return;
+            }
+            clients.broadcast_chat(ChatLine {
+                kind: ChatKind::Player { sender },
+                text,
+            });
         }
     }
 }
@@ -138,5 +172,46 @@ impl GameServer {
     pub(crate) fn spawn_position(&self) -> BlockPos {
         use stagcrest_mod_server::SEA_LEVEL;
         BlockPos::new(8, SEA_LEVEL + 16, 8)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_session::ClientRegistry;
+    use stagcrest_net::{ClientHello, PROTOCOL_VERSION};
+
+    #[test]
+    fn hello_rejects_invalid_username() {
+        let mut registry = ClientRegistry::new(16);
+        let id = registry.register_inprocess();
+        let err = handle_client_hello(
+            &registry,
+            id,
+            ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                username: "ab".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("3–16"));
+    }
+
+    #[test]
+    fn hello_rejects_duplicate_username() {
+        let mut registry = ClientRegistry::new(16);
+        let first = registry.register_inprocess();
+        registry.get_mut(first).unwrap().username = Some("Steve".into());
+        let second = registry.register_inprocess();
+        let err = handle_client_hello(
+            &registry,
+            second,
+            ClientHello {
+                protocol_version: PROTOCOL_VERSION,
+                username: "Steve".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("already in use"));
     }
 }

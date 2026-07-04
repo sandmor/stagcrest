@@ -848,6 +848,39 @@ fn rem_euclid(a: i32, b: i32) -> i32 {
     ((a % b) + b) % b
 }
 
+/// Minecraft-style username rules: 3–16 alphanumeric/underscore characters.
+pub fn validate_username(name: &str) -> Result<(), String> {
+    let len = name.len();
+    if !(3..=16).contains(&len) {
+        return Err("username must be 3–16 characters".into());
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err("username may only contain letters, numbers, and underscores".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::validate_username;
+
+    #[test]
+    fn validate_username_accepts_minecraft_style_names() {
+        assert!(validate_username("Steve").is_ok());
+        assert!(validate_username("Notch_123").is_ok());
+    }
+
+    #[test]
+    fn validate_username_rejects_invalid_names() {
+        assert!(validate_username("ab").is_err());
+        assert!(validate_username("has space").is_err());
+        assert!(validate_username("way_too_long_username").is_err());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
