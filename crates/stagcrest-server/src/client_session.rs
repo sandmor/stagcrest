@@ -167,6 +167,15 @@ impl ClientRegistry {
         }
     }
 
+    pub fn broadcast_world_time(&mut self, time: f64) {
+        let msg = GameMessage::Server(ServerMessage::WorldTime { time });
+        for client in self.clients.iter_mut() {
+            if client.handshake_complete {
+                client.queue_priority(msg.clone());
+            }
+        }
+    }
+
     pub fn announce_join(&mut self, client_id: ClientId) {
         let Some(client) = self.get(client_id) else {
             return;

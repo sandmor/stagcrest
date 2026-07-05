@@ -12,6 +12,7 @@ mod persistence;
 mod player;
 mod session;
 mod streaming;
+mod world_time;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -94,6 +95,7 @@ pub struct GameServer {
     pub air: BlockId,
     pub registry: BlockRegistry,
     circuit_accumulator: f32,
+    world_time_broadcast: f32,
     pub server_id: u64,
     cached_manifest: stagcrest_protocol::manifest::ContentManifest,
     cached_texture_chunks: Vec<TextureAssetsChunk>,
@@ -191,6 +193,7 @@ impl GameServer {
             air,
             registry,
             circuit_accumulator: 0.0,
+            world_time_broadcast: 0.0,
             server_id: 1,
             cached_manifest,
             cached_texture_chunks,
@@ -243,6 +246,17 @@ impl GameServer {
 
     pub fn tick(&mut self, clients: &mut ClientRegistry, dt_secs: f32) {
         const CIRCUIT_TICK_INTERVAL: f32 = 0.1;
+        const WORLD_TIME_BROADCAST_INTERVAL: f32 = 1.0;
+
+        self.session.meta.world_time =
+            world_time::advance_world_time(self.session.meta.world_time, dt_secs);
+
+        self.world_time_broadcast += dt_secs;
+        if self.world_time_broadcast >= WORLD_TIME_BROADCAST_INTERVAL {
+            self.world_time_broadcast = 0.0;
+            let time = self.session.meta.world_time;
+            clients.broadcast_world_time(time);
+        }
 
         self.circuit_accumulator += dt_secs;
         while self.circuit_accumulator >= CIRCUIT_TICK_INTERVAL {

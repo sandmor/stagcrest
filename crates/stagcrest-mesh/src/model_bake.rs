@@ -6,6 +6,8 @@ use stagcrest_protocol::{
     ModelTexture,
 };
 
+use crate::{encode_normal_axis, pack_light, vertex_ao};
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuMeshVertex {
@@ -14,8 +16,13 @@ pub struct GpuMeshVertex {
     pub overlay_uv: [f32; 2],
     pub tint: f32,
     pub overlay_tint: f32,
+    pub tint_mul: [f32; 3],
     pub atlas_index: f32,
     pub overlay_atlas_index: f32,
+    pub normal: u8,
+    pub light: u8,
+    pub ao: u8,
+    pub flags: u8,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -141,8 +148,47 @@ fn bake_element(
             oah,
             tint,
             overlay_tint,
+            face,
         );
     }
+}
+
+const FACE_NORMALS: [[f32; 3]; 6] = [
+    [0.0, -1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, -1.0],
+    [0.0, 0.0, 1.0],
+    [-1.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0],
+];
+
+const WHITE_TINT_MUL: [f32; 3] = [1.0, 1.0, 1.0];
+
+fn quad_normal(corners: &[[f32; 3]; 4]) -> [f32; 3] {
+    let ax = corners[1][0] - corners[0][0];
+    let ay = corners[1][1] - corners[0][1];
+    let az = corners[1][2] - corners[0][2];
+    let bx = corners[3][0] - corners[0][0];
+    let by = corners[3][1] - corners[0][1];
+    let bz = corners[3][2] - corners[0][2];
+    let nx = ay * bz - az * by;
+    let ny = az * bx - ax * bz;
+    let nz = ax * by - ay * bx;
+    let len = (nx * nx + ny * ny + nz * nz).sqrt();
+    if len > 0.0 {
+        [nx / len, ny / len, nz / len]
+    } else {
+        [0.0, 1.0, 0.0]
+    }
+}
+
+fn default_vertex_shade(normal: [f32; 3], _corner: u8) -> (u8, u8, u8, u8) {
+    (
+        encode_normal_axis(glam::Vec3::from_array(normal)),
+        pack_light(15, 0),
+        vertex_ao(3),
+        0,
+    )
 }
 
 const FULL_UV: [[f32; 2]; 4] = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
@@ -156,16 +202,23 @@ fn push_quad(
     tint: f32,
     overlay_tint: f32,
 ) {
+    let normal = quad_normal(corners);
     let base = mesh.vertices.len() as u32;
     for (i, pos) in corners.iter().enumerate() {
+        let (normal_enc, light_enc, ao, flags) = default_vertex_shade(normal, i as u8);
         mesh.vertices.push(GpuMeshVertex {
             position: *pos,
             uv: uvs[i],
             overlay_uv: overlay_uvs[i],
             tint,
             overlay_tint,
+            tint_mul: WHITE_TINT_MUL,
             atlas_index: 0.0,
             overlay_atlas_index: 0.0,
+            normal: normal_enc,
+            light: light_enc,
+            ao,
+            flags,
         });
     }
     mesh.indices
@@ -184,7 +237,9 @@ fn push_model_face(
     oah: u32,
     tint: f32,
     overlay_tint: f32,
+    face: usize,
 ) {
+    let normal = FACE_NORMALS[face];
     let mut uvs = [[0.0f32; 2]; 4];
     let mut overlay_uvs = [[0.0f32; 2]; 4];
     for (i, uv) in uv_pixels.iter().enumerate() {
@@ -199,14 +254,20 @@ fn push_model_face(
     }
     let base = mesh.vertices.len() as u32;
     for (i, pos) in corners.iter().enumerate() {
+        let (normal_enc, light_enc, ao, flags) = default_vertex_shade(normal, i as u8);
         mesh.vertices.push(GpuMeshVertex {
             position: *pos,
             uv: uvs[i],
             overlay_uv: overlay_uvs[i],
             tint,
             overlay_tint,
+            tint_mul: WHITE_TINT_MUL,
             atlas_index: atlas_uv.atlas_index as f32,
             overlay_atlas_index: overlay_atlas.atlas_index as f32,
+            normal: normal_enc,
+            light: light_enc,
+            ao,
+            flags,
         });
     }
     mesh.indices

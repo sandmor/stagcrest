@@ -26,6 +26,7 @@ struct LoadingState {
     pending_username: Option<String>,
     pending_manifest: Option<ContentManifest>,
     pending_textures: Vec<TextureAssetTransfer>,
+    pending_world_time: Option<f64>,
     all_textures_received: bool,
 }
 
@@ -178,8 +179,9 @@ fn poll_connection_system(
                     state.all_textures_received = true;
                 }
             }
-            ServerMessage::Initial(_) => {
+            ServerMessage::Initial(initial) => {
                 net.initial_received = true;
+                state.pending_world_time = Some(initial.world_time);
             }
             ServerMessage::Chat(line) => {
                 crate::chat::push_chat_line(&mut chat, line);
@@ -232,6 +234,11 @@ fn poll_connection_system(
                     fluid_anim,
                 });
                 commands.insert_resource(MeshCacheResource::default());
+                let mut wt = crate::world_time::WorldTime::default();
+                if let Some(t) = state.pending_world_time.take() {
+                    wt.set_from_server(t);
+                }
+                commands.insert_resource(wt);
                 net.handshake_done = true;
             }
             Err(err) => {

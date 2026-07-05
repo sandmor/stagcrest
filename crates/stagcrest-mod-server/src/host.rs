@@ -166,6 +166,9 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         push_reaction,
         map_color: json.map_color,
         redstone_powerable,
+        light_emission: json.light_emission,
+        light_attenuation: json.light_attenuation,
+        blocks_sky_light: json.blocks_sky_light,
     });
 }
 

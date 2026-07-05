@@ -1,6 +1,7 @@
 mod block_model;
 mod chunk_build;
 mod greedy_mesh;
+mod light;
 mod mesh_snapshot;
 mod model_bake;
 
@@ -22,6 +23,10 @@ pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
 pub use chunk_build::build_chunk_mesh_snapshot;
+pub use light::{
+    encode_normal_axis, pack_light, shade_vertex, vertex_ao, ChunkLightGrid, LightBuildContext,
+    LightSampler, LightingContext, GRID_SIZE,
+};
 pub use greedy_mesh::greedy_mesh_enabled;
 pub use mesh_snapshot::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
 pub use model_bake::{
@@ -39,7 +44,14 @@ pub struct VoxelVertex {
     pub tint_mul: [f32; 3],
     pub atlas_index: f32,
     pub overlay_atlas_index: f32,
+    pub normal: u8,
+    pub light: u8,
+    pub ao: u8,
+    pub flags: u8,
 }
+
+pub const VERTEX_FLAG_EMISSIVE: u8 = 1;
+pub const VERTEX_FLAG_FACES_FLUID: u8 = 2;
 
 #[derive(Debug, Clone, Default)]
 pub struct ChunkMesh {
@@ -168,6 +180,8 @@ fn build_single_block_mesh_internal(
             registry,
             0,
             0,
+            0,
+            None,
             None,
             None,
         );
@@ -197,9 +211,11 @@ fn build_single_block_mesh_internal(
         state,
         0,
         0,
+        0,
         None,
         None,
         |_| false,
+        None,
         None,
     );
     mesh
@@ -275,11 +291,13 @@ pub(crate) fn emit_block_geometry(
     power: u8,
     state: BlockState,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
     mut should_cull: impl FnMut(Vec3) -> bool,
     wire_connections: Option<WireConnections>,
+    light: Option<&LightingContext<'_>>,
 ) {
     match geometry {
         BlockGeometry::Cube => emit_cube_faces(
@@ -289,10 +307,12 @@ pub(crate) fn emit_block_geometry(
             cube_bucket,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
             &mut should_cull,
+            light,
         ),
         BlockGeometry::Flat => {
             if let Some(connections) = wire_connections {
@@ -305,9 +325,11 @@ pub(crate) fn emit_block_geometry(
                     power,
                     registry,
                     lx,
+                    ly,
                     lz,
                     climate,
                     column_tints,
+                    light,
                 );
             } else {
                 emit_flat(
@@ -317,9 +339,11 @@ pub(crate) fn emit_block_geometry(
                     power,
                     registry,
                     lx,
+                    ly,
                     lz,
                     climate,
                     column_tints,
+                    light,
                 );
             }
         }
@@ -331,15 +355,29 @@ pub(crate) fn emit_block_geometry(
                 power,
                 registry,
                 lx,
+                ly,
                 lz,
                 climate,
                 column_tints,
+                light,
             );
         }
         BlockGeometry::Model(model_id) => {
             let model = resolve_block_model(models, model_id, namespaced_id, state);
-            // Circuit power tints wire line geometry; models use state-driven textures.
-            emit_block_model(mesh, origin, model, face_textures, 0, registry);
+            emit_block_model(
+                mesh,
+                origin,
+                model,
+                face_textures,
+                power,
+                registry,
+                lx,
+                ly,
+                lz,
+                climate,
+                column_tints,
+                light,
+            );
         }
     }
 }
@@ -351,10 +389,12 @@ fn emit_cube_faces(
     bucket: MeshBucket,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
     mut should_cull: impl FnMut(Vec3) -> bool,
+    light: Option<&LightingContext<'_>>,
 ) {
     let faces: [(Vec3, FaceTexture); 6] = [
         (
@@ -384,9 +424,11 @@ fn emit_cube_faces(
             bucket,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
+            light,
         );
     }
 }
@@ -442,6 +484,12 @@ fn texture_uv_corners(
     )
 }
 
+fn quad_normal(corners: [[f32; 3]; 4]) -> Vec3 {
+    let a = Vec3::from_array(corners[1]) - Vec3::from_array(corners[0]);
+    let b = Vec3::from_array(corners[3]) - Vec3::from_array(corners[0]);
+    a.cross(b).normalize_or_zero()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_wire_quad_raw(
     mesh: &mut ChunkMesh,
@@ -452,9 +500,11 @@ fn emit_wire_quad_raw(
     power_tinted: bool,
     registry: &BlockRegistry,
     lx: i32,
+    _ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let face_tex = FaceTexture {
         texture: tex_id,
@@ -473,9 +523,11 @@ fn emit_wire_quad_raw(
         0.0
     };
     let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
+    let normal = quad_normal(corners);
     let (verts, indices) = block_model::mesh_buffers(mesh, MeshBucket::Cutout);
     let base = verts.len() as u32;
     for (i, pos) in corners.iter().enumerate() {
+        let (normal_enc, light_enc, ao, flags) = shade_vertex(light, normal, i as u8);
         verts.push(VoxelVertex {
             position: *pos,
             uv: [uvs[i].0, uvs[i].1],
@@ -485,6 +537,10 @@ fn emit_wire_quad_raw(
             tint_mul,
             atlas_index: atlas_index as f32,
             overlay_atlas_index: 0.0,
+            normal: normal_enc,
+            light: light_enc,
+            ao,
+            flags,
         });
     }
     indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -501,9 +557,11 @@ fn emit_wire_layer_pair(
     power: u8,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     if let Some(overlay_tex) = overlay_tex {
         let overlay_rect = registry.atlas_uv(overlay_tex);
@@ -517,9 +575,11 @@ fn emit_wire_layer_pair(
                 false,
                 registry,
                 lx,
+                ly,
                 lz,
                 climate,
                 column_tints,
+                light,
             );
         }
     }
@@ -532,9 +592,11 @@ fn emit_wire_layer_pair(
         true,
         registry,
         lx,
+        ly,
         lz,
         climate,
         column_tints,
+        light,
     );
 }
 
@@ -547,9 +609,11 @@ fn emit_wire_line(
     power: u8,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let o = origin;
     let line_y = o[1] + block_model::FLAT_Y + DUST_LAYER_EPS;
@@ -572,9 +636,11 @@ fn emit_wire_line(
             power,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
+            light,
         );
     }
 
@@ -629,9 +695,11 @@ fn emit_wire_line(
                     power,
                     registry,
                     lx,
+                    ly,
                     lz,
                     climate,
                     column_tints,
+                    light,
                 );
             }
             WireLink::Up => {
@@ -687,9 +755,11 @@ fn emit_wire_line(
                     power,
                     registry,
                     lx,
+                    ly,
                     lz,
                     climate,
                     column_tints,
+                    light,
                 );
             }
             WireLink::None => {}
@@ -704,9 +774,11 @@ fn emit_flat(
     power: u8,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let o = origin;
     let y = o[1] + block_model::FLAT_Y;
@@ -724,9 +796,11 @@ fn emit_flat(
         MeshBucket::Cutout,
         registry,
         lx,
+        ly,
         lz,
         climate,
         column_tints,
+        light,
         false,
     );
 }
@@ -738,9 +812,11 @@ fn emit_cross_plants(
     power: u8,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let uniform = face_textures.sides;
     let layered = face_textures.top.texture != face_textures.bottom.texture;
@@ -754,9 +830,11 @@ fn emit_cross_plants(
             power,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
+            light,
         );
         emit_cross_layer(
             mesh,
@@ -767,9 +845,11 @@ fn emit_cross_plants(
             power,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
+            light,
         );
     } else {
         emit_cross_layer(
@@ -781,9 +861,11 @@ fn emit_cross_plants(
             power,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
+            light,
         );
     }
 }
@@ -797,9 +879,11 @@ fn emit_cross_layer(
     power: u8,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let o = origin;
     let y_bottom = o[1] + y0;
@@ -825,9 +909,11 @@ fn emit_cross_layer(
             MeshBucket::Cutout,
             registry,
             lx,
+            ly,
             lz,
             climate,
             column_tints,
+            light,
             true,
         );
     }
@@ -947,9 +1033,11 @@ fn emit_face_from_texture(
     bucket: MeshBucket,
     registry: &BlockRegistry,
     lx: i32,
+    _ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let uv_rect = registry.atlas_uv(face_tex.texture);
     let overlay_uv =
@@ -977,6 +1065,7 @@ fn emit_face_from_texture(
         tint_mul,
         bucket,
         registry,
+        light,
     );
 }
 
@@ -1039,9 +1128,11 @@ pub(crate) fn emit_quad(
     bucket: MeshBucket,
     registry: &BlockRegistry,
     lx: i32,
+    ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
     double_sided: bool,
 ) {
     let (tile_u, tile_v) = quad_block_tiles(corners);
@@ -1057,9 +1148,11 @@ pub(crate) fn emit_quad(
                     bucket,
                     registry,
                     lx,
+                    ly,
                     lz,
                     climate,
                     column_tints,
+                    light,
                     double_sided,
                 );
             }
@@ -1075,9 +1168,11 @@ pub(crate) fn emit_quad(
         bucket,
         registry,
         lx,
+        ly,
         lz,
         climate,
         column_tints,
+        light,
         double_sided,
     );
 }
@@ -1090,9 +1185,11 @@ fn emit_quad_single(
     bucket: MeshBucket,
     registry: &BlockRegistry,
     lx: i32,
+    _ly: i32,
     lz: i32,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
     double_sided: bool,
 ) {
     let uv_rect = registry.atlas_uv(face_tex.texture);
@@ -1121,8 +1218,10 @@ fn emit_quad_single(
     let overlay_uvs = [(ou0, ov1), (ou1, ov1), (ou1, ov0), (ou0, ov0)];
     let tint = vertex_tint(face_tex, power);
     let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
+    let normal = quad_normal(corners);
 
     for (i, pos) in corners.iter().enumerate() {
+        let (normal_enc, light_enc, ao, flags) = shade_vertex(light, normal, i as u8);
         verts.push(VoxelVertex {
             position: *pos,
             uv: [uvs[i].0, uvs[i].1],
@@ -1132,6 +1231,10 @@ fn emit_quad_single(
             tint_mul,
             atlas_index: uv_rect.atlas_index as f32,
             overlay_atlas_index: overlay_uv.atlas_index as f32,
+            normal: normal_enc,
+            light: light_enc,
+            ao,
+            flags,
         });
     }
 
@@ -1154,6 +1257,7 @@ fn emit_face(
     tint_mul: [f32; 3],
     bucket: MeshBucket,
     registry: &BlockRegistry,
+    light: Option<&LightingContext<'_>>,
 ) {
     let (verts, indices) = block_model::mesh_buffers(mesh, bucket);
 
@@ -1177,6 +1281,7 @@ fn emit_face(
             2 => (ou1, ov0),
             _ => (ou0, ov0),
         };
+        let (normal_enc, light_enc, ao, flags) = shade_vertex(light, normal, i as u8);
         verts.push(VoxelVertex {
             position: *pos,
             uv: [u, v],
@@ -1186,6 +1291,10 @@ fn emit_face(
             tint_mul,
             atlas_index: uv.atlas_index as f32,
             overlay_atlas_index: overlay_uv_rect.atlas_index as f32,
+            normal: normal_enc,
+            light: light_enc,
+            ao,
+            flags,
         });
     }
 
@@ -1273,6 +1382,9 @@ mod tests {
                 fluid,
                 false,
             ),
+            light_emission: 0,
+            light_attenuation: 0,
+            blocks_sky_light: None,
         }
     }
 

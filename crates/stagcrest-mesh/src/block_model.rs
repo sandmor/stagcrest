@@ -1,10 +1,14 @@
+use glam::Vec3;
 use stagcrest_mod_client::BlockRegistry;
 use stagcrest_protocol::{
     AtlasRect, BlockFaceTextures, BlockGeometry, BlockModel, FaceTexture, ModelAxis, ModelElement,
     ModelFace, ModelRenderLayer, ModelRotation, ModelTexture, TintKind,
 };
 
-use crate::{vertex_tint, ChunkMesh, VoxelVertex};
+use crate::{
+    face_tint_mul, shade_vertex, vertex_tint, ColumnTintCache, ChunkMesh, LightingContext,
+    MeshClimateTint, VoxelVertex,
+};
 
 /// Block-space center of a voxel cell, used as the pivot for the whole-model
 /// orientation rotation.
@@ -17,6 +21,12 @@ pub fn emit_block_model(
     face_textures: &BlockFaceTextures,
     power: u8,
     registry: &BlockRegistry,
+    lx: i32,
+    ly: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let bucket = layer_bucket(model.layer);
     for element in &model.elements {
@@ -30,6 +40,12 @@ pub fn emit_block_model(
             power,
             bucket,
             registry,
+            lx,
+            ly,
+            lz,
+            climate,
+            column_tints,
+            light,
         );
     }
 }
@@ -85,6 +101,12 @@ fn emit_element(
     power: u8,
     bucket: MeshBucket,
     registry: &BlockRegistry,
+    lx: i32,
+    _ly: i32,
+    lz: i32,
+    climate: Option<&MeshClimateTint<'_>>,
+    column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightingContext<'_>>,
 ) {
     let transformed: [[f32; 3]; 8] = element_corners_block_local(element, model_rotation)
         .map(|p| [origin[0] + p[0], origin[1] + p[1], origin[2] + p[2]]);
@@ -110,6 +132,7 @@ fn emit_element(
         face_tex.tint.as_f32()
     };
     let overlay_tint = face_tex.overlay_tint.as_f32();
+    let tint_mul = face_tint_mul(&face_tex, lx, lz, climate, column_tints);
 
     for face in 0..6 {
         let Some(face_def) = element.faces[face] else {
@@ -135,10 +158,22 @@ fn emit_element(
             oah,
             tint,
             overlay_tint,
+            tint_mul,
+            FACE_NORMALS[face],
             bucket,
+            light,
         );
     }
 }
+
+const FACE_NORMALS: [Vec3; 6] = [
+    Vec3::new(0.0, -1.0, 0.0),
+    Vec3::new(0.0, 1.0, 0.0),
+    Vec3::new(0.0, 0.0, -1.0),
+    Vec3::new(0.0, 0.0, 1.0),
+    Vec3::new(-1.0, 0.0, 0.0),
+    Vec3::new(1.0, 0.0, 0.0),
+];
 
 /// Corner indices per face (`BoxFace` order: Down, Up, North, South, West,
 /// East). The winding matches the working axis-aligned cube faces so model
@@ -265,7 +300,10 @@ fn emit_model_face(
     oah: u32,
     tint: f32,
     overlay_tint: f32,
+    tint_mul: [f32; 3],
+    normal: Vec3,
     bucket: MeshBucket,
+    light: Option<&LightingContext<'_>>,
 ) {
     let (verts, indices) = mesh_buffers(mesh, bucket);
     let base = verts.len() as u32;
@@ -277,15 +315,20 @@ fn emit_model_face(
             (overlay_atlas.x as f32 + uv_pixels[i][0] / 16.0 * overlay_atlas.w as f32) / oaw as f32;
         let ov =
             (overlay_atlas.y as f32 + uv_pixels[i][1] / 16.0 * overlay_atlas.h as f32) / oah as f32;
+        let (normal_enc, light_enc, ao, flags) = shade_vertex(light, normal, i as u8);
         verts.push(VoxelVertex {
             position: *pos,
             uv: [u, v],
             overlay_uv: [ou, ov],
             tint,
             overlay_tint,
-            tint_mul: [1.0, 1.0, 1.0],
+            tint_mul,
             atlas_index: atlas_uv.atlas_index as f32,
             overlay_atlas_index: overlay_atlas.atlas_index as f32,
+            normal: normal_enc,
+            light: light_enc,
+            ao,
+            flags,
         });
     }
 

@@ -87,6 +87,9 @@ mod tests {
                 push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [0, 0, 0],
                 redstone_powerable: false,
+                light_emission: 0,
+                light_attenuation: 0,
+                blocks_sky_light: None,
             },
             BlockDef {
                 id: stone,
@@ -105,6 +108,9 @@ mod tests {
                 push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [120, 120, 120],
                 redstone_powerable: true,
+                light_emission: 0,
+                light_attenuation: 0,
+                blocks_sky_light: None,
             },
             BlockDef {
                 id: grass_plant,
@@ -123,6 +129,9 @@ mod tests {
                 push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [95, 159, 53],
                 redstone_powerable: false,
+                light_emission: 0,
+                light_attenuation: 0,
+                blocks_sky_light: None,
             },
         ]
     }

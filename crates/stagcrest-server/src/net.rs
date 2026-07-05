@@ -46,6 +46,7 @@ pub fn send_handshake(server: &GameServer, client: &mut ConnectedClient) {
         spawn_y: spawn.y as f32 + 1.6,
         spawn_z: spawn.z as f32 + 0.5,
         render_distance: server.config.render_distance,
+        world_time: server.session.meta.world_time,
     })));
 
     let manifest = server.cached_manifest.clone();

@@ -8,8 +8,13 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{Shader, ShaderRef};
 
+use crate::scene_lighting::SceneLightingUniform;
+
 pub const VOXEL_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("a7c3e891-4f2b-4d1e-9c8a-0123456789ab");
+
+pub const SCENE_LIGHTING_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("d1e2f3a4-b5c6-7890-abcd-ef1234567890");
 
 pub const MAX_ATLAS_PAGES: usize = 8;
 
@@ -18,6 +23,12 @@ pub struct VoxelMaterialPlugin;
 
 impl Plugin for VoxelMaterialPlugin {
     fn build(&self, app: &mut App) {
+        load_internal_asset!(
+            app,
+            SCENE_LIGHTING_SHADER_HANDLE,
+            "../../../assets/shaders/scene_lighting.wgsl",
+            Shader::from_wgsl
+        );
         load_internal_asset!(
             app,
             VOXEL_SHADER_HANDLE,
@@ -67,6 +78,8 @@ pub struct VoxelMaterial {
     pub water_tint: LinearRgba,
     #[uniform(22)]
     pub fluid_anim: Vec4,
+    #[uniform(23)]
+    pub scene_lighting: SceneLightingUniform,
     pub alpha_mode: AlphaMode,
 }
 
@@ -114,6 +127,10 @@ impl Material for VoxelMaterial {
             ATTRIBUTE_TINT_MUL.at_shader_location(5),
             ATTRIBUTE_ATLAS_INDEX.at_shader_location(6),
             ATTRIBUTE_OVERLAY_ATLAS_INDEX.at_shader_location(7),
+            ATTRIBUTE_NORMAL.at_shader_location(8),
+            ATTRIBUTE_LIGHT.at_shader_location(9),
+            ATTRIBUTE_AO.at_shader_location(10),
+            ATTRIBUTE_FLAGS.at_shader_location(11),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
         Ok(())
@@ -132,3 +149,11 @@ pub const ATTRIBUTE_ATLAS_INDEX: MeshVertexAttribute =
     MeshVertexAttribute::new("AtlasIndex", 988301005, VertexFormat::Float32);
 pub const ATTRIBUTE_OVERLAY_ATLAS_INDEX: MeshVertexAttribute =
     MeshVertexAttribute::new("OverlayAtlasIndex", 988301006, VertexFormat::Float32);
+pub const ATTRIBUTE_NORMAL: MeshVertexAttribute =
+    MeshVertexAttribute::new("Normal", 988301007, VertexFormat::Uint8);
+pub const ATTRIBUTE_LIGHT: MeshVertexAttribute =
+    MeshVertexAttribute::new("Light", 988301008, VertexFormat::Uint8);
+pub const ATTRIBUTE_AO: MeshVertexAttribute =
+    MeshVertexAttribute::new("Ao", 988301009, VertexFormat::Uint8);
+pub const ATTRIBUTE_FLAGS: MeshVertexAttribute =
+    MeshVertexAttribute::new("Flags", 988301010, VertexFormat::Uint8);

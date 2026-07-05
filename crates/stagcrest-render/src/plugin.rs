@@ -206,6 +206,7 @@ pub fn sync_chunk_meshes(
         material_flags: Vec4::ZERO,
         water_tint: water,
         fluid_anim,
+        scene_lighting: default(),
         alpha_mode: AlphaMode::Opaque,
     };
 
@@ -341,7 +342,7 @@ fn sync_one(
 }
 
 fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
-    use bevy::mesh::{Indices, PrimitiveTopology};
+    use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
     let (vertices, indices) = match bucket {
         1 => (&chunk.transparent_vertices, &chunk.transparent_indices),
@@ -384,6 +385,22 @@ fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
             .iter()
             .map(|v| v.overlay_atlas_index)
             .collect::<Vec<_>>(),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_NORMAL,
+        VertexAttributeValues::Uint8(vertices.iter().map(|v| v.normal).collect()),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_LIGHT,
+        VertexAttributeValues::Uint8(vertices.iter().map(|v| v.light).collect()),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_AO,
+        VertexAttributeValues::Uint8(vertices.iter().map(|v| v.ao).collect()),
+    );
+    mesh.insert_attribute(
+        crate::voxel_material::ATTRIBUTE_FLAGS,
+        VertexAttributeValues::Uint8(vertices.iter().map(|v| v.flags).collect()),
     );
     mesh.insert_indices(Indices::U32(indices.clone()));
 

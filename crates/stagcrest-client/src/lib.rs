@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
-use stagcrest_render::UnderwaterPlugin;
+use stagcrest_render::{SceneLightingPlugin, SkyboxPlugin, UnderwaterPlugin};
 
 use camera::UiCameraPlugin;
 
@@ -31,6 +31,7 @@ pub mod targeting;
 pub mod ui;
 pub mod world_replica;
 pub mod world_select;
+pub mod world_time;
 
 pub use game::AppState;
 
@@ -58,6 +59,8 @@ pub fn run_app(launch: LaunchConfig) {
         .init_state::<AppState>()
         .add_sub_state::<game::GameplayState>()
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
+        .add_plugins(SceneLightingPlugin)
+        .add_plugins(SkyboxPlugin)
         .add_plugins(UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
         .add_plugins(MaterialPlugin::<stagcrest_render::VoxelMaterial>::default())

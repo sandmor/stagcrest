@@ -98,6 +98,9 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
         redstone_powerable: false,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     });
     reg.register_block(transparent_conductor_block(
         blocks.slime,
@@ -132,6 +135,9 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         push_reaction: stagcrest_protocol::PushReaction::Normal,
         map_color: [128, 128, 128],
         redstone_powerable: true,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     });
 
     (reg, blocks)
@@ -155,6 +161,9 @@ fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
         push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
         redstone_powerable: false,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     }
 }
 
@@ -176,6 +185,9 @@ fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef 
         push_reaction,
         map_color: [128, 128, 128],
         redstone_powerable: true,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     }
 }
 
@@ -197,6 +209,9 @@ fn transparent_insulator_block(id: BlockId, name: &str) -> BlockDef {
         push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
         redstone_powerable: false,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     }
 }
 
@@ -222,6 +237,9 @@ fn transparent_conductor_block(
         push_reaction,
         map_color: [128, 128, 128],
         redstone_powerable: true,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     }
 }
 
@@ -247,6 +265,9 @@ fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeome
         push_reaction: stagcrest_protocol::PushReaction::Normal,
         map_color: [128, 128, 128],
         redstone_powerable: false,
+        light_emission: 0,
+        light_attenuation: 0,
+        blocks_sky_light: None,
     }
 }
 

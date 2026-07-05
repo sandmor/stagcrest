@@ -7,7 +7,7 @@ use crate::player::FlyCamera;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 use stagcrest_mod_client::SEA_LEVEL;
-use stagcrest_render::{spawn_block_outline, OutlineMaterial, UnderwaterEffect};
+use stagcrest_render::{spawn_block_outline, OutlineMaterial, SkyMaterial, UnderwaterEffect};
 
 /// Marker for entities owned by the active in-world session (camera, HUD roots, lights, etc.).
 #[derive(Component)]
@@ -70,6 +70,7 @@ pub fn spawn_game_session(
         ..default()
     });
 
+    // Optional GPU shadow caster for non-voxel content; voxel/entity color uses shade_voxel instead.
     commands.spawn((
         GameSessionEntity,
         DirectionalLight {
@@ -92,6 +93,7 @@ pub fn spawn_game_session(
         },
         transform,
         FlyCamera::default(),
+        SkyMaterial::default(),
         UnderwaterEffect::default(),
         DistanceFog {
             color: Color::srgba(0.1, 0.3, 0.5, 0.0),

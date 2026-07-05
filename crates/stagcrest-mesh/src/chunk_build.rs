@@ -8,7 +8,7 @@ use crate::greedy_mesh::{emit_greedy_cubes, is_greedy_eligible, GreedyGrid};
 use crate::mesh_snapshot::{self, MeshSnapshot};
 use crate::{
     build_column_tint_cache, emit_block_geometry, fluid_flow_textures, mesh_bucket_for_layer,
-    should_cull_face, ChunkMesh, MeshClimateTint,
+    should_cull_face, ChunkMesh, LightBuildContext, LightSampler, LightingContext, MeshClimateTint,
 };
 
 pub fn build_chunk_mesh_snapshot(snapshot: &MeshSnapshot) -> ChunkMesh {
@@ -31,6 +31,14 @@ pub(crate) fn build_chunk_mesh_neighbors(
 
     let column_tints = climate.map(build_column_tint_cache);
     let mut greedy_grid = GreedyGrid::new();
+
+    let light_ctx = LightBuildContext {
+        registry,
+        air,
+        block_at: &|lx, ly, lz| neighbor_at(lx, ly, lz),
+    };
+    let light_grid = light_ctx.build_grid();
+    let light_sampler = LightSampler::new(&light_grid, &light_ctx);
 
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
@@ -67,6 +75,12 @@ pub(crate) fn build_chunk_mesh_neighbors(
                 }
 
                 let bucket = mesh_bucket_for_layer(def.render_layer);
+                let lighting = LightingContext {
+                    sampler: &light_sampler,
+                    lx: x,
+                    ly: y,
+                    lz: z,
+                };
 
                 if is_greedy_eligible(def.geometry, def.fluid) {
                     greedy_grid.insert(
@@ -123,6 +137,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
                     block_power,
                     block.state,
                     x as i32,
+                    y as i32,
                     z as i32,
                     climate,
                     column_tints.as_ref(),
@@ -140,6 +155,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
                         )
                     },
                     wire_connections,
+                    Some(&lighting),
                 );
             }
         }
@@ -154,6 +170,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
         &neighbor_at,
         climate,
         column_tints.as_ref(),
+        Some(&light_sampler),
     );
 
     mesh
@@ -211,6 +228,9 @@ mod tests {
             push_reaction: stagcrest_protocol::PushReaction::Block,
             map_color: [128, 128, 128],
             redstone_powerable: true,
+            light_emission: 0,
+            light_attenuation: 0,
+            blocks_sky_light: None,
         });
         reg
     }
@@ -292,6 +312,9 @@ mod tests {
             push_reaction: PushReaction::Destroy,
             map_color: [128, 128, 128],
             redstone_powerable: false,
+            light_emission: 0,
+            light_attenuation: 0,
+            blocks_sky_light: None,
         });
 
         let air = BlockId(0);

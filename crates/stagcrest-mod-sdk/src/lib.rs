@@ -36,6 +36,12 @@ pub struct RegisterBlockRequest {
     /// If omitted, the host derives it from solid/opaque/transparent/fluid.
     #[serde(default)]
     pub redstone_powerable: Option<bool>,
+    #[serde(default)]
+    pub light_emission: u8,
+    #[serde(default)]
+    pub light_attenuation: u8,
+    #[serde(default)]
+    pub blocks_sky_light: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]

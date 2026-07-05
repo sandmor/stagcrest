@@ -48,6 +48,9 @@ pub struct InitialState {
     pub spawn_y: f32,
     pub spawn_z: f32,
     pub render_distance: i32,
+    /// Seconds within the day/night cycle at connect time.
+    #[serde(default)]
+    pub world_time: f64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -158,6 +161,8 @@ pub enum ServerMessage {
     PlayerAck(PlayerAck),
     Pong { nonce: u32 },
     Chat(ChatLine),
+    /// Periodic day/night sync (~1 Hz).
+    WorldTime { time: f64 },
 }
 
 /// Unified game message for transports.

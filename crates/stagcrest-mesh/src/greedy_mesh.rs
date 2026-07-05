@@ -7,7 +7,7 @@ use stagcrest_world::ChunkBlock;
 
 use crate::{
     emit_quad, face_corners, face_tint_mul, should_cull_face, vertex_tint, ChunkMesh,
-    ColumnTintCache, MeshBucket, MeshClimateTint,
+    ColumnTintCache, LightSampler, LightingContext, MeshBucket, MeshClimateTint,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -120,6 +120,7 @@ pub(crate) fn emit_greedy_cubes(
     neighbor_at: &impl Fn(i32, i32, i32) -> Option<ChunkBlock>,
     climate: Option<&MeshClimateTint<'_>>,
     column_tints: Option<&ColumnTintCache>,
+    light: Option<&LightSampler<'_>>,
 ) {
     let base_x = chunk_pos.x * CHUNK_SIZE;
     let base_y = chunk_pos.y * CHUNK_SIZE;
@@ -255,6 +256,13 @@ pub(crate) fn emit_greedy_cubes(
                         height,
                     );
 
+                    let lighting = light.map(|sampler| LightingContext {
+                        sampler,
+                        lx: bx,
+                        ly: by,
+                        lz: bz,
+                    });
+
                     emit_quad(
                         mesh,
                         corners,
@@ -263,9 +271,11 @@ pub(crate) fn emit_greedy_cubes(
                         cell.bucket,
                         registry,
                         bx,
+                        by,
                         bz,
                         climate,
                         column_tints,
+                        lighting.as_ref(),
                         false,
                     );
 
@@ -412,6 +422,8 @@ mod tests {
             &reg,
             0,
             0,
+            0,
+            None,
             None,
             None,
             false,

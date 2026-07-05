@@ -3,6 +3,7 @@ pub mod colormap;
 pub mod manifest;
 pub mod map_colors;
 pub mod tints;
+pub mod world_time;
 
 pub use colormap::sample_colormap_rgb;
 pub use map_colors::default_map_color;
@@ -18,6 +19,7 @@ pub use block_model::{
     BlockGeometry, BlockModel, BoxFace, ModelAxis, ModelElement, ModelFace, ModelId,
     ModelRenderLayer, ModelRotation, ModelTexture, ModelVariant,
 };
+pub use world_time::{TimeOfDay, DAY_LENGTH_SECS};
 
 pub const CHUNK_SIZE: i32 = 16;
 pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
@@ -733,6 +735,34 @@ pub struct BlockDef {
     /// receive strong or weak block power and pass strong power to dust.
     #[serde(default)]
     pub redstone_powerable: bool,
+    /// Block light emitted (0–15), e.g. torches and lava.
+    #[serde(default)]
+    pub light_emission: u8,
+    /// Light subtracted when passing through this block (0 = derive from opaque/transparent).
+    #[serde(default)]
+    pub light_attenuation: u8,
+    /// When set, overrides whether this block occludes skylight columns.
+    #[serde(default)]
+    pub blocks_sky_light: Option<bool>,
+}
+
+impl BlockDef {
+    pub fn blocks_skylight(&self) -> bool {
+        self.blocks_sky_light
+            .unwrap_or(self.opaque && !self.fluid && !self.transparent)
+    }
+
+    pub fn effective_light_attenuation(&self) -> u8 {
+        if self.light_attenuation > 0 {
+            self.light_attenuation
+        } else if self.blocks_skylight() {
+            15
+        } else if self.transparent || self.fluid {
+            1
+        } else {
+            0
+        }
+    }
 }
 
 /// Default Bedrock-style redstone conductor flag when a mod omits an explicit override.

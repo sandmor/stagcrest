@@ -510,6 +510,7 @@ fn world_select_button_system(
                                 format_version: stagcrest_storage::WORLD_FORMAT_VERSION,
                                 world_seed: final_seed,
                                 circuit_tick: 0,
+                                world_time: 0.0,
                             };
                             if let Err(e) = meta.save(&storage) {
                                 tracing::error!("failed to write world meta: {e}");

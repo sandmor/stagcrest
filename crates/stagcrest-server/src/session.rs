@@ -57,6 +57,7 @@ impl WorldSession {
             format_version: stagcrest_storage::WORLD_FORMAT_VERSION,
             world_seed: self.meta.world_seed,
             circuit_tick,
+            world_time: self.meta.world_time,
         };
         meta.save(self.storage.as_ref())
     }
