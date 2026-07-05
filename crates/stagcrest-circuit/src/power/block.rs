@@ -1,5 +1,6 @@
 use crate::eval::is_torch_geometry;
 use crate::registry::BlockRegistry;
+use stagcrest_mod_server::block_redstone_powerable;
 use stagcrest_protocol::{
     facing_delta, mount_face, mount_facing, mount_on, mount_support_offset, observer_facing,
     repeater_facing, BlockDef, BlockPos, CircuitKind,
@@ -25,7 +26,7 @@ impl BlockPower {
 }
 
 pub fn is_redstone_powerable_block(def: &BlockDef) -> bool {
-    def.redstone_powerable
+    block_redstone_powerable(def)
 }
 
 /// Strong power on a redstone-powerable opaque block from adjacent components.
@@ -47,11 +48,11 @@ fn block_strong_power(
         let Some(def) = registry.block(id) else {
             continue;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             continue;
         };
 
-        match node.kind {
+        match kind {
             CircuitKind::Switch { output } => {
                 if mount_on(state) {
                     let (dx, dy, dz) = mount_support_offset(mount_face(state), mount_facing(state));
@@ -147,8 +148,8 @@ fn dust_power_to_block(
     let (id, _) = world_blocks.get_block(dust_pos);
     let def = registry.block(id)?;
     if !def
-        .circuit
-        .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
+        .circuit_kind()
+        .is_some_and(|kind| matches!(kind, CircuitKind::Wire { .. }))
     {
         return None;
     }

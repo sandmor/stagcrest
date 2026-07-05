@@ -113,7 +113,7 @@ impl LightBuildContext<'_> {
         }
         self.registry
             .block(block.id)
-            .map(|d| d.effective_light_emission(block.state))
+            .map(|d| d.resolved_light_emission(block.state))
             .unwrap_or(0)
     }
 

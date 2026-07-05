@@ -16,7 +16,7 @@ pub fn is_targetable_block(id: BlockId, def: &BlockDef, air: BlockId) -> bool {
     id != air
         && (def.solid
             || def.placeable && matches!(def.geometry, BlockGeometry::Cube)
-            || def.circuit.is_some()
+            || def.has_circuit()
             || matches!(def.geometry, BlockGeometry::Flat | BlockGeometry::Cross))
 }
 

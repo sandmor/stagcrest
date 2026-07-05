@@ -101,7 +101,7 @@ pub fn max_wire_input_at(
         let Some(ndef) = registry.block(nid) else {
             continue;
         };
-        if !is_redstone_powerable_block(ndef) || ndef.circuit.is_some() {
+        if !is_redstone_powerable_block(ndef) || ndef.has_circuit() {
             continue;
         }
         let bp = block_power_at(circuit, npos, world, registry);

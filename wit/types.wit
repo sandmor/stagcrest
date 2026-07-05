@@ -1,0 +1,235 @@
+package stagcrest:plugin@0.1.0;
+
+/// Core world types shared between host and guest.
+interface types {
+    record block-id {
+        value: u32,
+    }
+
+    record block-pos {
+        x: s32,
+        y: s32,
+        z: s32,
+    }
+
+    record block-state {
+        value: u16,
+    }
+
+    /// Bitset of lifecycle hooks implemented by a block's mod behavior.
+    flags callback-flags {
+        on-place,
+        on-break,
+        on-use,
+        on-neighbor-changed,
+        on-scheduled-tick,
+        on-random-tick,
+        state-for-place,
+        dynamic-light,
+    }
+
+    enum render-layer {
+        opaque,
+        blend,
+        cutout,
+    }
+
+    enum push-reaction {
+        normal,
+        block,
+        destroy,
+    }
+
+    variant native-behavior {
+        redstone-source(u8),
+        redstone-wire(u8),
+        redstone-inverter(u8),
+        redstone-switch(u8),
+        redstone-repeater(u8),
+        redstone-observer(u8),
+        redstone-piston(bool),
+        redstone-lamp,
+        bedrock,
+        piston-body,
+        piston-head,
+    }
+
+    variant behavior-ref {
+        native(native-behavior),
+        wasm,
+    }
+
+    record register-block-request {
+        namespaced-id: string,
+        display-name: string,
+        opaque: bool,
+        transparent: bool,
+        solid: bool,
+        hardness: f32,
+        top-texture: string,
+        bottom-texture: string,
+        sides-texture: string,
+        placeable: bool,
+        fluid: bool,
+        render-layer: option<render-layer>,
+        geometry: option<string>,
+        map-color: tuple<u8, u8, u8>,
+        light-emission: u8,
+        light-attenuation: u8,
+        behavior: option<behavior-ref>,
+        callbacks: callback-flags,
+    }
+
+    record register-texture-request {
+        namespaced-id: string,
+        width: u32,
+        height: u32,
+        rgba: list<u8>,
+    }
+
+    record register-command-request {
+        name: string,
+        description: string,
+        usage: string,
+    }
+
+    record noise-range {
+        min: f32,
+        max: f32,
+    }
+
+    enum biome-dimension {
+        surface,
+        underground,
+        sky-island,
+    }
+
+    record biome-environment {
+        fog-color: tuple<u8, u8, u8>,
+        fog-density: f32,
+        water-color: tuple<u8, u8, u8>,
+        water-fog-color: tuple<u8, u8, u8>,
+        sky-color: tuple<u8, u8, u8>,
+        grass-color: option<tuple<u8, u8, u8>>,
+        foliage-color: option<tuple<u8, u8, u8>>,
+    }
+
+    record register-biome-request {
+        namespaced-id: string,
+        dimension: biome-dimension,
+        temperature: noise-range,
+        humidity: noise-range,
+        continentalness: noise-range,
+        erosion: noise-range,
+        depth: noise-range,
+        weirdness: noise-range,
+        offset: f32,
+        surface-top: string,
+        surface-under: string,
+        surface-depth: u8,
+        underwater-top: option<string>,
+        underwater-under: option<string>,
+        environment: biome-environment,
+    }
+
+    enum tree-shape {
+        oak,
+        birch,
+        spruce,
+        pine,
+        jungle,
+        acacia,
+        dark-oak,
+        mangrove,
+        cherry,
+        azalea,
+        bamboo,
+    }
+
+    variant feature-placement {
+        plant(tuple<string, bool>),
+        patch(tuple<string, u8, f32>),
+        tree(tuple<string, string, tree-shape, u8>),
+        boulder(string),
+        column(tuple<string, u8>),
+        ice-spike,
+        stalagmite(string),
+        stalactite(string),
+        surface-patch(string),
+        glow-flora(string),
+        waterfall-sheet(option<string>),
+        waterfall-pool(tuple<string, u8>),
+    }
+
+    record register-feature-request {
+        biome-id: string,
+        placement: feature-placement,
+        chance: f32,
+    }
+
+    enum hydrology-mode {
+        terrace,
+        drainage-grid,
+    }
+
+    enum river-feature-slot {
+        waterfall-lip,
+        waterfall-base,
+        pool-surface,
+    }
+
+    record register-river-feature-request {
+        slot: river-feature-slot,
+        placement: feature-placement,
+        chance: f32,
+    }
+
+    record register-river-config-request {
+        width: f32,
+        bank-blocks: list<string>,
+        river-biome-id: string,
+        frozen-river-biome-id: string,
+        riverbank-biome-id: string,
+        hydrology-mode: hydrology-mode,
+        terrace-step: s32,
+        terrace-offset: s32,
+        drainage-cell-size: s32,
+        drainage-relax-passes: u32,
+        waterfall-min-drop: s32,
+        channel-depth: s32,
+        max-channel-carve: s32,
+        mouth-sea-margin: s32,
+    }
+
+    record register-cave-config-request {
+        cheese-threshold: f64,
+        spaghetti-threshold: f64,
+        noodle-threshold: f64,
+        lush-cave-biome-id: string,
+        dripstone-cave-biome-id: string,
+        deep-dark-biome-id: string,
+    }
+
+    enum feature-kind {
+        short-grass,
+        tall-grass,
+        dandelion,
+        poppy,
+        cactus,
+        dead-bush,
+        oak-tree,
+    }
+
+    record register-biome-feature-request {
+        biome-id: string,
+        feature-kind: feature-kind,
+        chance: f32,
+    }
+
+    variant behavior-result {
+        ok,
+        cancel,
+        set-state(block-state),
+        set-block(tuple<block-id, block-state>),
+    }
+}

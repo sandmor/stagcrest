@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use stagcrest_mesh::{build_single_block_icon_mesh, ChunkMesh};
+use stagcrest_mod_client::is_wire_line_block;
 use stagcrest_protocol::{
-    decode_power_tint, torch_state, BlockGeometry, BlockId, BlockState, TorchAttachment,
-    TINT_POWER_BASE, TINT_WATER,
+    decode_power_tint, torch_state, BlockGeometry, BlockId, BlockState, BehaviorRef,
+    NativeBehaviorId, TorchAttachment, TINT_POWER_BASE, TINT_WATER,
 };
 
 use crate::game::ModContext;
@@ -100,17 +101,20 @@ pub fn bake_block_icons(
         let power = if mod_ctx
             .registry
             .block(block_id)
-            .is_some_and(|d| d.namespaced_id == "stagcrest:redstone_dust")
+            .is_some_and(|d| is_wire_line_block(&mod_ctx.registry, block_id))
         {
             15
         } else {
             0
         };
-        let icon_state = if mod_ctx
-            .registry
-            .block(block_id)
-            .is_some_and(|d| d.namespaced_id == "stagcrest:redstone_torch")
-        {
+        let icon_state = if mod_ctx.registry.block(block_id).is_some_and(|d| {
+            matches!(
+                d.behavior,
+                Some(BehaviorRef::Native {
+                    id: NativeBehaviorId::RedstoneInverter { .. }
+                })
+            )
+        }) {
             torch_state(true, TorchAttachment::Floor)
         } else {
             BlockState(0)

@@ -1,13 +1,11 @@
 use glam::Vec3;
 use stagcrest_circuit::{is_player_toggleable, is_repeater};
 use stagcrest_mod_server::{
-    validate_mount_placement, validate_observer_placement, validate_piston_placement,
-    validate_repeater_placement, validate_torch_placement,
+    extra_break_positions, placement_state, BehaviorCtx, BehaviorResult,
 };
+use stagcrest_mod_server::runtime::BehaviorHook;
 use stagcrest_net::{BlockUpdate, PlayerAck, PlayerAction, PlayerActionKind};
-use stagcrest_protocol::{
-    piston_extended, piston_facing, piston_front_pos, piston_head_facing, BlockPos, BlockState,
-};
+use stagcrest_protocol::{BlockState, CallbackFlags};
 
 use crate::client_session::{ClientId, ClientRegistry};
 use crate::GameServer;
@@ -42,7 +40,6 @@ pub fn apply_player_action(
     let pose = client.pose;
 
     let air = server.air;
-    let registry = &server.registry;
     let h = server.config.render_distance;
     let v = server.config.vertical_render_distance;
 
@@ -52,32 +49,56 @@ pub fn apply_player_action(
                 return ack(false, "chunk not interactive");
             }
             let (id, state) = server.world.get_block(action.target);
-            let break_positions = {
-                let registry = &server.registry;
-                if registry
-                    .block(id)
-                    .is_some_and(|d| d.namespaced_id == "stagcrest:bedrock")
-                {
-                    return ack(false, "bedrock");
-                }
-
-                let mut positions = vec![action.target];
-                if let Some(def) = registry.block(id) {
-                    if def.namespaced_id == "stagcrest:piston_head" {
-                        let facing = piston_head_facing(state);
-                        let body_pos = piston_front_pos(action.target, facing.opposite());
-                        positions.push(body_pos);
-                    } else if def.namespaced_id == "stagcrest:piston"
-                        || def.namespaced_id == "stagcrest:sticky_piston"
-                    {
-                        if piston_extended(state) {
-                            let head_pos = piston_front_pos(action.target, piston_facing(state));
-                            positions.push(head_pos);
-                        }
-                    }
-                }
-                positions
+            let Some(def) = server.registry.block(id) else {
+                return ack(false, "unknown block");
             };
+            let mut break_ctx = BehaviorCtx {
+                pos: action.target,
+                block_id: id,
+                state,
+                neighbor: None,
+                world: &mut server.world,
+                registry: &server.registry,
+                air,
+                face_normal: None,
+                player_yaw_pitch: None,
+            };
+            let break_cancelled = if let Some(mod_idx) =
+                server.mod_host.behavior_registry.wasm_mod_index(id)
+            {
+                if def.callbacks.contains(CallbackFlags::ON_BREAK) {
+                    server
+                        .mod_host
+                        .invoke_behavior(
+                            mod_idx,
+                            BehaviorHook::OnBreak,
+                            action.target,
+                            id,
+                            state,
+                            None,
+                            &mut server.world,
+                        )
+                        .map(|r| r == BehaviorResult::Cancel)
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            } else {
+                matches!(
+                    server.mod_host.behavior_registry.on_break(&mut break_ctx),
+                    BehaviorResult::Cancel
+                )
+            };
+            if break_cancelled {
+                return ack(false, "bedrock");
+            }
+
+            let break_positions = extra_break_positions(
+                &server.mod_host.behavior_registry,
+                def,
+                action.target,
+                state,
+            );
 
             for pos in break_positions {
                 server.world.set_block(pos, air, BlockState(0));
@@ -126,24 +147,10 @@ pub fn apply_player_action(
             }
 
             let block_id = action.block_id;
-            let is_solid_at = |x: i32, y: i32, z: i32| {
-                let (id, _) = server.world.get_block(BlockPos::new(x, y, z));
-                registry.block(id).map(|d| d.solid).unwrap_or(false) && id != air
+            let Some(def) = server.registry.block(block_id) else {
+                return ack(false, "unknown block");
             };
 
-            let (dir_x, dir_y, dir_z) = pose
-                .map(|p| {
-                    let yaw = p.yaw;
-                    let pitch = p.pitch;
-                    (
-                        yaw.sin() * pitch.cos(),
-                        -pitch.sin(),
-                        yaw.cos() * pitch.cos(),
-                    )
-                })
-                .unwrap_or((0.0, 0.0, 1.0));
-
-            let selected_name = registry.block(block_id).map(|d| d.namespaced_id.as_str());
             let (nx, ny, nz) = (
                 action.face_normal[0],
                 action.face_normal[1],
@@ -152,65 +159,30 @@ pub fn apply_player_action(
             if !is_axis_face_normal(nx, ny, nz) {
                 return ack(false, "invalid face normal");
             }
-            let block_state = match selected_name {
-                Some("stagcrest:redstone_torch") => {
-                    let Some(state) = validate_torch_placement(is_solid_at, place_pos, nx, ny, nz)
-                    else {
-                        return ack(false, "invalid torch placement");
-                    };
-                    state
-                }
-                Some("stagcrest:lever") | Some("stagcrest:stone_button") => {
-                    let Some(state) =
-                        validate_mount_placement(is_solid_at, place_pos, nx, ny, nz, dir_x, dir_z)
-                    else {
-                        return ack(false, "invalid mount placement");
-                    };
-                    state
-                }
-                Some("stagcrest:repeater") => {
-                    let Some(state) = validate_repeater_placement(
-                        is_solid_at,
-                        place_pos,
-                        nx,
-                        ny,
-                        nz,
-                        dir_x,
-                        dir_z,
-                    ) else {
-                        return ack(false, "invalid repeater placement");
-                    };
-                    state
-                }
-                Some("stagcrest:observer") => {
-                    let Some(state) = validate_observer_placement(
-                        is_solid_at,
-                        place_pos,
-                        nx,
-                        ny,
-                        nz,
-                        dir_x,
-                        dir_z,
-                    ) else {
-                        return ack(false, "invalid observer placement");
-                    };
-                    state
-                }
-                Some("stagcrest:piston") | Some("stagcrest:sticky_piston") => {
-                    let Some(state) = validate_piston_placement(place_pos, dir_x, dir_y, dir_z)
-                    else {
-                        return ack(false, "invalid piston placement");
-                    };
-                    state
-                }
-                _ => BlockState(0),
+
+            let place_ctx = BehaviorCtx {
+                pos: place_pos,
+                block_id,
+                state: BlockState(0),
+                neighbor: None,
+                world: &mut server.world,
+                registry: &server.registry,
+                air,
+                face_normal: Some([nx, ny, nz]),
+                player_yaw_pitch: pose.map(|p| (p.yaw, p.pitch)),
             };
+            let block_state = placement_state(
+                &server.mod_host.behavior_registry,
+                def,
+                &place_ctx,
+            )
+            .unwrap_or(BlockState(0));
 
             server.world.set_block(place_pos, block_id, block_state);
             server
                 .circuit
-                .notify_block_changed(place_pos, &mut server.world, registry);
-            server.circuit.tick(&mut server.world, registry);
+                .notify_block_changed(place_pos, &mut server.world, &server.registry);
+            server.circuit.tick(&mut server.world, &server.registry);
             server.broadcast_circuit_replication(clients);
             server.mark_chunk_dirty(place_pos.chunk_pos());
             let (_, block_state) = server.world.get_block(place_pos);
@@ -232,21 +204,21 @@ pub fn apply_player_action(
                 return ack(false, "chunk not interactive");
             }
             let (hit_id, _) = server.world.get_block(action.target);
-            let Some(def) = registry.block(hit_id) else {
+            let Some(def) = server.registry.block(hit_id) else {
                 return ack(false, "unknown block");
             };
             if is_repeater(def) {
                 server
                     .circuit
-                    .cycle_repeater_delay(action.target, &mut server.world, registry);
+                    .cycle_repeater_delay(action.target, &mut server.world, &server.registry);
             } else if is_player_toggleable(def) {
                 server
                     .circuit
-                    .toggle_block(action.target, &mut server.world, registry);
+                    .toggle_block(action.target, &mut server.world, &server.registry);
             } else {
                 return ack(false, "not toggleable");
             }
-            server.circuit.tick(&mut server.world, registry);
+            server.circuit.tick(&mut server.world, &server.registry);
             server.broadcast_circuit_replication(clients);
             let (id, state) = server.world.get_block(action.target);
             server.fanout_block_update(
@@ -263,7 +235,7 @@ pub fn apply_player_action(
         }
         PlayerActionKind::Pick => {
             let (id, _) = server.world.get_block(action.target);
-            let Some(def) = registry.block(id) else {
+            let Some(def) = server.registry.block(id) else {
                 return ack(false, "unknown block");
             };
             if !def.placeable {

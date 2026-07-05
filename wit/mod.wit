@@ -1,0 +1,19 @@
+package stagcrest:plugin@0.1.0;
+
+world plugin {
+    import host;
+    import types;
+
+    use types.{block-pos, block-id, block-state, behavior-result};
+
+    export register: func() -> s32;
+    export handle-command: func() -> s32;
+    export on-place: func(pos: block-pos, id: block-id, state: block-state) -> behavior-result;
+    export on-break: func(pos: block-pos, id: block-id, state: block-state) -> behavior-result;
+    export on-use: func(pos: block-pos, id: block-id, state: block-state) -> behavior-result;
+    export on-neighbor-changed: func(pos: block-pos, id: block-id, state: block-state, neighbor: block-pos) -> behavior-result;
+    export on-scheduled-tick: func(pos: block-pos, id: block-id, state: block-state) -> behavior-result;
+    export on-random-tick: func(pos: block-pos, id: block-id, state: block-state) -> behavior-result;
+    export state-for-place: func(id: block-id, face-normal: tuple<s32, s32, s32>) -> option<block-state>;
+    export dynamic-light: func(id: block-id, state: block-state) -> u8;
+}

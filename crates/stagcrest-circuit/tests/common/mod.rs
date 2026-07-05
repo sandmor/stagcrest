@@ -1,9 +1,9 @@
 use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_server::BlockRegistry;
 use stagcrest_protocol::{
-    mount_state, torch_state, AttachFace, BlockDef, BlockFaceTextures, BlockGeometry, BlockId,
-    BlockPos, BlockState, CircuitKind, CircuitNodeDef, Facing, ModelId, ModelRenderLayer,
-    PushReaction, TextureId, TorchAttachment,
+    mount_state, torch_state, AttachFace, BehaviorRef, BlockDef, BlockFaceTextures, BlockGeometry,
+    BlockId, BlockPos, BlockState, CallbackFlags, CircuitKind, Facing, ModelId, ModelRenderLayer,
+    NativeBehaviorId, TextureId, TorchAttachment,
 };
 use stagcrest_world::World;
 
@@ -24,6 +24,16 @@ pub struct TestBlocks {
     pub glass: BlockId,
     pub bedrock: BlockId,
     pub lamp: BlockId,
+}
+
+fn circuit_behavior(kind: CircuitKind) -> Option<BehaviorRef> {
+    Some(BehaviorRef::Native {
+        id: NativeBehaviorId::from_circuit_kind(kind),
+    })
+}
+
+fn native_behavior(id: NativeBehaviorId) -> Option<BehaviorRef> {
+    Some(BehaviorRef::Native { id })
 }
 
 pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
@@ -92,35 +102,20 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: None,
         placeable: false,
         geometry: BlockGeometry::Model(ModelId::PistonHead),
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
-        push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
-        redstone_powerable: false,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: native_behavior(NativeBehaviorId::PistonHead),
+        callbacks: CallbackFlags::default(),
     });
-    reg.register_block(transparent_conductor_block(
-        blocks.slime,
-        "test:slime_block",
-        PushReaction::Normal,
-    ));
-    reg.register_block(transparent_conductor_block(
-        blocks.honey,
-        "test:honey_block",
-        PushReaction::Normal,
-    ));
+    reg.register_block(transparent_conductor_block(blocks.slime, "test:slime_block"));
+    reg.register_block(transparent_conductor_block(blocks.honey, "test:honey_block"));
     reg.register_block(transparent_insulator_block(blocks.glass, "test:glass"));
-    reg.register_block(cube_block(
-        blocks.bedrock,
-        "test:bedrock",
-        PushReaction::Block,
-    ));
+    reg.register_block(cube_block(blocks.bedrock, "test:bedrock", NativeBehaviorId::Bedrock));
     reg.register_block(test_lamp_block(blocks.lamp));
     reg.register_block(BlockDef {
         id: blocks.stone,
@@ -131,18 +126,15 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: None,
         placeable: true,
         geometry: BlockGeometry::Cube,
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
-        push_reaction: stagcrest_protocol::PushReaction::Normal,
         map_color: [128, 128, 128],
-        redstone_powerable: true,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: None,
+        callbacks: CallbackFlags::default(),
     });
 
     (reg, blocks)
@@ -158,20 +150,15 @@ fn test_lamp_block(id: BlockId) -> BlockDef {
         solid: true,
         hardness: 0.3,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: Some(CircuitNodeDef {
-            kind: CircuitKind::Lamp,
-        }),
         placeable: true,
         geometry: BlockGeometry::Cube,
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
-        push_reaction: PushReaction::Normal,
         map_color: [180, 140, 80],
-        redstone_powerable: true,
         light_emission: 15,
-        light_emission_when_lit: true,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: circuit_behavior(CircuitKind::Lamp),
+        callbacks: CallbackFlags::default(),
     }
 }
 
@@ -185,22 +172,19 @@ fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: Some(CircuitNodeDef { kind }),
         placeable: true,
         geometry: BlockGeometry::Model(ModelId::Piston),
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
-        push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
-        redstone_powerable: false,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: circuit_behavior(kind),
+        callbacks: CallbackFlags::default(),
     }
 }
 
-fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef {
+fn cube_block(id: BlockId, name: &str, behavior: NativeBehaviorId) -> BlockDef {
     BlockDef {
         id,
         namespaced_id: name.into(),
@@ -210,18 +194,15 @@ fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef 
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: None,
         placeable: true,
         geometry: BlockGeometry::Cube,
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
-        push_reaction,
         map_color: [128, 128, 128],
-        redstone_powerable: true,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: native_behavior(behavior),
+        callbacks: CallbackFlags::default(),
     }
 }
 
@@ -235,26 +216,19 @@ fn transparent_insulator_block(id: BlockId, name: &str) -> BlockDef {
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: None,
         placeable: true,
         geometry: BlockGeometry::Cube,
         fluid: false,
         render_layer: ModelRenderLayer::Blend,
-        push_reaction: PushReaction::Normal,
         map_color: [128, 128, 128],
-        redstone_powerable: false,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: None,
+        callbacks: CallbackFlags::default(),
     }
 }
 
-fn transparent_conductor_block(
-    id: BlockId,
-    name: &str,
-    push_reaction: PushReaction,
-) -> BlockDef {
+fn transparent_conductor_block(id: BlockId, name: &str) -> BlockDef {
     BlockDef {
         id,
         namespaced_id: name.into(),
@@ -264,18 +238,15 @@ fn transparent_conductor_block(
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: None,
         placeable: true,
         geometry: BlockGeometry::Cube,
         fluid: false,
         render_layer: ModelRenderLayer::Blend,
-        push_reaction,
         map_color: [128, 128, 128],
-        redstone_powerable: true,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: None,
+        callbacks: CallbackFlags::default(),
     }
 }
 
@@ -293,18 +264,15 @@ fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeome
         solid: true,
         hardness: 1.0,
         face_textures: BlockFaceTextures::uniform(TextureId(0)),
-        circuit: Some(CircuitNodeDef { kind }),
         placeable: true,
         geometry,
         fluid: false,
         render_layer: ModelRenderLayer::Opaque,
-        push_reaction: stagcrest_protocol::PushReaction::Normal,
         map_color: [128, 128, 128],
-        redstone_powerable: false,
         light_emission: 0,
-        light_emission_when_lit: false,
         light_attenuation: 0,
-        blocks_sky_light: None,
+        behavior: circuit_behavior(kind),
+        callbacks: CallbackFlags::default(),
     }
 }
 

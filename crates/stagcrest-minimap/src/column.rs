@@ -47,7 +47,7 @@ pub fn surface_block(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stagcrest_protocol::{BlockFaceTextures, BlockGeometry, ModelRenderLayer, TextureId};
+    use stagcrest_protocol::{BlockFaceTextures, BlockGeometry, CallbackFlags, ModelRenderLayer, TextureId};
 
     struct Column {
         blocks: Vec<(i32, BlockId)>,
@@ -79,18 +79,15 @@ mod tests {
                 solid: false,
                 hardness: 0.0,
                 face_textures: BlockFaceTextures::uniform(TextureId(0)),
-                circuit: None,
                 placeable: false,
                 geometry: BlockGeometry::Cube,
                 fluid: false,
                 render_layer: ModelRenderLayer::Opaque,
-                push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [0, 0, 0],
-                redstone_powerable: false,
                 light_emission: 0,
-                light_emission_when_lit: false,
                 light_attenuation: 0,
-                blocks_sky_light: None,
+                behavior: None,
+                callbacks: CallbackFlags::default(),
             },
             BlockDef {
                 id: stone,
@@ -101,18 +98,15 @@ mod tests {
                 solid: true,
                 hardness: 1.0,
                 face_textures: BlockFaceTextures::uniform(TextureId(0)),
-                circuit: None,
                 placeable: true,
                 geometry: BlockGeometry::Cube,
                 fluid: false,
                 render_layer: ModelRenderLayer::Opaque,
-                push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [120, 120, 120],
-                redstone_powerable: true,
                 light_emission: 0,
-                light_emission_when_lit: false,
                 light_attenuation: 0,
-                blocks_sky_light: None,
+                behavior: None,
+                callbacks: CallbackFlags::default(),
             },
             BlockDef {
                 id: grass_plant,
@@ -123,18 +117,15 @@ mod tests {
                 solid: false,
                 hardness: 0.0,
                 face_textures: BlockFaceTextures::uniform(TextureId(0)),
-                circuit: None,
                 placeable: false,
                 geometry: BlockGeometry::Cross,
                 fluid: false,
                 render_layer: ModelRenderLayer::Cutout,
-                push_reaction: stagcrest_protocol::PushReaction::Normal,
                 map_color: [95, 159, 53],
-                redstone_powerable: false,
                 light_emission: 0,
-                light_emission_when_lit: false,
                 light_attenuation: 0,
-                blocks_sky_light: None,
+                behavior: None,
+                callbacks: CallbackFlags::default(),
             },
         ]
     }

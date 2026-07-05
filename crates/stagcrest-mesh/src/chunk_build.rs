@@ -1,5 +1,6 @@
 use stagcrest_mod_client::{
-    compute_wire_connections, is_wire_line_neighbor, BlockRegistry, ModelRegistry, PowerLookup,
+    compute_wire_connections, is_wire_line_block, is_wire_line_neighbor, BlockRegistry,
+    ModelRegistry, PowerLookup,
 };
 use stagcrest_protocol::{fluid_flowing, BlockId, BlockPos, ChunkPos, CHUNK_SIZE};
 use stagcrest_world::ChunkBlock;
@@ -94,7 +95,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
                     continue;
                 }
 
-                let wire_connections = if def.namespaced_id == "stagcrest:redstone_dust" {
+                let wire_connections = if is_wire_line_block(registry, block.id) {
                     Some(compute_wire_connections(
                         |dx, dy, dz| {
                             let Some(neighbor) = neighbor_at(x + dx, y + dy, z + dz) else {
@@ -224,14 +225,11 @@ mod tests {
             fluid: false,
             placeable: true,
             hardness: 1.0,
-            circuit: None,
-            push_reaction: stagcrest_protocol::PushReaction::Block,
+            behavior: None,
+            callbacks: stagcrest_protocol::CallbackFlags::default(),
             map_color: [128, 128, 128],
-            redstone_powerable: true,
             light_emission: 0,
-            light_emission_when_lit: false,
             light_attenuation: 0,
-            blocks_sky_light: None,
         });
         reg
     }
@@ -271,8 +269,6 @@ mod tests {
 
     #[test]
     fn redstone_dust_uses_wire_emitter() {
-        use stagcrest_protocol::PushReaction;
-
         let mut reg = BlockRegistry::new();
         let dot = reg.register_texture("stagcrest:dot".into(), 16, 16, vec![0; 16 * 16 * 4]);
         let _line = reg.register_texture("stagcrest:line".into(), 16, 16, vec![0; 16 * 16 * 4]);
@@ -309,14 +305,13 @@ mod tests {
             fluid: false,
             placeable: true,
             hardness: 0.0,
-            circuit: None,
-            push_reaction: PushReaction::Destroy,
+            behavior: Some(stagcrest_protocol::BehaviorRef::Native {
+                id: stagcrest_protocol::NativeBehaviorId::RedstoneWire { falloff: 1 },
+            }),
+            callbacks: stagcrest_protocol::CallbackFlags::default(),
             map_color: [128, 128, 128],
-            redstone_powerable: false,
             light_emission: 0,
-            light_emission_when_lit: false,
             light_attenuation: 0,
-            blocks_sky_light: None,
         });
 
         let air = BlockId(0);

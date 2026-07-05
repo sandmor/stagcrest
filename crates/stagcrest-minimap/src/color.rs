@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
     manifest::{BIOME_GRID_SIZE, BIOME_GRID_VOLUME},
-    BlockDef, BlockGeometry, BlockId, TintKind, CHUNK_SIZE,
+    BlockDef, BlockGeometry, BlockId, TintKind, UNKNOWN_BLOCK_ID, CHUNK_SIZE,
 };
 
 /// RGBA for columns with no loaded chunk data.
@@ -176,6 +176,9 @@ pub fn biome_index_at(
 
 pub fn is_map_visible(def: &BlockDef, air: BlockId, id: BlockId) -> bool {
     if id == air {
+        return false;
+    }
+    if def.namespaced_id == UNKNOWN_BLOCK_ID {
         return false;
     }
     if def.fluid {

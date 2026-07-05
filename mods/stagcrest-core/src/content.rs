@@ -1,6 +1,7 @@
 use stagcrest_mod_sdk::{
-    CircuitKindRequest, ContentRegistrar, PushReaction, RegisterBlockRequest,
-    RegisterCircuitRequest, RegisterTextureRequest, RenderLayer,
+    behavior_from_circuit, BehaviorKindRequest, CircuitKindRequest, ContentRegistrar,
+    NativeBehaviorRequest, RegisterBehaviorRequest, RegisterBlockRequest,
+    RegisterTextureRequest, RenderLayer,
 };
 use stagcrest_protocol::default_map_color;
 
@@ -190,14 +191,11 @@ fn register_layered_cross_plant(
         fluid: false,
         render_layer: None,
         geometry: Some("cross".into()),
-        circuit: None,
-        push_reaction: None,
+        behavior: None,
+        callbacks: Default::default(),
         map_color: default_map_color(id),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
 }
 
@@ -211,7 +209,7 @@ pub(crate) fn register_solid_block(
     solid: bool,
     placeable: bool,
     render_layer: Option<RenderLayer>,
-    circuit: Option<RegisterCircuitRequest>,
+    behavior: Option<RegisterBehaviorRequest>,
     geometry: Option<&str>,
 ) {
     reg.register_block(RegisterBlockRequest {
@@ -228,14 +226,11 @@ pub(crate) fn register_solid_block(
         fluid: false,
         render_layer,
         geometry: geometry.map(str::to_string),
-        circuit,
-        push_reaction: None,
+        behavior,
+        callbacks: Default::default(),
         map_color: default_map_color(id),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
 }
 
@@ -292,15 +287,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:grass_side".into(),
         placeable: true,
         geometry: None,
-        circuit: None,
+        behavior: None,
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:grass_block"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     register_solid_block(
         reg,
@@ -354,15 +346,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:water_still".into(),
         placeable: false,
         geometry: None,
-        circuit: None,
+        behavior: None,
+        callbacks: Default::default(),
         render_layer: Some(RenderLayer::Blend),
-        push_reaction: None,
         map_color: default_map_color("stagcrest:water"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:bedrock".into(),
@@ -377,15 +366,14 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:bedrock".into(),
         placeable: false,
         geometry: None,
-        circuit: None,
+        behavior: Some(RegisterBehaviorRequest {
+            kind: BehaviorKindRequest::Native(NativeBehaviorRequest::Bedrock),
+        }),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: Some(PushReaction::Block),
         map_color: default_map_color("stagcrest:bedrock"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     register_solid_block(
         reg,
@@ -397,9 +385,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         false,
         true,
         None,
-        Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Wire { falloff: 1 },
-        }),
+        Some(behavior_from_circuit(CircuitKindRequest::Wire { falloff: 1 })),
         Some("flat"),
     );
     reg.register_block(RegisterBlockRequest {
@@ -415,17 +401,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:redstone_torch_off".into(),
         placeable: true,
         geometry: Some("model:redstone_torch".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Inverter { output: 15 },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Inverter { output: 15 })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:redstone_torch"),
-        redstone_powerable: None,
         light_emission: 14,
-        light_emission_when_lit: Some(true),
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:redstone_block".into(),
@@ -440,17 +421,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:redstone_block".into(),
         placeable: true,
         geometry: None,
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Source { level: 15 },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Source { level: 15 })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:redstone_block"),
-        redstone_powerable: Some(false),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:redstone_lamp".into(),
@@ -465,17 +441,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:redstone_lamp".into(),
         placeable: true,
         geometry: None,
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Lamp,
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Lamp)),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:redstone_lamp"),
-        redstone_powerable: None,
         light_emission: 15,
-        light_emission_when_lit: Some(true),
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     // Lever: cobblestone base (top/bottom slots) + lever handle (sides slot),
     // rendered as a cutout model. Non-opaque so it doesn't cull neighbors, but
@@ -493,17 +464,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:lever".into(),
         placeable: true,
         geometry: Some("model:lever".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Switch { output: 15 },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Switch { output: 15 })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:lever"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     // Stone button: a small stone box that sinks when pressed.
     reg.register_block(RegisterBlockRequest {
@@ -519,17 +485,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:stone".into(),
         placeable: true,
         geometry: Some("model:stone_button".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Switch { output: 15 },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Switch { output: 15 })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:stone_button"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:repeater".into(),
@@ -544,17 +505,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:redstone_torch_off".into(),
         placeable: true,
         geometry: Some("model:repeater".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Repeater { output: 15 },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Repeater { output: 15 })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:repeater"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:observer".into(),
@@ -569,17 +525,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:observer_front".into(),
         placeable: true,
         geometry: Some("model:observer".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Observer { output: 15 },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Observer { output: 15 })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:observer"),
-        redstone_powerable: Some(false),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:piston".into(),
@@ -594,17 +545,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:piston_side".into(),
         placeable: true,
         geometry: Some("model:piston".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Piston { sticky: false },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Piston { sticky: false })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:piston"),
-        redstone_powerable: Some(false),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:sticky_piston".into(),
@@ -619,17 +565,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:piston_side".into(),
         placeable: true,
         geometry: Some("model:sticky_piston".into()),
-        circuit: Some(RegisterCircuitRequest {
-            kind: CircuitKindRequest::Piston { sticky: true },
-        }),
+        behavior: Some(behavior_from_circuit(CircuitKindRequest::Piston { sticky: true })),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:sticky_piston"),
-        redstone_powerable: Some(false),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:piston_head".into(),
@@ -644,15 +585,14 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:piston_side".into(),
         placeable: false,
         geometry: Some("model:piston_head".into()),
-        circuit: None,
+        behavior: Some(RegisterBehaviorRequest {
+            kind: BehaviorKindRequest::Native(NativeBehaviorRequest::PistonHead),
+        }),
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: Some(PushReaction::Block),
         map_color: default_map_color("stagcrest:piston_head"),
-        redstone_powerable: Some(false),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:slime_block".into(),
@@ -667,15 +607,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:slime_block".into(),
         placeable: true,
         geometry: None,
-        circuit: None,
+        behavior: None,
+        callbacks: Default::default(),
         render_layer: Some(RenderLayer::Blend),
-        push_reaction: None,
         map_color: default_map_color("stagcrest:slime_block"),
-        redstone_powerable: Some(true),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     reg.register_block(RegisterBlockRequest {
         namespaced_id: "stagcrest:honey_block".into(),
@@ -690,15 +627,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:honey_block_side".into(),
         placeable: true,
         geometry: None,
-        circuit: None,
+        behavior: None,
+        callbacks: Default::default(),
         render_layer: Some(RenderLayer::Blend),
-        push_reaction: None,
         map_color: default_map_color("stagcrest:honey_block"),
-        redstone_powerable: Some(true),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     register_solid_block(
         reg,
@@ -739,15 +673,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:oak_log".into(),
         placeable: true,
         geometry: None,
-        circuit: None,
+        behavior: None,
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:oak_log"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     register_solid_block(
         reg,
@@ -821,15 +752,12 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         sides_texture: "stagcrest:cactus_side".into(),
         placeable: true,
         geometry: None,
-        circuit: None,
+        behavior: None,
+        callbacks: Default::default(),
         render_layer: None,
-        push_reaction: None,
         map_color: default_map_color("stagcrest:cactus"),
-        redstone_powerable: None,
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
     register_solid_block(
         reg,

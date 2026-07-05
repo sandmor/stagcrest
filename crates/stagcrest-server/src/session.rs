@@ -52,12 +52,17 @@ impl WorldSession {
         })
     }
 
-    pub fn save_meta(&self, circuit_tick: u64) -> Result<(), StorageError> {
+    pub fn save_meta(
+        &self,
+        circuit_tick: u64,
+        block_registry: Vec<stagcrest_storage::BlockRegistryEntry>,
+    ) -> Result<(), StorageError> {
         let meta = WorldMeta {
             format_version: stagcrest_storage::WORLD_FORMAT_VERSION,
             world_seed: self.meta.world_seed,
             circuit_tick,
             world_time: self.meta.world_time,
+            block_registry,
         };
         meta.save(self.storage.as_ref())
     }

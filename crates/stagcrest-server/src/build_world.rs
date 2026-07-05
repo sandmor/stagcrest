@@ -253,13 +253,28 @@ fn build_world_region_inner(
         let tile_count = map_dirty.len();
         let map_bar = progress_bar(tile_count as u64, "map tiles");
         let rebuilt =
-            map_dirty.rebuild_all(offline.session.storage.as_ref(), &map_ctx, &y_chunks)?;
+            map_dirty.rebuild_all(
+                offline.session.storage.as_ref(),
+                &map_ctx,
+                &y_chunks,
+                air,
+                offline.block_remap.as_ref(),
+            )?;
         map_bar.inc(tile_count as u64);
         map_bar.finish_with_message("map tiles done");
         result.map_tiles_rebuilt = rebuilt;
     }
 
-    if let Err(err) = offline.session.save_meta(circuit.current_tick()) {
+    if let Err(err) = offline.session.save_meta(
+        circuit.current_tick(),
+        stagcrest_storage::BlockIdRemap::from_entries(
+            offline
+                .worldgen
+                .registry
+                .all_blocks()
+                .map(|def| (def.id.0, def.namespaced_id.clone())),
+        ),
+    ) {
         tracing::warn!("failed to save world meta: {err}");
     }
 

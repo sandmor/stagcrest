@@ -511,6 +511,7 @@ fn world_select_button_system(
                                 world_seed: final_seed,
                                 circuit_tick: 0,
                                 world_time: 0.0,
+                                block_registry: Vec::new(),
                             };
                             if let Err(e) = meta.save(&storage) {
                                 tracing::error!("failed to write world meta: {e}");

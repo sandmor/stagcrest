@@ -8,6 +8,7 @@ pub use connections::{
 pub use eval::{max_wire_input, max_wire_input_at};
 
 use crate::registry::BlockRegistry;
+use stagcrest_mod_server::block_redstone_powerable;
 use stagcrest_protocol::{
     observer_facing, repeater_connects_toward, repeater_facing, BlockGeometry, BlockId, BlockState,
     CircuitKind, ModelId,
@@ -18,11 +19,8 @@ pub fn is_wire_block(registry: &BlockRegistry, id: BlockId) -> bool {
     let Some(def) = registry.block(id) else {
         return false;
     };
-    if def.namespaced_id == "stagcrest:redstone_dust" {
-        return true;
-    }
-    def.circuit
-        .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
+    def.circuit_kind()
+        .is_some_and(|kind| matches!(kind, CircuitKind::Wire { .. }))
 }
 
 /// Whether a neighbor may link to a wire cell from direction `(toward_wire_dx, toward_wire_dz)`.
@@ -43,10 +41,10 @@ pub fn is_wire_network_neighbor(
     if toward_wire_dy != 0 {
         return false;
     }
-    if def.redstone_powerable && def.circuit.is_none() {
+    if block_redstone_powerable(def) && !def.has_circuit() {
         return true;
     }
-    let Some(node) = def.circuit else {
+    let Some(kind) = def.circuit_kind() else {
         return false;
     };
     if matches!(def.geometry, BlockGeometry::Model(ModelId::Repeater)) {
@@ -61,7 +59,7 @@ pub fn is_wire_network_neighbor(
         return (toward_wire_dx, toward_wire_dy, toward_wire_dz) != (sx, sy, sz);
     }
     matches!(
-        node.kind,
+        kind,
         CircuitKind::Source { .. } | CircuitKind::Switch { .. } | CircuitKind::Piston { .. }
     )
 }
@@ -89,7 +87,7 @@ pub fn wire_connections_at(
             if dy == 0 {
                 if registry
                     .block(id)
-                    .is_some_and(|d| d.redstone_powerable && d.circuit.is_none())
+                    .is_some_and(|d| block_redstone_powerable(d) && !d.has_circuit())
                 {
                     let above = stagcrest_protocol::BlockPos::new(npos.x, npos.y + 1, npos.z);
                     if world.is_chunk_interactive(above.chunk_pos()) {
@@ -117,7 +115,7 @@ pub fn wire_connections_at(
             };
             // Conductive block above the wire prevents diagonal climb (Bedrock wire cutting).
             if dx == 0 && dy == 1 && dz == 0 {
-                return def.redstone_powerable;
+                return block_redstone_powerable(def);
             }
             // Solid obstruction at the same Y level that dust can climb over.
             def.solid && def.opaque && !def.fluid

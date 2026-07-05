@@ -3,13 +3,19 @@ use crate::block_tints::apply_block_face_tints;
 use crate::commands::{CommandHost, CommandRegistry};
 use crate::registry::BlockRegistry;
 use crate::resourcepack::{ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES};
-use crate::runtime::{load_mod, ModInstance, ModLoadContext};
+use crate::runtime::{create_engine, load_mod, ModInstance, ModLoadContext};
 use crate::worldgen::BiomeRegistry;
-use stagcrest_mod_sdk::{CircuitKindRequest, RegisterBlockRequest};
-use stagcrest_protocol::{
-    BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CircuitKind, CircuitNodeDef, ModManifest,
-    ModsManifest,
+use crate::behavior::{BehaviorRegistry, BehaviorResult};
+use stagcrest_mod_sdk::{
+    BehaviorKindRequest, CircuitKindRequest, RegisterBlockRequest, RegisterBehaviorRequest,
 };
+use stagcrest_protocol::{
+    BehaviorRef, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CallbackFlags,
+    ModManifest, ModsManifest, NativeBehaviorId, UNKNOWN_BLOCK_ID,
+};
+use stagcrest_storage::{BlockIdRemap, BlockRegistryEntry};
+use std::sync::Arc;
+use wasmtime::Engine;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -30,17 +36,23 @@ pub struct ModHost {
     pub registry: BlockRegistry,
     pub biome_registry: BiomeRegistry,
     pub command_registry: CommandRegistry,
+    pub behavior_registry: BehaviorRegistry,
     pub loaded_mods: Vec<String>,
+    engine: Arc<Engine>,
     instances: Vec<ModInstance>,
 }
 
 impl ModHost {
     pub fn new() -> Self {
+        let engine = create_engine().expect("wasmtime engine");
+        let registry = BlockRegistry::new();
         Self {
-            registry: BlockRegistry::new(),
+            registry,
             biome_registry: BiomeRegistry::default(),
             command_registry: CommandRegistry::new(),
+            behavior_registry: BehaviorRegistry::new(),
             loaded_mods: Vec::new(),
+            engine: Arc::new(engine),
             instances: Vec::new(),
         }
     }
@@ -93,17 +105,20 @@ impl ModHost {
             command_registry: &mut self.command_registry,
             mod_index,
             packs,
+            engine: self.engine.clone(),
         };
         let instance = load_mod(&mut ctx, &wasm_bytes).map_err(ModError::Runtime)?;
 
-        // If this mod registered commands, it must export `_stagcrest_command`.
+        self.behavior_registry.rebuild(&self.registry);
+
+        // If this mod registered commands, it must export handle-command.
         let registered_commands = self
             .command_registry
             .names()
             .any(|name| self.command_registry.get(name).map(|e| e.mod_index) == Some(mod_index));
         if registered_commands && !instance.has_command_export() {
             return Err(ModError::Message(format!(
-                "mod {} registered slash commands but does not export _stagcrest_command",
+                "mod {} registered slash commands but does not export handle-command",
                 entry.id
             )));
         }
@@ -147,6 +162,54 @@ impl ModHost {
             .block_by_name("stagcrest:air")
             .unwrap_or(BlockId(0))
     }
+
+    pub fn block_registry_snapshot(&self) -> Vec<BlockRegistryEntry> {
+        BlockIdRemap::from_entries(
+            self.registry
+                .all_blocks()
+                .map(|def| (def.id.0, def.namespaced_id.clone())),
+        )
+    }
+
+    pub fn build_id_remap(&self, saved: &[BlockRegistryEntry]) -> BlockIdRemap {
+        let mut by_name = std::collections::HashMap::new();
+        for def in self.registry.all_blocks() {
+            by_name.insert(def.namespaced_id.clone(), def.id);
+        }
+        let unknown = self
+            .registry
+            .block_by_name(UNKNOWN_BLOCK_ID)
+            .unwrap_or(BlockId(0));
+        BlockIdRemap::from_saved_registry(saved, &by_name, unknown)
+    }
+
+    pub fn rebuild_behaviors(&mut self) {
+        self.behavior_registry.rebuild(&self.registry);
+    }
+
+    pub fn invoke_behavior(
+        &mut self,
+        mod_index: u32,
+        hook: crate::runtime::BehaviorHook,
+        pos: stagcrest_protocol::BlockPos,
+        block_id: BlockId,
+        state: stagcrest_protocol::BlockState,
+        neighbor: Option<stagcrest_protocol::BlockPos>,
+        world: &mut stagcrest_world::World,
+    ) -> Result<BehaviorResult, String> {
+        let Some(instance) = self.instances.get_mut(mod_index as usize) else {
+            return Err(format!("mod {mod_index} not loaded"));
+        };
+        instance.invoke_behavior(
+            hook,
+            pos,
+            block_id,
+            state,
+            neighbor,
+            world,
+            &self.registry,
+        )
+    }
 }
 
 impl Default for ModHost {
@@ -155,7 +218,7 @@ impl Default for ModHost {
     }
 }
 
-pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) {
+pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest, mod_index: usize) {
     let mut face_textures = reg
         .resolve_face_textures(&json.top_texture, &json.bottom_texture, &json.sides_texture)
         .unwrap_or(BlockFaceTextures::uniform(stagcrest_protocol::TextureId(0)));
@@ -163,37 +226,42 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
     apply_block_face_tints(&json.namespaced_id, json.fluid, &mut face_textures, reg);
 
     let id = reg.allocate_block_id();
-    let circuit = json.circuit.map(|r| CircuitNodeDef {
-        kind: match r.kind {
-            CircuitKindRequest::Source { level } => CircuitKind::Source { level },
-            CircuitKindRequest::Inverter { output } => CircuitKind::Inverter { output },
-            CircuitKindRequest::Wire { falloff } => CircuitKind::Wire { falloff },
-            CircuitKindRequest::Switch { output } => CircuitKind::Switch { output },
-            CircuitKindRequest::Repeater { output } => CircuitKind::Repeater { output },
-            CircuitKindRequest::Observer { output } => CircuitKind::Observer { output },
-            CircuitKindRequest::Piston { sticky } => CircuitKind::Piston { sticky },
-            CircuitKindRequest::Lamp => CircuitKind::Lamp,
+    let behavior = json.behavior.map(|b| match b.kind {
+        BehaviorKindRequest::Native(native) => BehaviorRef::Native {
+            id: native.to_protocol(),
+        },
+        BehaviorKindRequest::Wasm => BehaviorRef::Wasm {
+            mod_index: mod_index as u32,
         },
     });
 
-    let push_reaction = json
-        .push_reaction
-        .map(push_reaction_from_sdk)
-        .unwrap_or(stagcrest_protocol::PushReaction::Normal);
+    let mut callbacks = json.callbacks;
+    if let Some(BehaviorRef::Native { id: native_id }) = behavior {
+        if matches!(
+            native_id,
+            NativeBehaviorId::RedstoneInverter { .. }
+                | NativeBehaviorId::RedstoneSwitch { .. }
+                | NativeBehaviorId::RedstoneRepeater { .. }
+                | NativeBehaviorId::RedstoneObserver { .. }
+                | NativeBehaviorId::RedstonePiston { .. }
+        ) {
+            callbacks = callbacks.union(CallbackFlags::STATE_FOR_PLACE);
+        }
+        if matches!(
+            native_id,
+            NativeBehaviorId::RedstoneLamp | NativeBehaviorId::RedstoneInverter { .. }
+        ) {
+            callbacks = callbacks.union(CallbackFlags::DYNAMIC_LIGHT);
+        }
+        if native_id == NativeBehaviorId::Bedrock {
+            callbacks = callbacks.union(CallbackFlags::ON_BREAK);
+        }
+    }
 
     let render_layer = json
         .render_layer
         .map(render_layer_from_sdk)
         .unwrap_or_else(|| resolve_render_layer(json.transparent));
-
-    let redstone_powerable = json.redstone_powerable.unwrap_or(
-        stagcrest_protocol::default_redstone_powerable(
-            json.solid,
-            json.opaque,
-            json.fluid,
-            json.transparent,
-        ),
-    );
 
     reg.register_block(BlockDef {
         id,
@@ -204,7 +272,6 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         solid: json.solid,
         hardness: json.hardness,
         face_textures,
-        circuit,
         placeable: json.placeable,
         fluid: json.fluid,
         geometry: json
@@ -213,24 +280,47 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
             .map(BlockGeometry::from_str)
             .unwrap_or_default(),
         render_layer,
-        push_reaction,
         map_color: json.map_color,
-        redstone_powerable,
         light_emission: json.light_emission,
-        light_emission_when_lit: json.light_emission_when_lit.unwrap_or(false),
         light_attenuation: json.light_attenuation,
-        blocks_sky_light: json.blocks_sky_light,
+        behavior,
+        callbacks,
+    });
+}
+
+/// Register the reserved unknown placeholder block.
+pub fn register_unknown_block(reg: &mut BlockRegistry) {
+    if reg.block_by_name(UNKNOWN_BLOCK_ID).is_some() {
+        return;
+    }
+    let id = reg.allocate_block_id();
+    reg.register_texture("stagcrest:unknown".into(), 16, 16, vec![255; 16 * 16 * 4]);
+    let tex = reg.texture_by_name("stagcrest:unknown").unwrap();
+    reg.register_block(BlockDef {
+        id,
+        namespaced_id: UNKNOWN_BLOCK_ID.into(),
+        display_name: "Unknown Block".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        hardness: 0.0,
+        face_textures: BlockFaceTextures::uniform(tex),
+        placeable: false,
+        geometry: BlockGeometry::Cube,
+        fluid: false,
+        render_layer: stagcrest_protocol::ModelRenderLayer::Opaque,
+        map_color: [255, 0, 255],
+        light_emission: 0,
+        light_attenuation: 0,
+        behavior: None,
+        callbacks: CallbackFlags::default(),
     });
 }
 
 fn push_reaction_from_sdk(
-    reaction: stagcrest_mod_sdk::PushReaction,
+    _reaction: stagcrest_mod_sdk::PushReaction,
 ) -> stagcrest_protocol::PushReaction {
-    match reaction {
-        stagcrest_mod_sdk::PushReaction::Normal => stagcrest_protocol::PushReaction::Normal,
-        stagcrest_mod_sdk::PushReaction::Block => stagcrest_protocol::PushReaction::Block,
-        stagcrest_mod_sdk::PushReaction::Destroy => stagcrest_protocol::PushReaction::Destroy,
-    }
+    stagcrest_protocol::PushReaction::Normal
 }
 
 fn resolve_render_layer(transparent: bool) -> stagcrest_protocol::ModelRenderLayer {
@@ -264,6 +354,8 @@ pub fn load_mods(repo_root: &std::path::Path) -> Result<ModHost, ModError> {
         register_pack_plant_textures(&mut host.registry, packs, &reader);
     }
     host.load_all(&reader, packs.as_ref())?;
+    register_unknown_block(&mut host.registry);
+    host.rebuild_behaviors();
     Ok(host)
 }
 

@@ -279,7 +279,7 @@ impl CircuitWorld {
         self.torch_flicker.remove(&pos);
 
         let (id, _) = world.get_block(pos);
-        if registry.block(id).and_then(|d| d.circuit).is_none() {
+        if registry.block(id).is_none_or(|d| !d.has_circuit()) {
             if self.power.remove(&pos).is_some() {
                 self.power_updates.push((pos, 0));
                 self.mark_chunk_dirty(pos);
@@ -342,14 +342,14 @@ impl CircuitWorld {
         let Some(def) = registry.block(id) else {
             return;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             return;
         };
-        match node.kind {
+        match kind {
             CircuitKind::Repeater { .. }
             | CircuitKind::Inverter { .. }
             | CircuitKind::Observer { .. } => {
-                self.set_published_power(pos, output, id, state, def, node.kind, world, registry);
+                self.set_published_power(pos, output, id, state, def, kind, world, registry);
             }
             CircuitKind::Piston { sticky } => {
                 if output == 1 {
@@ -385,10 +385,10 @@ impl CircuitWorld {
             let Some(def) = registry.block(id) else {
                 continue;
             };
-            let Some(node) = def.circuit else {
+            let Some(kind) = def.circuit_kind() else {
                 continue;
             };
-            if !matches!(node.kind, CircuitKind::Observer { .. }) {
+            if !matches!(kind, CircuitKind::Observer { .. }) {
                 continue;
             }
             if !observer_watches(npos, observer_facing(state), changed_pos) {
@@ -418,10 +418,9 @@ impl CircuitWorld {
         let Some(def) = registry.block(id) else {
             return;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             return;
         };
-        let kind = node.kind;
         if !matches!(kind, CircuitKind::Observer { .. }) {
             return;
         }
@@ -450,8 +449,8 @@ impl CircuitWorld {
                 continue;
             };
             if !def
-                .circuit
-                .is_some_and(|n| matches!(n.kind, CircuitKind::Switch { .. }))
+                .circuit_kind()
+                .is_some_and(|kind| matches!(kind, CircuitKind::Switch { .. }))
             {
                 continue;
             }
@@ -472,7 +471,7 @@ impl CircuitWorld {
         let Some(def) = registry.block(id) else {
             return;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             return;
         };
 
@@ -486,10 +485,10 @@ impl CircuitWorld {
         };
 
         let burnt_out = torch_burnt_out(state) && is_torch_geometry(def);
-        match dispatch(&ctx, node.kind, prev_input, burnt_out) {
+        match dispatch(&ctx, kind, prev_input, burnt_out) {
             EvalResult::Unchanged => {}
             EvalResult::Publish(power) => {
-                self.set_published_power(pos, power, id, state, def, node.kind, world, registry);
+                self.set_published_power(pos, power, id, state, def, kind, world, registry);
             }
             EvalResult::ArmDelay {
                 input,
@@ -622,7 +621,7 @@ impl CircuitWorld {
         let Some(def) = registry.block(id) else {
             return;
         };
-        if !def.redstone_powerable {
+        if !stagcrest_mod_server::block_redstone_powerable(def) {
             return;
         }
 
@@ -632,7 +631,7 @@ impl CircuitWorld {
                 continue;
             }
             let (nid, _) = world.get_block(npos);
-            if registry.block(nid).and_then(|d| d.circuit).is_some() {
+            if registry.block(nid).is_some_and(|d| d.has_circuit()) {
                 self.queue.enqueue_evaluate(npos);
             }
         }
@@ -687,7 +686,7 @@ impl CircuitWorld {
                 continue;
             }
             let (nid, nstate) = world.get_block(npos);
-            if registry.block(nid).and_then(|d| d.circuit).is_some() {
+            if registry.block(nid).is_some_and(|d| d.has_circuit()) {
                 self.torch_flicker.remove(&npos);
                 if let Some(ndef) = registry.block(nid) {
                     if is_torch_geometry(ndef) && torch_burnt_out(nstate) {
@@ -712,7 +711,7 @@ impl CircuitWorld {
                 continue;
             }
             let (nid, _) = world.get_block(npos);
-            if registry.block(nid).and_then(|d| d.circuit).is_some() {
+            if registry.block(nid).is_some_and(|d| d.has_circuit()) {
                 self.queue.enqueue_evaluate(npos);
             }
         }
@@ -723,11 +722,11 @@ impl CircuitWorld {
         let Some(def) = registry.block(id) else {
             return;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             return;
         };
 
-        let new_state = match node.kind {
+        let new_state = match kind {
             CircuitKind::Source { .. } => return,
             CircuitKind::Inverter { .. } if is_torch_geometry(def) => {
                 if torch_burnt_out(state) {
@@ -772,10 +771,10 @@ impl CircuitWorld {
         let Some(def) = registry.block(id) else {
             return;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             return;
         };
-        let CircuitKind::Repeater { .. } = node.kind else {
+        let CircuitKind::Repeater { .. } = kind else {
             return;
         };
 

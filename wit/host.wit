@@ -1,0 +1,39 @@
+package stagcrest:plugin@0.1.0;
+
+/// Host functions imported by mod components.
+interface host {
+    use types.{block-id, block-pos, block-state, callback-flags, native-behavior, behavior-ref,
+        register-block-request, register-texture-request, register-command-request,
+        register-biome-request, register-feature-request, register-river-config-request,
+        register-river-feature-request, register-cave-config-request, register-biome-feature-request};
+
+    /// Register a block; returns the assigned runtime id.
+    register-block: func(req: register-block-request) -> result<block-id, string>;
+    register-texture: func(req: register-texture-request) -> result<s32, string>;
+    /// Load a texture from a resource pack. Returns 1 if loaded, 0 if not found, -1 if no packs.
+    register-texture-from-pack: func(namespaced-id: string, mc-name: string) -> s32;
+    register-biome: func(req: register-biome-request) -> result<s32, string>;
+    register-feature: func(req: register-feature-request) -> result<s32, string>;
+    register-river-config: func(req: register-river-config-request) -> result<s32, string>;
+    register-river-feature: func(req: register-river-feature-request) -> result<s32, string>;
+    register-cave-config: func(req: register-cave-config-request) -> result<s32, string>;
+    register-biome-feature: func(req: register-biome-feature-request) -> result<s32, string>;
+    register-command: func(req: register-command-request) -> s32;
+    log: func(msg: string);
+
+    // --- Command dispatch (valid only during handle-command) ---
+
+    command-name: func() -> option<string>;
+    command-args: func() -> option<string>;
+    command-reply: func(text: string);
+    set-world-time: func(time: f64) -> s32;
+    get-world-time: func() -> f64;
+
+    // --- Runtime world API (valid during behavior callbacks) ---
+
+    get-block: func(pos: block-pos) -> option<tuple<block-id, block-state>>;
+    set-block-at: func(pos: block-pos, id: block-id, state: block-state) -> result<_, string>;
+    schedule-tick: func(pos: block-pos, delay-ticks: u32);
+    world-time: func() -> f64;
+    send-chat: func(client-id: u64, text: string);
+}

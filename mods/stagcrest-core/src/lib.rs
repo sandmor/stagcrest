@@ -3,77 +3,10 @@ mod commands;
 mod content;
 mod worldgen;
 
+#[cfg(target_arch = "wasm32")]
+mod bindings;
+
+#[cfg(target_arch = "wasm32")]
+mod guest;
+
 pub use content::register_content;
-
-#[cfg(target_arch = "wasm32")]
-struct WasmRegistrar;
-
-#[cfg(target_arch = "wasm32")]
-impl stagcrest_mod_sdk::ContentRegistrar for WasmRegistrar {
-    fn register_texture(&mut self, req: stagcrest_mod_sdk::RegisterTextureRequest) -> i32 {
-        stagcrest_mod_sdk::register_texture(req)
-    }
-
-    fn register_texture_from_pack(&mut self, namespaced_id: &str, mc_name: &str) -> i32 {
-        stagcrest_mod_sdk::register_texture_from_pack(namespaced_id, mc_name)
-    }
-
-    fn register_block(&mut self, req: stagcrest_mod_sdk::RegisterBlockRequest) -> i32 {
-        stagcrest_mod_sdk::register_block(req)
-    }
-
-    fn register_biome(&mut self, req: stagcrest_mod_sdk::RegisterBiomeRequest) -> i32 {
-        stagcrest_mod_sdk::register_biome(req)
-    }
-
-    fn register_feature(&mut self, req: stagcrest_mod_sdk::RegisterFeatureRequest) -> i32 {
-        stagcrest_mod_sdk::register_feature(req)
-    }
-
-    fn register_river_config(&mut self, req: stagcrest_mod_sdk::RegisterRiverConfigRequest) -> i32 {
-        stagcrest_mod_sdk::register_river_config(req)
-    }
-
-    fn register_river_feature(
-        &mut self,
-        req: stagcrest_mod_sdk::RegisterRiverFeatureRequest,
-    ) -> i32 {
-        stagcrest_mod_sdk::register_river_feature(req)
-    }
-
-    fn register_cave_config(&mut self, req: stagcrest_mod_sdk::RegisterCaveConfigRequest) -> i32 {
-        stagcrest_mod_sdk::register_cave_config(req)
-    }
-
-    fn register_command(&mut self, req: stagcrest_mod_sdk::RegisterCommandRequest) -> i32 {
-        stagcrest_mod_sdk::register_command(req)
-    }
-
-    fn register_biome_feature(
-        &mut self,
-        req: stagcrest_mod_sdk::RegisterBiomeFeatureRequest,
-    ) -> i32 {
-        stagcrest_mod_sdk::register_biome_feature(req)
-    }
-
-    fn log(&self, msg: &str) {
-        stagcrest_mod_sdk::log(msg);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[no_mangle]
-pub extern "C" fn _stagcrest_register() -> i32 {
-    let mut reg = WasmRegistrar;
-    register_content(&mut reg);
-    0
-}
-
-/// Command dispatch entry point invoked by the host when a slash command
-/// registered by this mod is run. Delegates to the command handler which pulls
-/// the command name/args from host imports.
-#[cfg(target_arch = "wasm32")]
-#[no_mangle]
-pub extern "C" fn _stagcrest_command() -> i32 {
-    commands::handle_command()
-}

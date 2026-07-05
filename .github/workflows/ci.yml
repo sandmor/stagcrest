@@ -32,6 +32,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - name: Install wasm-tools
+        run: cargo install wasm-tools --locked
       - name: Build core mod
         shell: bash
         run: bash scripts/build-core-mod.sh
@@ -41,6 +43,7 @@ jobs:
           cargo build -p stagcrest-client --release --no-default-features
           cargo build -p stagcrest-server --release
           cargo test -p stagcrest-net
+          cargo test -p stagcrest-mod-server host::tests::core_mod_time_command_sets_world_time
       - name: Package nightly
         if: github.event_name == 'push'
         shell: bash

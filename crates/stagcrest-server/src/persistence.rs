@@ -5,8 +5,8 @@ use stagcrest_circuit::CircuitWorld;
 use stagcrest_mod_server::WorldGenState;
 use stagcrest_protocol::ChunkPos;
 use stagcrest_storage::{
-    compress_stored, store_inactive_chunk, ChunkStorage, InactiveChunk, RedbChunkStorage,
-    StorageError,
+    compress_stored, store_inactive_chunk, BlockIdRemap, ChunkStorage, InactiveChunk,
+    RedbChunkStorage, StorageError,
 };
 use stagcrest_world::{EvictedChunk, World};
 use thiserror::Error;
@@ -115,6 +115,10 @@ impl ChunkPersistence {
         }
         all_persisted
     }
+}
+
+pub fn remap_loaded_chunk(chunk: &mut InactiveChunk, remap: &BlockIdRemap) {
+    remap.remap_palette(&mut chunk.palette_ids);
 }
 
 pub fn persist_chunk(

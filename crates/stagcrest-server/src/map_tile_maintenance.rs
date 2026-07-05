@@ -4,8 +4,8 @@ use rayon::prelude::*;
 use stagcrest_minimap::{
     build_map_chunk_blob, world_chunk_to_map_chunk, MapChunkLoadInput, MapResolveContext,
 };
-use stagcrest_protocol::ChunkPos;
-use stagcrest_storage::RedbChunkStorage;
+use stagcrest_protocol::{BlockId, ChunkPos};
+use stagcrest_storage::{BlockIdRemap, RedbChunkStorage};
 use thiserror::Error;
 
 /// Report from a full-world map tile rebuild.
@@ -51,9 +51,11 @@ impl MapTileDirtySet {
         storage: &RedbChunkStorage,
         map_ctx: &MapResolveContext,
         y_chunks: &[i32],
+        air: BlockId,
+        block_remap: Option<&BlockIdRemap>,
     ) -> Result<usize, MapTileError> {
         let tiles: Vec<(i32, i32)> = self.tiles.drain().collect();
-        rebuild_map_tiles(&tiles, storage, map_ctx, y_chunks)
+        rebuild_map_tiles(&tiles, storage, map_ctx, y_chunks, air, block_remap)
     }
 }
 
@@ -77,6 +79,8 @@ pub fn rebuild_map_tile(
     storage: &RedbChunkStorage,
     map_ctx: &MapResolveContext,
     y_chunks: &[i32],
+    air: BlockId,
+    block_remap: Option<&BlockIdRemap>,
 ) -> Result<(), MapTileError> {
     let empty_overrides = HashMap::new();
     let empty_modified = HashSet::new();
@@ -86,6 +90,8 @@ pub fn rebuild_map_tile(
         y_chunks,
         mx,
         mz,
+        air,
+        block_remap,
         overrides: &empty_overrides,
         modified_live: &empty_modified,
     };
@@ -100,13 +106,15 @@ pub fn rebuild_map_tiles(
     storage: &RedbChunkStorage,
     map_ctx: &MapResolveContext,
     y_chunks: &[i32],
+    air: BlockId,
+    block_remap: Option<&BlockIdRemap>,
 ) -> Result<usize, MapTileError> {
     if tiles.is_empty() {
         return Ok(0);
     }
     if tiles.len() == 1 {
         let (mx, mz) = tiles[0];
-        rebuild_map_tile(mx, mz, storage, map_ctx, y_chunks)?;
+        rebuild_map_tile(mx, mz, storage, map_ctx, y_chunks, air, block_remap)?;
         return Ok(1);
     }
 
@@ -122,6 +130,8 @@ pub fn rebuild_map_tiles(
                 y_chunks,
                 mx,
                 mz,
+                air,
+                block_remap,
                 overrides: &empty_overrides,
                 modified_live: &empty_modified,
             };
@@ -151,6 +161,8 @@ pub fn rebuild_all_map_tiles(
     storage: &RedbChunkStorage,
     map_ctx: &MapResolveContext,
     y_chunks: &[i32],
+    air: BlockId,
+    block_remap: Option<&BlockIdRemap>,
 ) -> Result<MapTileRebuildReport, MapTileError> {
     let positions = storage.iter_chunk_positions()?;
     if positions.is_empty() {
@@ -160,7 +172,7 @@ pub fn rebuild_all_map_tiles(
     }
 
     let tiles = map_tiles_from_chunk_positions(&positions);
-    let rebuilt = rebuild_map_tiles(&tiles, storage, map_ctx, y_chunks)?;
+    let rebuilt = rebuild_map_tiles(&tiles, storage, map_ctx, y_chunks, air, block_remap)?;
     Ok(MapTileRebuildReport {
         world_chunks: positions.len(),
         map_tiles: tiles.len(),

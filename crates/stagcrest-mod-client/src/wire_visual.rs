@@ -25,11 +25,8 @@ pub fn is_wire_line_block(registry: &BlockRegistry, id: BlockId) -> bool {
     let Some(def) = registry.block(id) else {
         return false;
     };
-    if def.namespaced_id == "stagcrest:redstone_dust" {
-        return true;
-    }
-    def.circuit
-        .is_some_and(|c| matches!(c.kind, CircuitKind::Wire { .. }))
+    def.circuit_kind()
+        .is_some_and(|kind| matches!(kind, CircuitKind::Wire { .. }))
 }
 
 /// Wire line neighbor check with directional rules for repeaters.

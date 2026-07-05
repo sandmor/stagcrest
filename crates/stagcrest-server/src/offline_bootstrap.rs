@@ -8,6 +8,7 @@ use stagcrest_mod_server::{
     FsAssetReader, ModHost, TerrainConfig,
 };
 use stagcrest_protocol::BlockId;
+use stagcrest_storage::BlockIdRemap;
 use thiserror::Error;
 
 use crate::map_generation::make_map_resolve_context;
@@ -66,6 +67,7 @@ impl WorldgenContext {
 pub struct OfflineWorld {
     pub session: WorldSession,
     pub worldgen: WorldgenContext,
+    pub block_remap: Option<BlockIdRemap>,
 }
 
 #[derive(Debug, Error)]
@@ -75,7 +77,7 @@ pub enum BootstrapError {
     #[error("mod: {0}")]
     Mod(#[from] stagcrest_mod_server::ModError),
     #[error("map tile: {0}")]
-    MapTile(#[from] MapTileError),
+    Map(#[from] MapTileError),
     #[error("{0}")]
     Message(String),
 }
@@ -133,15 +135,34 @@ fn worldgen_context_from_host(
     })
 }
 
+pub fn block_remap_from_meta(
+    host: &ModHost,
+    saved: &[stagcrest_storage::BlockRegistryEntry],
+) -> Option<BlockIdRemap> {
+    if saved.is_empty() {
+        None
+    } else {
+        Some(host.build_id_remap(saved))
+    }
+}
+
 /// One mod load and one DB open — used by `build-map` and minimap rebuild paths.
 pub fn bootstrap_offline(
     world_name: &str,
     mods_root: &Path,
     seed: WorldSeedPolicy,
 ) -> Result<OfflineWorld, BootstrapError> {
-    let worldgen = load_worldgen_context(mods_root)?;
+    let spin = spinner("Loading mods and colormaps...");
+    let host = load_mods(mods_root)?;
+    let worldgen = worldgen_context_from_host(&host, mods_root)?;
+    spin.finish_with_message("mods loaded");
     let session = open_offline_world(world_name, seed)?;
-    Ok(OfflineWorld { session, worldgen })
+    let block_remap = block_remap_from_meta(&host, &session.meta.block_registry);
+    Ok(OfflineWorld {
+        session,
+        worldgen,
+        block_remap,
+    })
 }
 
 /// Rebuild every map tile covering saved world chunks (single storage scan).
@@ -152,6 +173,14 @@ pub fn rebuild_all_minimap_tiles(
     let storage = offline.session.storage.as_ref();
     let map_ctx = offline.worldgen.map_ctx();
     let y_chunks = offline.worldgen.map_y_chunks();
-    let report = with_rayon_pool(jobs, || rebuild_all_map_tiles(storage, &map_ctx, &y_chunks))?;
+    let report = with_rayon_pool(jobs, || {
+        rebuild_all_map_tiles(
+            storage,
+            &map_ctx,
+            &y_chunks,
+            offline.worldgen.air,
+            offline.block_remap.as_ref(),
+        )
+    })?;
     Ok(report)
 }

@@ -39,10 +39,10 @@ fn is_locked(ctx: &EvalContext<'_>) -> bool {
         let Some(def) = ctx.registry.block(id) else {
             continue;
         };
-        let Some(node) = def.circuit else {
+        let Some(kind) = def.circuit_kind() else {
             continue;
         };
-        let stagcrest_protocol::CircuitKind::Repeater { .. } = node.kind else {
+        let stagcrest_protocol::CircuitKind::Repeater { .. } = kind else {
             continue;
         };
         if !repeater_powered(state) && ctx.circuit.power_at(side_pos) == 0 {

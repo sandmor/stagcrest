@@ -1,6 +1,9 @@
 use crate::registry::BlockRegistry;
 use crate::worldgen::terrain::ColumnBlocks;
-use stagcrest_protocol::{BlockDef, BlockFaceTextures, BlockGeometry, BlockId, TextureId};
+use stagcrest_protocol::{
+    BehaviorRef, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CallbackFlags,
+    NativeBehaviorId, TextureId,
+};
 
 pub fn test_blocks() -> ColumnBlocks {
     ColumnBlocks {
@@ -51,6 +54,13 @@ pub fn test_registry() -> BlockRegistry {
         let opaque = id != 0 && id != 5 && (id < 9 || id == 13);
         let transparent = id == 5 || (id >= 9 && id <= 12) || id == 14 || id == 15;
         let solid = id != 0 && id != 5 && id < 9 || id == 13;
+        let behavior = if name == "stagcrest:bedrock" {
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::Bedrock,
+            })
+        } else {
+            None
+        };
         reg.register_block(BlockDef {
             id: BlockId(id),
             namespaced_id: name.into(),
@@ -60,7 +70,6 @@ pub fn test_registry() -> BlockRegistry {
             solid,
             hardness: 1.0,
             face_textures: face,
-            circuit: None,
             placeable: false,
             geometry,
             fluid: id == 5,
@@ -71,22 +80,11 @@ pub fn test_registry() -> BlockRegistry {
             } else {
                 stagcrest_protocol::ModelRenderLayer::Opaque
             },
-            push_reaction: if name == "stagcrest:bedrock" {
-                stagcrest_protocol::PushReaction::Block
-            } else {
-                stagcrest_protocol::PushReaction::Normal
-            },
             map_color: [128, 128, 128],
-            redstone_powerable: stagcrest_protocol::default_redstone_powerable(
-                solid,
-                opaque,
-                false,
-                transparent,
-            ),
             light_emission: 0,
-            light_emission_when_lit: false,
             light_attenuation: 0,
-            blocks_sky_light: None,
+            behavior,
+            callbacks: CallbackFlags::default(),
         });
     }
     reg

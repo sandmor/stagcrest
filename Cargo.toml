@@ -57,7 +57,9 @@ toml = "0.8"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-wasmi = "0.32"
+wasmtime = { version = "28", default-features = false, features = ["component-model", "cranelift", "async", "pooling-allocator"] }
+wit-bindgen = { version = "0.36", features = ["macros", "realloc"] }
+bitflags = "2"
 rayon = "1.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
 noise = "0.9"

@@ -1,4 +1,6 @@
-mod memory;
-mod wasmi;
+mod bindings;
+mod wasmtime;
 
-pub use wasmi::{load_mod, ModInstance, ModLoadContext};
+pub use wasmtime::{
+    create_engine, load_mod, BehaviorHook, ModInstance, ModLoadContext,
+};

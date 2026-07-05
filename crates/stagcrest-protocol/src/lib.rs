@@ -745,36 +745,105 @@ pub struct BlockDef {
     pub solid: bool,
     pub hardness: f32,
     pub face_textures: BlockFaceTextures,
-    pub circuit: Option<CircuitNodeDef>,
     pub placeable: bool,
     pub geometry: BlockGeometry,
     pub fluid: bool,
     pub render_layer: ModelRenderLayer,
-    #[serde(default)]
-    pub push_reaction: PushReaction,
     pub map_color: [u8; 3],
-    /// Whether this block behaves like a redstone opaque/full block: it can
-    /// receive strong or weak block power and pass strong power to dust.
-    #[serde(default)]
-    pub redstone_powerable: bool,
-    /// Block light emitted (0–15), e.g. torches and lava.
+    /// Block light emitted (0–15) when not using dynamic-light behavior.
     #[serde(default)]
     pub light_emission: u8,
-    /// When true, emits [`Self::light_emission`] only when block state bit 0 is set.
-    #[serde(default)]
-    pub light_emission_when_lit: bool,
     /// Light subtracted when passing through this block (0 = derive from opaque/transparent).
     #[serde(default)]
     pub light_attenuation: u8,
-    /// When set, overrides whether this block occludes skylight columns.
+    /// Optional behavior (native redstone, mod WASM callbacks, etc.).
     #[serde(default)]
-    pub blocks_sky_light: Option<bool>,
+    pub behavior: Option<BehaviorRef>,
+    /// Which lifecycle hooks this block's behavior implements.
+    #[serde(default)]
+    pub callbacks: CallbackFlags,
+}
+
+/// Reserved namespaced id for blocks whose original id is missing from the registry.
+pub const UNKNOWN_BLOCK_ID: &str = "stagcrest:unknown";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub struct CallbackFlags(pub u16);
+
+impl CallbackFlags {
+    pub const ON_PLACE: Self = Self(1 << 0);
+    pub const ON_BREAK: Self = Self(1 << 1);
+    pub const ON_USE: Self = Self(1 << 2);
+    pub const ON_NEIGHBOR_CHANGED: Self = Self(1 << 3);
+    pub const ON_SCHEDULED_TICK: Self = Self(1 << 4);
+    pub const ON_RANDOM_TICK: Self = Self(1 << 5);
+    pub const STATE_FOR_PLACE: Self = Self(1 << 6);
+    pub const DYNAMIC_LIGHT: Self = Self(1 << 7);
+
+    pub fn contains(self, flag: Self) -> bool {
+        self.0 & flag.0 != 0
+    }
+
+    pub fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BehaviorRef {
+    Native { id: NativeBehaviorId },
+    Wasm { mod_index: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NativeBehaviorId {
+    RedstoneSource { level: u8 },
+    RedstoneWire { falloff: u8 },
+    RedstoneInverter { output: u8 },
+    RedstoneSwitch { output: u8 },
+    RedstoneRepeater { output: u8 },
+    RedstoneObserver { output: u8 },
+    RedstonePiston { sticky: bool },
+    RedstoneLamp,
+    Bedrock,
+    PistonBody,
+    PistonHead,
+}
+
+impl NativeBehaviorId {
+    pub fn circuit_kind(self) -> Option<CircuitKind> {
+        match self {
+            Self::RedstoneSource { level } => Some(CircuitKind::Source { level }),
+            Self::RedstoneWire { falloff } => Some(CircuitKind::Wire { falloff }),
+            Self::RedstoneInverter { output } => Some(CircuitKind::Inverter { output }),
+            Self::RedstoneSwitch { output } => Some(CircuitKind::Switch { output }),
+            Self::RedstoneRepeater { output } => Some(CircuitKind::Repeater { output }),
+            Self::RedstoneObserver { output } => Some(CircuitKind::Observer { output }),
+            Self::RedstonePiston { sticky } => Some(CircuitKind::Piston { sticky }),
+            Self::RedstoneLamp => Some(CircuitKind::Lamp),
+            Self::Bedrock | Self::PistonBody | Self::PistonHead => None,
+        }
+    }
+
+    pub fn from_circuit_kind(kind: CircuitKind) -> Self {
+        match kind {
+            CircuitKind::Source { level } => Self::RedstoneSource { level },
+            CircuitKind::Wire { falloff } => Self::RedstoneWire { falloff },
+            CircuitKind::Inverter { output } => Self::RedstoneInverter { output },
+            CircuitKind::Switch { output } => Self::RedstoneSwitch { output },
+            CircuitKind::Repeater { output } => Self::RedstoneRepeater { output },
+            CircuitKind::Observer { output } => Self::RedstoneObserver { output },
+            CircuitKind::Piston { sticky } => Self::RedstonePiston { sticky },
+            CircuitKind::Lamp => Self::RedstoneLamp,
+        }
+    }
 }
 
 impl BlockDef {
     pub fn blocks_skylight(&self) -> bool {
-        self.blocks_sky_light
-            .unwrap_or(self.opaque && !self.fluid && !self.transparent)
+        self.opaque && !self.fluid && !self.transparent
     }
 
     pub fn effective_light_attenuation(&self) -> u8 {
@@ -789,18 +858,73 @@ impl BlockDef {
         }
     }
 
-    /// Block light emitted at the given instance state.
-    pub fn effective_light_emission(&self, state: BlockState) -> u8 {
-        if self.light_emission_when_lit {
-            if state.0 & 1 != 0 {
-                self.light_emission.min(15)
-            } else {
-                0
-            }
-        } else {
-            self.light_emission.min(15)
+    /// Block light emitted at the given instance state (static emission only).
+    pub fn effective_light_emission(&self, _state: BlockState) -> u8 {
+        if self.callbacks.contains(CallbackFlags::DYNAMIC_LIGHT) {
+            return 0;
+        }
+        self.light_emission.min(15)
+    }
+
+    /// Resolved block light including native dynamic behaviors (lamps, torches).
+    pub fn resolved_light_emission(&self, state: BlockState) -> u8 {
+        match self.behavior {
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneLamp,
+            }) if lamp_lit(state) => self.light_emission.min(15),
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneInverter { .. },
+            }) if state.0 & 1 != 0 => self.light_emission.min(15),
+            _ if self.callbacks.contains(CallbackFlags::DYNAMIC_LIGHT) => 0,
+            _ => self.light_emission.min(15),
         }
     }
+
+    pub fn has_circuit(&self) -> bool {
+        self.behavior
+            .and_then(|b| match b {
+                BehaviorRef::Native { id } => id.circuit_kind(),
+                BehaviorRef::Wasm { .. } => None,
+            })
+            .is_some()
+    }
+
+    pub fn circuit_kind(&self) -> Option<CircuitKind> {
+        match self.behavior? {
+            BehaviorRef::Native { id } => id.circuit_kind(),
+            BehaviorRef::Wasm { .. } => None,
+        }
+    }
+
+    pub fn push_reaction(&self) -> PushReaction {
+        match self.behavior {
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::Bedrock,
+            }) => PushReaction::Block,
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::PistonHead,
+            }) => PushReaction::Destroy,
+            _ if self.solid && self.opaque => PushReaction::Normal,
+            _ => PushReaction::Destroy,
+        }
+    }
+
+    pub fn redstone_powerable(&self) -> bool {
+        if is_slime_or_honey(&self.namespaced_id) {
+            return true;
+        }
+        match self.behavior {
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneLamp,
+            }) => true,
+            Some(BehaviorRef::Native { id }) if id.circuit_kind().is_some() => false,
+            _ => default_redstone_powerable(self.solid, self.opaque, self.fluid, self.transparent),
+        }
+    }
+}
+
+fn is_slime_or_honey(namespaced_id: &str) -> bool {
+    namespaced_id.ends_with(":slime_block") || namespaced_id.ends_with(":honey_block")
 }
 
 /// Default Bedrock-style redstone conductor flag when a mod omits an explicit override.
@@ -947,36 +1071,41 @@ mod light_emission_tests {
             solid: false,
             hardness: 0.0,
             face_textures: BlockFaceTextures::uniform(TextureId(0)),
-            circuit: None,
             placeable: true,
             geometry: BlockGeometry::Cube,
             fluid: false,
             render_layer: ModelRenderLayer::Opaque,
-            push_reaction: PushReaction::Normal,
             map_color: [0, 0, 0],
-            redstone_powerable: false,
             light_emission: 14,
-            light_emission_when_lit: true,
             light_attenuation: 0,
-            blocks_sky_light: None,
+            behavior: None,
+            callbacks: CallbackFlags::default(),
         }
     }
 
     #[test]
-    fn effective_light_emission_respects_lit_bit() {
+    fn effective_light_emission_static_when_no_dynamic_callback() {
         let def = torch_def();
-        assert_eq!(def.effective_light_emission(torch_state(false, TorchAttachment::Floor)), 0);
+        assert_eq!(def.effective_light_emission(torch_state(false, TorchAttachment::Floor)), 14);
         assert_eq!(def.effective_light_emission(torch_state(true, TorchAttachment::Floor)), 14);
     }
 
     #[test]
-    fn lamp_effective_light_emission() {
+    fn effective_light_emission_deferred_with_dynamic_callback() {
         let def = BlockDef {
-            light_emission: 15,
-            light_emission_when_lit: true,
+            callbacks: CallbackFlags::DYNAMIC_LIGHT,
             ..torch_def()
         };
-        assert_eq!(def.effective_light_emission(lamp_state(false)), 0);
+        assert_eq!(def.effective_light_emission(torch_state(true, TorchAttachment::Floor)), 0);
+    }
+
+    #[test]
+    fn lamp_effective_light_emission_static() {
+        let def = BlockDef {
+            light_emission: 15,
+            ..torch_def()
+        };
+        assert_eq!(def.effective_light_emission(lamp_state(false)), 15);
         assert_eq!(def.effective_light_emission(lamp_state(true)), 15);
     }
 }

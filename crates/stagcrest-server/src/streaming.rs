@@ -7,13 +7,13 @@ use stagcrest_mod_server::{
 };
 use stagcrest_net::ChunkSnapshot;
 use stagcrest_protocol::{BlockId, BlockPos, ChunkPos, CHUNK_SIZE};
-use stagcrest_storage::load_inactive_chunk;
+use stagcrest_storage::{load_inactive_chunk, BlockIdRemap};
 use stagcrest_world::{EvictedChunk, World};
 
 use crate::chunk_gen::{apply_pass1_density, apply_pass2_decorate};
 use crate::client_session::{ClientId, ConnectedClient};
 use crate::interest::chunk_in_client_radius;
-use crate::persistence::{compressed_chunk_wire, pack_network_chunk, persist_evicted_chunk};
+use crate::persistence::{compressed_chunk_wire, pack_network_chunk, persist_evicted_chunk, remap_loaded_chunk};
 use crate::session::WorldSession;
 
 const MAX_GEN_PER_TICK: usize = 2;
@@ -53,6 +53,7 @@ impl StreamingPipeline {
         v_radius: i32,
         enqueue_rotate: usize,
         fair_rotate: usize,
+        block_remap: Option<&BlockIdRemap>,
     ) -> StreamingTickResult {
         let mut result = StreamingTickResult::default();
         if !clients
@@ -183,7 +184,10 @@ impl StreamingPipeline {
                 break;
             };
             match load_inactive_chunk(session.storage.as_ref(), pos) {
-                Ok(Some(chunk)) => {
+                Ok(Some(mut chunk)) => {
+                    if let Some(remap) = block_remap {
+                        remap_loaded_chunk(&mut chunk, remap);
+                    }
                     let biome = chunk.biome_grid;
                     let circuit_snap = chunk.circuit.clone();
                     world.insert_inactive_chunk(pos, chunk);

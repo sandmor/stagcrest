@@ -10,9 +10,9 @@ use std::collections::{HashMap, HashSet};
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use stagcrest_mod_client::{
-    face_texture_for, resolve_block_model, resolve_wire_line_textures, sample_colormap_rgb,
-    wire_power_vertex_tint, wire_shows_center_junction, BlockRegistry, ColormapSet, ModelRegistry,
-    WireConnections, WireLineTextures, WireLink,
+    face_texture_for, is_wire_line_block, resolve_block_model, resolve_wire_line_textures,
+    sample_colormap_rgb, wire_power_vertex_tint, wire_shows_center_junction, BlockRegistry,
+    ColormapSet, ModelRegistry, WireConnections, WireLineTextures, WireLink,
 };
 use stagcrest_protocol::{
     BlockGeometry, BlockId, BlockState, ChunkPos, FaceTexture, TextureId, TintKind, CHUNK_SIZE,
@@ -169,7 +169,7 @@ fn build_single_block_mesh_internal(
 
     let mut mesh = ChunkMesh::default();
 
-    if def.namespaced_id == "stagcrest:redstone_dust" {
+    if is_wire_line_block(registry, def.id) {
         let textures = resolve_wire_line_textures(registry);
         emit_wire_line(
             &mut mesh,
@@ -1366,7 +1366,8 @@ mod tests {
             face_textures: stagcrest_protocol::BlockFaceTextures::uniform(TextureId(0)),
             placeable: false,
             geometry: BlockGeometry::Cube,
-            circuit: None,
+            behavior: None,
+            callbacks: stagcrest_protocol::CallbackFlags::default(),
             render_layer: if fluid {
                 ModelRenderLayer::Blend
             } else if !opaque {
@@ -1374,18 +1375,9 @@ mod tests {
             } else {
                 ModelRenderLayer::Opaque
             },
-            push_reaction: stagcrest_protocol::PushReaction::Normal,
             map_color: [128, 128, 128],
-            redstone_powerable: stagcrest_protocol::default_redstone_powerable(
-                solid,
-                opaque,
-                fluid,
-                false,
-            ),
             light_emission: 0,
-            light_emission_when_lit: false,
             light_attenuation: 0,
-            blocks_sky_light: None,
         }
     }
 

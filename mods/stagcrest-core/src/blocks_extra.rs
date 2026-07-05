@@ -57,14 +57,11 @@ fn reg_faced_block(
         fluid: false,
         render_layer: None,
         geometry: None,
-        circuit: None,
-        push_reaction: None,
-        map_color: default_map_color(&full_id),
-        redstone_powerable: None,
+        behavior: None,
+        callbacks: Default::default(),
+                map_color: default_map_color(&full_id),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
 }
 
@@ -120,14 +117,11 @@ fn reg_log(reg: &mut impl ContentRegistrar, wood: &str) {
         fluid: false,
         render_layer: None,
         geometry: None,
-        circuit: None,
-        push_reaction: None,
-        map_color: default_map_color(&id),
-        redstone_powerable: None,
+        behavior: None,
+        callbacks: Default::default(),
+                map_color: default_map_color(&id),
         light_emission: 0,
-        light_emission_when_lit: None,
         light_attenuation: 0,
-        blocks_sky_light: None,
     });
 }
 

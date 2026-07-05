@@ -29,7 +29,7 @@ fn find_circuit_blocks(
                         base_y + y,
                         base_z + z,
                     ));
-                    if registry.block(id).and_then(|d| d.circuit).is_some() {
+                    if registry.block(id).is_some_and(|d| d.has_circuit()) {
                         out.push(stagcrest_protocol::BlockPos::new(
                             base_x + x,
                             base_y + y,

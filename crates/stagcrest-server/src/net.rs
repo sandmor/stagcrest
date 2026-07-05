@@ -213,8 +213,8 @@ mod tests {
 
     // Compile-time guard: GameServer must stay `Send` because `run_standalone`
     // holds it across `tokio::select!` awaits on a multi-thread runtime. The
-    // mod runtime now stores wasmi `Store<HostState>` inside `ModHost`, so this
-    // catches any non-Send host state regressions.
+    // wasmtime `Store<HostState>` inside `ModHost` is `Send` when host state is
+    // `Send`; this catches regressions.
     #[test]
     fn game_server_is_send() {
         fn assert_send<T: Send>() {}

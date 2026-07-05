@@ -1,5 +1,6 @@
 mod assets;
 mod atlas;
+mod behavior;
 mod block_tints;
 mod colormap;
 mod commands;
@@ -10,7 +11,7 @@ mod piston_placement;
 mod registry;
 mod repeater_placement;
 mod resourcepack;
-mod runtime;
+pub mod runtime;
 mod torch_placement;
 mod worldgen;
 
@@ -19,6 +20,10 @@ pub use atlas::TextureAtlas;
 pub use block_tints::apply_block_face_tints;
 pub use colormap::{sample_colormap_rgb, ColormapSet};
 pub use commands::{split_command, validate_command_name, CommandEntry, CommandHost, CommandRegistry};
+pub use behavior::{
+    block_push_reaction, block_redstone_powerable, extra_break_positions, placement_state,
+    BehaviorCtx, BehaviorRegistry, BehaviorResult, default_push_reaction, redstone_powerable_for,
+};
 pub use host::{load_mods, ModError, ModHost};
 pub use mount_placement::{mount_can_attach, validate_mount_placement};
 pub use observer_placement::validate_observer_placement;

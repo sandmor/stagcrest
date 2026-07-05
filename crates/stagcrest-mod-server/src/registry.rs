@@ -1,7 +1,7 @@
 use stagcrest_protocol::{
     lamp_lit, observer_powered, piston_extended, piston_head_sticky, repeater_powered, torch_lit,
-    AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures, FaceTexture,
-    TextureAnimation, TextureDef, TextureId, TintKind,
+    AtlasRect, BehaviorRef, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures,
+    FaceTexture, NativeBehaviorId, TextureAnimation, TextureDef, TextureId, TintKind,
 };
 use std::collections::HashMap;
 
@@ -238,64 +238,60 @@ impl BlockRegistry {
         state: BlockState,
     ) -> Option<BlockFaceTextures> {
         let def = self.block(id)?;
-        if def.namespaced_id == "stagcrest:redstone_torch" {
-            if !torch_lit(state) {
-                return Some(def.face_textures);
-            }
-            return self.resolve_face_textures(
+        match def.behavior {
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneInverter { .. },
+            }) if torch_lit(state) => self.resolve_face_textures(
                 "stagcrest:redstone_torch_on",
                 "stagcrest:redstone_torch_on",
                 "stagcrest:redstone_torch_on",
-            );
-        }
-        if def.namespaced_id == "stagcrest:redstone_lamp" && lamp_lit(state) {
-            return self.resolve_face_textures(
+            ),
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneInverter { .. },
+            }) if !torch_lit(state) => Some(def.face_textures),
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneLamp,
+            }) if lamp_lit(state) => self.resolve_face_textures(
                 "stagcrest:redstone_lamp_on",
                 "stagcrest:redstone_lamp_on",
                 "stagcrest:redstone_lamp_on",
-            );
-        }
-        if def.namespaced_id == "stagcrest:repeater" && repeater_powered(state) {
-            // Top stays `repeater`: `repeater_on` on the full slab cap reads as a flat
-            // red wash. Lit state is shown by the powered model variant + torch sides.
-            return self.resolve_face_textures(
+            ),
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneRepeater { .. },
+            }) if repeater_powered(state) => self.resolve_face_textures(
                 "stagcrest:repeater",
                 "stagcrest:smooth_stone",
                 "stagcrest:redstone_torch_on",
-            );
-        }
-        if def.namespaced_id == "stagcrest:observer" && observer_powered(state) {
-            let output_lit = self
-                .texture_by_name("stagcrest:observer_back_on")
-                .map(|_| "stagcrest:observer_back_on")
-                .unwrap_or("stagcrest:redstone_torch_on");
-            return self.resolve_face_textures(
-                output_lit,
-                "stagcrest:observer_side",
-                "stagcrest:observer_front",
-            );
-        }
-        if (def.namespaced_id == "stagcrest:piston"
-            || def.namespaced_id == "stagcrest:sticky_piston")
-            && piston_extended(state)
-        {
-            return self.resolve_face_textures(
+            ),
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstoneObserver { .. },
+            }) if observer_powered(state) => {
+                let output_lit = self
+                    .texture_by_name("stagcrest:observer_back_on")
+                    .map(|_| "stagcrest:observer_back_on")
+                    .unwrap_or("stagcrest:redstone_torch_on");
+                self.resolve_face_textures(
+                    output_lit,
+                    "stagcrest:observer_side",
+                    "stagcrest:observer_front",
+                )
+            }
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::RedstonePiston { .. },
+            }) if piston_extended(state) => self.resolve_face_textures(
                 "stagcrest:piston_inner",
                 "stagcrest:piston_bottom",
                 "stagcrest:piston_side",
-            );
-        }
-        if def.namespaced_id == "stagcrest:piston_head" && piston_head_sticky(state) {
-            return self.resolve_face_textures(
+            ),
+            Some(BehaviorRef::Native {
+                id: NativeBehaviorId::PistonHead,
+            }) if piston_head_sticky(state) => self.resolve_face_textures(
                 "stagcrest:piston_top_sticky",
                 "stagcrest:piston_bottom",
                 "stagcrest:piston_side",
-            );
+            ),
+            _ => Some(def.face_textures),
         }
-        if state.0 == 0 {
-            return Some(def.face_textures);
-        }
-        Some(def.face_textures)
     }
 
     pub fn tint_for_kind(kind: TintKind) -> f32 {

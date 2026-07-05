@@ -1,13 +1,13 @@
 # Stagcrest
 
-Mod-first voxel engine in Rust: **server-authoritative** simulation, **Bevy** native client for rendering and UI, **wasmi** for WASM mods. Every block, texture, and circuit rule comes from mods — the `stagcrest-core` mod provides default content.
+Mod-first voxel engine in Rust: **server-authoritative** simulation, **Bevy** native client for rendering and UI, **wasmtime** (Component Model + WIT) for WASM mods. Every block, texture, and circuit rule comes from mods — the `stagcrest-core` mod provides default content.
 
 ## Architecture
 
-- **stagcrest-server** — mods (wasmi), worldgen, block world, circuits, persistence (redb), chunk streaming
+- **stagcrest-server** — mods (wasmtime components), worldgen, block world, circuits, persistence (redb), chunk streaming
 - **stagcrest-client** — Bevy rendering, meshing, UI, input, raycast against a world replica
 - **stagcrest-net** — postcard-framed TCP (remote) or in-process transport (embedded single-player)
-- Mods compile to `wasm32-unknown-unknown` cdylibs and export `_stagcrest_register()`. The server loads mod `.wasm` bytes through **wasmi**.
+- Mods compile to WebAssembly **components** (`wasm32-unknown-unknown` + `wasm-tools component embed/new`). The server loads `.wasm` components through **wasmtime** using the WIT package in `wit/`.
 
 Single-player embeds the server in-process (no second terminal). Remote play: run `stagcrest-server`, connect with `stagcrest-client --connect host:port`.
 
@@ -42,6 +42,7 @@ Mods are built artifacts (not committed). Build before running:
 
 ```bash
 rustup target add wasm32-unknown-unknown
+cargo install wasm-tools --locked
 bash scripts/build-core-mod.sh      # Linux/macOS
 # or on Windows PowerShell:
 # .\scripts\build-core-mod.ps1
@@ -156,7 +157,7 @@ crates/
   stagcrest-mesh        — greedy meshing
   stagcrest-circuit     — event-driven circuit graph
   stagcrest-mod-sdk     — mod author API (host imports)
-  stagcrest-mod-server  — wasmi loader, worldgen, server registries
+  stagcrest-mod-server  — wasmtime component loader, worldgen, server registries
   stagcrest-mod-client  — client content from manifest
   stagcrest-net         — framing, transports, NetConfig
   stagcrest-server      — authoritative simulation (lib + bin)
@@ -192,35 +193,30 @@ data/settings.toml      — content settings (see settings.toml.example)
 
 ## Mod API
 
-Mods export `_stagcrest_register()` and import from module `stagcrest_host`:
+Mods are WebAssembly **components** defined by the WIT package `stagcrest:plugin` in `wit/`. Guest exports (implemented via `wit-bindgen` in the mod crate):
 
-| Import                   | Signature                                       | Payload                                                                          |
-| ------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------- |
-| `register_block`         | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → block definition (includes `map_color: [u8;3]`)                     |
-| `register_texture`       | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → RGBA texture                                                        |
-| `register_command`       | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → slash command definition (name, description, usage)                 |
-| `log_message`            | `(ptr: i32, len: i32)`                          | UTF-8 string                                                                     |
-| `load_texture_from_pack` | `(name_ptr, name_len, out_ptr, out_max) -> i32` | Load MC-format block PNG from host resource packs; returns bytes written or `-1` |
+| Export                                                         | Purpose                                                                 |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `register`                                                     | Register blocks, textures, biomes, features, and commands with the host |
+| `handle-command`                                               | Handle dispatched slash commands                                        |
+| `on-place` / `on-break` / `on-use`                             | Block lifecycle hooks (optional per-block via `callbacks` flags)        |
+| `on-neighbor-changed` / `on-scheduled-tick` / `on-random-tick` | Simulation hooks                                                        |
+| `state-for-place` / `dynamic-light`                            | Placement state and per-instance lighting                               |
 
-Mods that register commands also export `_stagcrest_command() -> i32`, invoked by the host when a registered slash command is run. While it runs, these command-phase imports are available:
+Host imports (called from the mod during `register` or callbacks) include `register-block`, `register-texture`, `register-command`, `log`, and a runtime `world` API (`get-block`, `set-block`, `schedule-tick`, world time, chat).
 
-| Import           | Signature                             | Behavior                                                                 |
-| ---------------- | ------------------------------------- | ------------------------------------------------------------------------ |
-| `command_name`   | `(out_ptr: i32, out_max: i32) -> i32` | Write the dispatched command name into the buffer; bytes written or `-1` |
-| `command_args`   | `(out_ptr: i32, out_max: i32) -> i32` | Write the command argument string into the buffer; bytes written or `-1` |
-| `command_reply`  | `(ptr: i32, len: i32)`                | Send a `System` chat reply to the invoking client only                   |
-| `set_world_time` | `(time: f64) -> i32`                  | Set the world day/night time (seconds); `0` on success                   |
-| `get_world_time` | `() -> f64`                           | Read the world day/night time                                            |
+Block definitions use `behavior` (native redstone id or WASM). Redstone components in `stagcrest-core` use native behaviors; mod special blocks can opt into WASM callbacks.
 
-`stagcrest-core` defines `/time [<value|day|night|noon|midnight>]` this way. Chat lines starting with `/` are dispatched to mod callbacks instead of broadcast as player chat.
-
-Mods must export WebAssembly `memory`. See `mods/stagcrest-core/src/content.rs` for a full example.
+See `mods/stagcrest-core/src/bindings.rs` and `mods/stagcrest-core/src/content.rs` for a full example.
 
 Build a mod:
 
 ```bash
-cd mods/your-mod
-cargo build --release --target wasm32-unknown-unknown
+bash scripts/build-core-mod.sh   # builds stagcrest-core component
+# or for your own mod:
+cargo build --release --target wasm32-unknown-unknown -p your-mod
+wasm-tools component embed wit/ target/wasm32-unknown-unknown/release/your_mod.wasm -o /tmp/embedded.wasm
+wasm-tools component new /tmp/embedded.wasm -o your-mod.wasm
 ```
 
 Add an entry to `mods/mods.toml` pointing at the `.wasm` file.

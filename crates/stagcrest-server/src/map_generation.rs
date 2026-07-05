@@ -9,7 +9,7 @@ use stagcrest_minimap::{
 };
 use stagcrest_mod_server::{BiomeRegistry, BlockRegistry, ColormapSet, TerrainConfig};
 use stagcrest_protocol::{BlockDef, BlockId, ChunkPos};
-use stagcrest_storage::{InactiveChunk, RedbChunkStorage};
+use stagcrest_storage::{BlockIdRemap, InactiveChunk, RedbChunkStorage};
 use stagcrest_world::World;
 
 const MAX_MAP_GEN_PER_TICK: usize = 1;
@@ -26,6 +26,8 @@ struct MapChunkJob {
     overrides: HashMap<ChunkPos, InactiveChunk>,
     modified_live: HashSet<ChunkPos>,
     y_chunks: Vec<i32>,
+    air: BlockId,
+    block_remap: Option<BlockIdRemap>,
     ctx: Arc<MapResolveContext>,
     storage: Arc<RedbChunkStorage>,
 }
@@ -53,6 +55,8 @@ impl MapChunkPipeline {
                     y_chunks: &job.y_chunks,
                     mx: job.mx,
                     mz: job.mz,
+                    air: job.air,
+                    block_remap: job.block_remap.as_ref(),
                     overrides: &job.overrides,
                     modified_live: &job.modified_live,
                 };
@@ -113,6 +117,8 @@ impl MapChunkPipeline {
         y_chunks: &[i32],
         ctx: &Arc<MapResolveContext>,
         storage: &Arc<RedbChunkStorage>,
+        air: BlockId,
+        block_remap: Option<BlockIdRemap>,
     ) {
         for _ in 0..MAX_MAP_GEN_PER_TICK {
             let Some((mx, mz)) = self.pending.iter().next().copied() else {
@@ -130,6 +136,8 @@ impl MapChunkPipeline {
                 overrides,
                 modified_live,
                 y_chunks: y_chunks.to_vec(),
+                air,
+                block_remap: block_remap.clone(),
                 ctx: Arc::clone(ctx),
                 storage: Arc::clone(storage),
             };

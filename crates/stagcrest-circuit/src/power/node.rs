@@ -37,18 +37,18 @@ pub fn signal_into(
     let Some(def) = registry.block(id) else {
         return 0;
     };
-    let Some(node) = def.circuit else {
+    let Some(kind) = def.circuit_kind() else {
         return 0;
     };
 
     if !are_face_adjacent(source, consumer)
-        && !(matches!(node.kind, CircuitKind::Wire { .. })
+        && !(matches!(kind, CircuitKind::Wire { .. })
             && wire_connects_toward_neighbor(registry, world_blocks, source, consumer))
     {
         return 0;
     }
 
-    match node.kind {
+    match kind {
         CircuitKind::Source { level } => level,
         CircuitKind::Switch { output } => {
             if !mount_on(state) {
@@ -119,7 +119,7 @@ pub fn repeater_input_power(
     }
     let (input_id, _) = world_blocks.get_block(input_pos);
     if let Some(input_def) = registry.block(input_id) {
-        if input_def.circuit.is_none() && super::is_redstone_powerable_block(input_def) {
+        if !input_def.has_circuit() && super::is_redstone_powerable_block(input_def) {
             return super::block_power_at(circuit, input_pos, world_blocks, registry).effective();
         }
     }
@@ -147,8 +147,8 @@ fn switch_signal_into(
 
     let (consumer_id, consumer_state) = world_blocks.get_block(consumer);
     if let Some(consumer_def) = registry.block(consumer_id) {
-        if let Some(node) = consumer_def.circuit {
-            match node.kind {
+        if let Some(kind) = consumer_def.circuit_kind() {
+            match kind {
                 CircuitKind::Wire { .. } => {
                     if wire_connects_toward_neighbor(registry, world_blocks, consumer, source) {
                         return output;
@@ -175,8 +175,8 @@ fn switch_signal_into(
     // Floor-mounted switch powers the wire cell directly below.
     if dy == -1 && dx == 0 && dz == 0 {
         if registry.block(consumer_id).is_some_and(|d| {
-            d.circuit
-                .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
+            d.circuit_kind()
+                .is_some_and(|kind| matches!(kind, CircuitKind::Wire { .. }))
         }) {
             return output;
         }
@@ -209,10 +209,10 @@ fn inverter_outputs_to(
         return false;
     };
     if cdef
-        .circuit
-        .is_some_and(|n| matches!(n.kind, CircuitKind::Wire { .. }))
+        .circuit_kind()
+        .is_some_and(|kind| matches!(kind, CircuitKind::Wire { .. }))
     {
         return wire_connects_toward_neighbor(registry, world_blocks, consumer, source);
     }
-    cdef.circuit.is_some()
+    cdef.has_circuit()
 }

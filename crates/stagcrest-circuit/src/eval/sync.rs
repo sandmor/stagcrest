@@ -1,6 +1,6 @@
 use stagcrest_protocol::{
     set_torch_lit, torch_burnt_out, torch_lit, BlockDef, BlockGeometry, BlockId, BlockPos,
-    BlockState, CircuitKind, CircuitNodeDef, ModelId,
+    BlockState, CircuitKind, ModelId,
 };
 use stagcrest_world::World;
 
@@ -52,10 +52,10 @@ pub fn is_button_geometry(def: Option<&BlockDef>) -> bool {
 }
 
 pub fn is_player_toggleable(def: &BlockDef) -> bool {
-    let Some(node) = def.circuit else {
+    let Some(kind) = def.circuit_kind() else {
         return false;
     };
-    match node.kind {
+    match kind {
         CircuitKind::Switch { .. } => true,
         CircuitKind::Inverter { .. } => is_torch_geometry(def),
         _ => false,
@@ -63,28 +63,13 @@ pub fn is_player_toggleable(def: &BlockDef) -> bool {
 }
 
 pub fn is_repeater(def: &BlockDef) -> bool {
-    matches!(
-        def.circuit,
-        Some(CircuitNodeDef {
-            kind: CircuitKind::Repeater { .. },
-        })
-    )
+    matches!(def.circuit_kind(), Some(CircuitKind::Repeater { .. }))
 }
 
 pub fn is_observer(def: &BlockDef) -> bool {
-    matches!(
-        def.circuit,
-        Some(CircuitNodeDef {
-            kind: CircuitKind::Observer { .. },
-        })
-    )
+    matches!(def.circuit_kind(), Some(CircuitKind::Observer { .. }))
 }
 
 pub fn is_piston(def: &BlockDef) -> bool {
-    matches!(
-        def.circuit,
-        Some(CircuitNodeDef {
-            kind: CircuitKind::Piston { .. },
-        })
-    )
+    matches!(def.circuit_kind(), Some(CircuitKind::Piston { .. }))
 }

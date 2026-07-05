@@ -393,12 +393,12 @@ fn format_target_section(
 
     if let Some(decoded) = format_block_state(def, state) {
         let mut detail = format!("        {decoded}");
-        if let Some(node) = def.circuit {
-            detail.push_str(&format!("  {}", format_circuit_kind(node.kind)));
+        if let Some(kind) = def.circuit_kind() {
+            detail.push_str(&format!("  {}", format_circuit_kind(kind)));
         }
         lines.push(detail);
-    } else if let Some(node) = def.circuit {
-        lines.push(format!("        {}", format_circuit_kind(node.kind)));
+    } else if let Some(kind) = def.circuit_kind() {
+        lines.push(format!("        {}", format_circuit_kind(kind)));
     }
 
     let flags = format_flags(def);
@@ -435,10 +435,10 @@ fn format_power_scan(
 
     if matches!(def.geometry, BlockGeometry::Model(ModelId::RedstoneTorch)) {
         append_torch_power_info(&mut lines, state, pos, world, ctx, power);
-    } else if def.circuit.is_some() {
+    } else if def.has_circuit() {
         lines.push(format!("        power: {}", power.power_at(pos)));
         append_neighbour_power_scan(&mut lines, pos, world, ctx, power, None);
-    } else if def.redstone_powerable {
+    } else if def.redstone_powerable() {
         append_neighbour_power_scan(&mut lines, pos, world, ctx, power, None);
     }
 
@@ -472,7 +472,7 @@ fn append_torch_power_info(
         return;
     };
 
-    let spowerable = if sdef.redstone_powerable {
+    let spowerable = if sdef.redstone_powerable() {
         "powerable"
     } else {
         "insulated"
@@ -545,10 +545,10 @@ fn power_tag(ctx: &ModContext, id: BlockId, source: BlockPos, target: BlockPos) 
     let Some(def) = ctx.registry.block(id) else {
         return "";
     };
-    let Some(node) = def.circuit else {
+    let Some(kind) = def.circuit_kind() else {
         return "";
     };
-    match node.kind {
+    match kind {
         CircuitKind::Wire { .. } => "(W)",
         CircuitKind::Inverter { .. } => {
             if target.y == source.y + 1 {
@@ -608,7 +608,7 @@ pub fn format_block_state(def: &BlockDef, state: BlockState) -> Option<String> {
             if observer_powered(state) { "on" } else { "off" },
             fmt_facing(observer_facing(state))
         )),
-        _ if def.circuit.is_some() => Some(format!("powered {}", state.0 & 1 == 1)),
+        _ if def.has_circuit() => Some(format!("powered {}", state.0 & 1 == 1)),
         _ => None,
     }
 }

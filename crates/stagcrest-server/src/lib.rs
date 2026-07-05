@@ -286,6 +286,12 @@ impl GameServer {
                 0
             };
 
+            let block_remap = if self.session.meta.block_registry.is_empty() {
+                None
+            } else {
+                Some(self.mod_host.build_id_remap(&self.session.meta.block_registry))
+            };
+
             let stream_result = self.pipeline.tick(
                 &mut self.world,
                 &mut self.terrain,
@@ -301,6 +307,7 @@ impl GameServer {
                 self.config.vertical_render_distance,
                 enqueue_rotate,
                 fair_rotate,
+                block_remap.as_ref(),
             );
 
             self.queue_map_regen_for_persisted(&stream_result.persisted);
@@ -329,6 +336,8 @@ impl GameServer {
                 &self.map_y_chunks,
                 &self.map_ctx,
                 &self.session.storage,
+                self.air,
+                block_remap.clone(),
             );
             self.tick_map_streaming(clients);
         }
@@ -387,7 +396,10 @@ impl GameServer {
             &mut self.session.stored_chunks,
         );
         self.queue_map_regen_for_persisted(&persisted);
-        if let Err(err) = self.session.save_meta(self.circuit.current_tick()) {
+        if let Err(err) = self.session.save_meta(
+            self.circuit.current_tick(),
+            self.mod_host.block_registry_snapshot(),
+        ) {
             tracing::error!("failed to save world meta: {err}");
         }
     }

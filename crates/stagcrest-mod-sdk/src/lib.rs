@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use stagcrest_protocol::{CallbackFlags, NativeBehaviorId};
 
 /// How a cube block's faces are drawn (opaque, alpha blend, or alpha cutout).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -28,25 +29,80 @@ pub struct RegisterBlockRequest {
     pub render_layer: Option<RenderLayer>,
     #[serde(default)]
     pub geometry: Option<String>,
-    pub circuit: Option<RegisterCircuitRequest>,
     #[serde(default)]
-    pub push_reaction: Option<PushReaction>,
+    pub behavior: Option<RegisterBehaviorRequest>,
+    #[serde(default)]
+    pub callbacks: CallbackFlags,
     pub map_color: [u8; 3],
-    /// Overrides whether this block behaves like a redstone opaque block.
-    /// If omitted, the host derives it from solid/opaque/transparent/fluid.
-    #[serde(default)]
-    pub redstone_powerable: Option<bool>,
     #[serde(default)]
     pub light_emission: u8,
-    /// When true, emits `light_emission` only when block state bit 0 is set.
-    #[serde(default)]
-    pub light_emission_when_lit: Option<bool>,
     #[serde(default)]
     pub light_attenuation: u8,
-    #[serde(default)]
-    pub blocks_sky_light: Option<bool>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RegisterBehaviorRequest {
+    pub kind: BehaviorKindRequest,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BehaviorKindRequest {
+    Native(NativeBehaviorRequest),
+    Wasm,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NativeBehaviorRequest {
+    RedstoneSource { level: u8 },
+    RedstoneWire { falloff: u8 },
+    RedstoneInverter { output: u8 },
+    RedstoneSwitch { output: u8 },
+    RedstoneRepeater { output: u8 },
+    RedstoneObserver { output: u8 },
+    RedstonePiston { sticky: bool },
+    RedstoneLamp,
+    Bedrock,
+    PistonBody,
+    PistonHead,
+}
+
+impl NativeBehaviorRequest {
+    pub fn to_protocol(self) -> NativeBehaviorId {
+        match self {
+            Self::RedstoneSource { level } => NativeBehaviorId::RedstoneSource { level },
+            Self::RedstoneWire { falloff } => NativeBehaviorId::RedstoneWire { falloff },
+            Self::RedstoneInverter { output } => NativeBehaviorId::RedstoneInverter { output },
+            Self::RedstoneSwitch { output } => NativeBehaviorId::RedstoneSwitch { output },
+            Self::RedstoneRepeater { output } => NativeBehaviorId::RedstoneRepeater { output },
+            Self::RedstoneObserver { output } => NativeBehaviorId::RedstoneObserver { output },
+            Self::RedstonePiston { sticky } => NativeBehaviorId::RedstonePiston { sticky },
+            Self::RedstoneLamp => NativeBehaviorId::RedstoneLamp,
+            Self::Bedrock => NativeBehaviorId::Bedrock,
+            Self::PistonBody => NativeBehaviorId::PistonBody,
+            Self::PistonHead => NativeBehaviorId::PistonHead,
+        }
+    }
+}
+
+pub fn behavior_from_circuit(kind: CircuitKindRequest) -> RegisterBehaviorRequest {
+    let native = match kind {
+        CircuitKindRequest::Source { level } => NativeBehaviorRequest::RedstoneSource { level },
+        CircuitKindRequest::Inverter { output } => NativeBehaviorRequest::RedstoneInverter { output },
+        CircuitKindRequest::Wire { falloff } => NativeBehaviorRequest::RedstoneWire { falloff },
+        CircuitKindRequest::Switch { output } => NativeBehaviorRequest::RedstoneSwitch { output },
+        CircuitKindRequest::Repeater { output } => NativeBehaviorRequest::RedstoneRepeater { output },
+        CircuitKindRequest::Observer { output } => NativeBehaviorRequest::RedstoneObserver { output },
+        CircuitKindRequest::Piston { sticky } => NativeBehaviorRequest::RedstonePiston { sticky },
+        CircuitKindRequest::Lamp => NativeBehaviorRequest::RedstoneLamp,
+    };
+    RegisterBehaviorRequest {
+        kind: BehaviorKindRequest::Native(native),
+    }
+}
+
+/// Legacy circuit registration — maps to native redstone behaviors.
 #[derive(Serialize, Deserialize)]
 pub struct RegisterCircuitRequest {
     pub kind: CircuitKindRequest,
@@ -400,13 +456,3 @@ pub trait ContentRegistrar {
     fn log(&self, msg: &str);
 }
 
-#[cfg(target_arch = "wasm32")]
-mod wasm;
-
-#[cfg(target_arch = "wasm32")]
-pub use wasm::{
-    command_args, command_name, command_reply, get_world_time, log, register_biome,
-    register_biome_feature, register_block, register_cave_config, register_command,
-    register_feature, register_river_config, register_river_feature, register_texture,
-    register_texture_from_pack, set_world_time,
-};

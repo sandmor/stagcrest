@@ -1,4 +1,5 @@
 use crate::eval::EvalContext;
+use stagcrest_mod_server::block_push_reaction;
 use crate::power::{block_power_at, is_redstone_powerable_block, signal_into};
 use crate::registry::BlockRegistry;
 use crate::world::CircuitWorld;
@@ -51,8 +52,8 @@ fn is_honey_block(namespaced_id: &str) -> bool {
 
 fn is_piston_body(registry: &BlockRegistry, id: stagcrest_protocol::BlockId) -> bool {
     registry.block(id).is_some_and(|d| {
-        d.circuit
-            .is_some_and(|n| matches!(n.kind, stagcrest_protocol::CircuitKind::Piston { .. }))
+        d.circuit_kind()
+            .is_some_and(|kind| matches!(kind, stagcrest_protocol::CircuitKind::Piston { .. }))
     })
 }
 
@@ -83,7 +84,7 @@ fn slime_honey_stick(a: &str, b: &str) -> bool {
 fn push_reaction_for(registry: &BlockRegistry, id: stagcrest_protocol::BlockId) -> PushReaction {
     registry
         .block(id)
-        .map(|d| d.push_reaction)
+        .map(block_push_reaction)
         .unwrap_or(PushReaction::Normal)
 }
 
@@ -194,7 +195,7 @@ fn expand_slime_honey_group(
             if !slime_honey_stick(seed_name, &ndef.namespaced_id) {
                 continue;
             }
-            match ndef.push_reaction {
+            match block_push_reaction(ndef) {
                 PushReaction::Block => return None,
                 PushReaction::Destroy => continue,
                 PushReaction::Normal => {}
