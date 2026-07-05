@@ -15,8 +15,9 @@ pub struct CommandHostImpl<'a> {
 
 impl<'a> CommandHost for CommandHostImpl<'a> {
     fn set_world_time(&mut self, time: f64) {
-        self.session.meta.world_time = time;
-        self.clients.broadcast_world_time(time);
+        let wrapped = stagcrest_protocol::TimeOfDay::new(time).seconds();
+        self.session.meta.world_time = wrapped;
+        self.clients.broadcast_world_time(wrapped);
     }
 
     fn world_time(&self) -> f64 {

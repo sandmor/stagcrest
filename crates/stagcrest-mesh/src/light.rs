@@ -104,8 +104,16 @@ impl LightBuildContext<'_> {
     }
 
     fn emission_at(&self, lx: i32, ly: i32, lz: i32) -> u8 {
-        self.def_at(lx, ly, lz)
-            .map(|d| d.light_emission.min(15))
+        let block = match (self.block_at)(lx, ly, lz) {
+            Some(b) => b,
+            None => return 0,
+        };
+        if block.id == self.air {
+            return 0;
+        }
+        self.registry
+            .block(block.id)
+            .map(|d| d.effective_light_emission(block.state))
             .unwrap_or(0)
     }
 

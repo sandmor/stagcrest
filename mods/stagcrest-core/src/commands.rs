@@ -73,10 +73,35 @@ fn handle_time(args: &str) -> i32 {
 fn parse_time_arg(arg: &str) -> Option<f64> {
     let lower = arg.trim().to_ascii_lowercase();
     match lower.as_str() {
-        "day" => Some(1000.0),
-        "noon" => Some(6000.0),
-        "night" => Some(13000.0),
-        "midnight" => Some(18000.0),
+        "midnight" => Some(0.0),
+        "night" => Some(100.0),
+        "sunrise" | "day" => Some(300.0),
+        "noon" => Some(600.0),
+        "sunset" => Some(900.0),
         _ => lower.parse::<f64>().ok(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use stagcrest_protocol::DAY_LENGTH_SECS;
+
+    fn parse_time_arg(arg: &str) -> Option<f64> {
+        let lower = arg.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "midnight" => Some(0.0),
+            "night" => Some(100.0),
+            "sunrise" | "day" => Some(300.0),
+            "noon" => Some(600.0),
+            "sunset" => Some(900.0),
+            _ => lower.parse::<f64>().ok(),
+        }
+    }
+
+    #[test]
+    fn time_presets_match_day_length() {
+        assert_eq!(parse_time_arg("noon").unwrap(), DAY_LENGTH_SECS * 0.5);
+        assert_eq!(parse_time_arg("midnight").unwrap(), 0.0);
+        assert_eq!(parse_time_arg("day").unwrap(), DAY_LENGTH_SECS * 0.25);
     }
 }

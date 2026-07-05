@@ -229,6 +229,7 @@ mod tests {
             map_color: [128, 128, 128],
             redstone_powerable: true,
             light_emission: 0,
+            light_emission_when_lit: false,
             light_attenuation: 0,
             blocks_sky_light: None,
         });
@@ -313,6 +314,7 @@ mod tests {
             map_color: [128, 128, 128],
             redstone_powerable: false,
             light_emission: 0,
+            light_emission_when_lit: false,
             light_attenuation: 0,
             blocks_sky_light: None,
         });

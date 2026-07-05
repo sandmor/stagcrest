@@ -172,6 +172,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
             CircuitKindRequest::Repeater { output } => CircuitKind::Repeater { output },
             CircuitKindRequest::Observer { output } => CircuitKind::Observer { output },
             CircuitKindRequest::Piston { sticky } => CircuitKind::Piston { sticky },
+            CircuitKindRequest::Lamp => CircuitKind::Lamp,
         },
     });
 
@@ -216,6 +217,7 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest) 
         map_color: json.map_color,
         redstone_powerable,
         light_emission: json.light_emission,
+        light_emission_when_lit: json.light_emission_when_lit.unwrap_or(false),
         light_attenuation: json.light_attenuation,
         blocks_sky_light: json.blocks_sky_light,
     });
@@ -393,7 +395,7 @@ mod tests {
             .invoke_command(&mut mock, 1, "time", "night")
             .expect("invoke /time night");
         assert_eq!(rc, 0);
-        assert_eq!(mock.world_time, 13000.0);
+        assert_eq!(mock.world_time, 100.0, "night preset uses DAY_LENGTH cycle");
 
         // Unknown command surfaces an error.
         let err = host

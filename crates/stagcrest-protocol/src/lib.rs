@@ -184,6 +184,28 @@ pub fn set_torch_burnt_out(state: BlockState, burnt: bool) -> BlockState {
     }
 }
 
+pub const LAMP_LIT_BIT: u16 = 1;
+
+pub fn lamp_state(lit: bool) -> BlockState {
+    if lit {
+        BlockState(LAMP_LIT_BIT)
+    } else {
+        BlockState(0)
+    }
+}
+
+pub fn lamp_lit(state: BlockState) -> bool {
+    state.0 & LAMP_LIT_BIT != 0
+}
+
+pub fn set_lamp_lit(state: BlockState, lit: bool) -> BlockState {
+    if lit {
+        BlockState(state.0 | LAMP_LIT_BIT)
+    } else {
+        BlockState(state.0 & !LAMP_LIT_BIT)
+    }
+}
+
 /// Surface a face-mounted block (lever, button) is attached to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum AttachFace {
@@ -738,6 +760,9 @@ pub struct BlockDef {
     /// Block light emitted (0–15), e.g. torches and lava.
     #[serde(default)]
     pub light_emission: u8,
+    /// When true, emits [`Self::light_emission`] only when block state bit 0 is set.
+    #[serde(default)]
+    pub light_emission_when_lit: bool,
     /// Light subtracted when passing through this block (0 = derive from opaque/transparent).
     #[serde(default)]
     pub light_attenuation: u8,
@@ -761,6 +786,19 @@ impl BlockDef {
             1
         } else {
             0
+        }
+    }
+
+    /// Block light emitted at the given instance state.
+    pub fn effective_light_emission(&self, state: BlockState) -> u8 {
+        if self.light_emission_when_lit {
+            if state.0 & 1 != 0 {
+                self.light_emission.min(15)
+            } else {
+                0
+            }
+        } else {
+            self.light_emission.min(15)
         }
     }
 }
@@ -816,6 +854,8 @@ pub enum CircuitKind {
     Piston {
         sticky: bool,
     },
+    /// Lights when receiving block power; no redstone output.
+    Lamp,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -891,6 +931,54 @@ pub fn validate_username(name: &str) -> Result<(), String> {
         return Err("username may only contain letters, numbers, and underscores".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod light_emission_tests {
+    use super::*;
+
+    fn torch_def() -> BlockDef {
+        BlockDef {
+            id: BlockId(1),
+            namespaced_id: "test:torch".into(),
+            display_name: "Torch".into(),
+            opaque: false,
+            transparent: true,
+            solid: false,
+            hardness: 0.0,
+            face_textures: BlockFaceTextures::uniform(TextureId(0)),
+            circuit: None,
+            placeable: true,
+            geometry: BlockGeometry::Cube,
+            fluid: false,
+            render_layer: ModelRenderLayer::Opaque,
+            push_reaction: PushReaction::Normal,
+            map_color: [0, 0, 0],
+            redstone_powerable: false,
+            light_emission: 14,
+            light_emission_when_lit: true,
+            light_attenuation: 0,
+            blocks_sky_light: None,
+        }
+    }
+
+    #[test]
+    fn effective_light_emission_respects_lit_bit() {
+        let def = torch_def();
+        assert_eq!(def.effective_light_emission(torch_state(false, TorchAttachment::Floor)), 0);
+        assert_eq!(def.effective_light_emission(torch_state(true, TorchAttachment::Floor)), 14);
+    }
+
+    #[test]
+    fn lamp_effective_light_emission() {
+        let def = BlockDef {
+            light_emission: 15,
+            light_emission_when_lit: true,
+            ..torch_def()
+        };
+        assert_eq!(def.effective_light_emission(lamp_state(false)), 0);
+        assert_eq!(def.effective_light_emission(lamp_state(true)), 15);
+    }
 }
 
 #[cfg(test)]

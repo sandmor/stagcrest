@@ -133,6 +133,9 @@ fn register_textures(reg: &mut impl ContentRegistrar) {
     register_texture_from_pack(reg, "stagcrest:redstone_torch_off", "redstone_torch_off");
     register_texture_from_pack(reg, "stagcrest:redstone_torch_on", "redstone_torch");
     register_texture_from_pack(reg, "stagcrest:redstone_block", "redstone_block");
+    register_texture_from_pack(reg, "stagcrest:redstone_lamp", "redstone_lamp");
+    register_optional_texture_from_pack(reg, "stagcrest:redstone_lamp_on", "redstone_lamp_on");
+    register_optional_texture_from_pack(reg, "stagcrest:redstone_lamp_on", "lit_redstone_lamp");
     register_texture_from_pack(reg, "stagcrest:lever", "lever");
     register_texture_from_pack(reg, "stagcrest:repeater", "repeater");
     register_texture_from_pack(reg, "stagcrest:repeater_on", "repeater_on");
@@ -192,6 +195,7 @@ fn register_layered_cross_plant(
         map_color: default_map_color(id),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -229,6 +233,7 @@ pub(crate) fn register_solid_block(
         map_color: default_map_color(id),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -293,6 +298,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:grass_block"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -354,6 +360,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:water"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -376,6 +383,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:bedrock"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -415,6 +423,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:redstone_torch"),
         redstone_powerable: None,
         light_emission: 14,
+        light_emission_when_lit: Some(true),
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -439,6 +448,32 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:redstone_block"),
         redstone_powerable: Some(false),
         light_emission: 0,
+        light_emission_when_lit: None,
+        light_attenuation: 0,
+        blocks_sky_light: None,
+    });
+    reg.register_block(RegisterBlockRequest {
+        namespaced_id: "stagcrest:redstone_lamp".into(),
+        display_name: "Redstone Lamp".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        fluid: false,
+        hardness: 0.3,
+        top_texture: "stagcrest:redstone_lamp".into(),
+        bottom_texture: "stagcrest:redstone_lamp".into(),
+        sides_texture: "stagcrest:redstone_lamp".into(),
+        placeable: true,
+        geometry: None,
+        circuit: Some(RegisterCircuitRequest {
+            kind: CircuitKindRequest::Lamp,
+        }),
+        render_layer: None,
+        push_reaction: None,
+        map_color: default_map_color("stagcrest:redstone_lamp"),
+        redstone_powerable: None,
+        light_emission: 15,
+        light_emission_when_lit: Some(true),
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -466,6 +501,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:lever"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -491,6 +527,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:stone_button"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -515,6 +552,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:repeater"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -539,6 +577,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:observer"),
         redstone_powerable: Some(false),
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -563,6 +602,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:piston"),
         redstone_powerable: Some(false),
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -587,6 +627,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:sticky_piston"),
         redstone_powerable: Some(false),
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -609,6 +650,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:piston_head"),
         redstone_powerable: Some(false),
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -631,6 +673,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:slime_block"),
         redstone_powerable: Some(true),
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -653,6 +696,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:honey_block"),
         redstone_powerable: Some(true),
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -701,6 +745,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:oak_log"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -782,6 +827,7 @@ fn register_blocks(reg: &mut impl ContentRegistrar) {
         map_color: default_map_color("stagcrest:cactus"),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });

@@ -23,6 +23,7 @@ pub struct TestBlocks {
     pub honey: BlockId,
     pub glass: BlockId,
     pub bedrock: BlockId,
+    pub lamp: BlockId,
 }
 
 pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
@@ -43,6 +44,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         honey: BlockId(14),
         glass: BlockId(16),
         bedrock: BlockId(15),
+        lamp: BlockId(17),
     };
 
     reg.register_block(test_block(blocks.source, CircuitKind::Source { level: 15 }));
@@ -99,6 +101,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         map_color: [128, 128, 128],
         redstone_powerable: false,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -118,6 +121,7 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         "test:bedrock",
         PushReaction::Block,
     ));
+    reg.register_block(test_lamp_block(blocks.lamp));
     reg.register_block(BlockDef {
         id: blocks.stone,
         namespaced_id: "test:stone".into(),
@@ -136,11 +140,39 @@ pub fn setup_registry() -> (BlockRegistry, TestBlocks) {
         map_color: [128, 128, 128],
         redstone_powerable: true,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
 
     (reg, blocks)
+}
+
+fn test_lamp_block(id: BlockId) -> BlockDef {
+    BlockDef {
+        id,
+        namespaced_id: "test:redstone_lamp".into(),
+        display_name: "Redstone Lamp".into(),
+        opaque: true,
+        transparent: false,
+        solid: true,
+        hardness: 0.3,
+        face_textures: BlockFaceTextures::uniform(TextureId(0)),
+        circuit: Some(CircuitNodeDef {
+            kind: CircuitKind::Lamp,
+        }),
+        placeable: true,
+        geometry: BlockGeometry::Cube,
+        fluid: false,
+        render_layer: ModelRenderLayer::Opaque,
+        push_reaction: PushReaction::Normal,
+        map_color: [180, 140, 80],
+        redstone_powerable: true,
+        light_emission: 15,
+        light_emission_when_lit: true,
+        light_attenuation: 0,
+        blocks_sky_light: None,
+    }
 }
 
 fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
@@ -162,6 +194,7 @@ fn test_piston_block(id: BlockId, kind: CircuitKind, name: &str) -> BlockDef {
         map_color: [128, 128, 128],
         redstone_powerable: false,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     }
@@ -186,6 +219,7 @@ fn cube_block(id: BlockId, name: &str, push_reaction: PushReaction) -> BlockDef 
         map_color: [128, 128, 128],
         redstone_powerable: true,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     }
@@ -210,6 +244,7 @@ fn transparent_insulator_block(id: BlockId, name: &str) -> BlockDef {
         map_color: [128, 128, 128],
         redstone_powerable: false,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     }
@@ -238,6 +273,7 @@ fn transparent_conductor_block(
         map_color: [128, 128, 128],
         redstone_powerable: true,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     }
@@ -266,6 +302,7 @@ fn test_block_with_geometry(id: BlockId, kind: CircuitKind, geometry: BlockGeome
         map_color: [128, 128, 128],
         redstone_powerable: false,
         light_emission: 0,
+        light_emission_when_lit: false,
         light_attenuation: 0,
         blocks_sky_light: None,
     }

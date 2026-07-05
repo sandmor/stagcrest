@@ -38,6 +38,7 @@ pub fn sync_block_state(
         }
         CircuitKind::Source { .. } => {}
         CircuitKind::Piston { .. } => {}
+        CircuitKind::Lamp => {}
     }
     None
 }

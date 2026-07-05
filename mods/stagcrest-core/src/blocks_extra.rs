@@ -62,6 +62,7 @@ fn reg_faced_block(
         map_color: default_map_color(&full_id),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });
@@ -124,6 +125,7 @@ fn reg_log(reg: &mut impl ContentRegistrar, wood: &str) {
         map_color: default_map_color(&id),
         redstone_powerable: None,
         light_emission: 0,
+        light_emission_when_lit: None,
         light_attenuation: 0,
         blocks_sky_light: None,
     });

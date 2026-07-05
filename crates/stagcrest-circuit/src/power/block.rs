@@ -88,7 +88,7 @@ fn block_strong_power(
                     strong = strong.max(circuit.power_at(npos));
                 }
             }
-            CircuitKind::Wire { .. } | CircuitKind::Piston { .. } => {}
+            CircuitKind::Wire { .. } | CircuitKind::Piston { .. } | CircuitKind::Lamp => {}
         }
     }
 

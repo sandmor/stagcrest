@@ -1,4 +1,5 @@
 mod inverter;
+pub mod lamp;
 mod observer;
 mod piston;
 mod repeater;
@@ -37,6 +38,8 @@ pub enum EvalResult {
         target: u8,
         delay_ticks: u64,
     },
+    /// Instant lamp lit-state change (cancels pending off-delay when turning on).
+    SetLit(bool),
 }
 
 pub fn dispatch(
@@ -53,5 +56,6 @@ pub fn dispatch(
         CircuitKind::Repeater { output } => repeater::evaluate(ctx, output, prev_input),
         CircuitKind::Observer { .. } => observer::evaluate(),
         CircuitKind::Piston { .. } => piston::evaluate(ctx),
+        CircuitKind::Lamp => lamp::evaluate(ctx),
     }
 }

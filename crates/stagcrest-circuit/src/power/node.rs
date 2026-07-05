@@ -94,6 +94,7 @@ pub fn signal_into(
             }
         }
         CircuitKind::Piston { .. } => 0,
+        CircuitKind::Lamp => 0,
     }
 }
 

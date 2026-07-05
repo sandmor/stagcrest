@@ -38,6 +38,9 @@ pub struct RegisterBlockRequest {
     pub redstone_powerable: Option<bool>,
     #[serde(default)]
     pub light_emission: u8,
+    /// When true, emits `light_emission` only when block state bit 0 is set.
+    #[serde(default)]
+    pub light_emission_when_lit: Option<bool>,
     #[serde(default)]
     pub light_attenuation: u8,
     #[serde(default)]
@@ -59,6 +62,7 @@ pub enum CircuitKindRequest {
     Repeater { output: u8 },
     Observer { output: u8 },
     Piston { sticky: bool },
+    Lamp,
 }
 
 /// How a block responds when pushed by a piston.

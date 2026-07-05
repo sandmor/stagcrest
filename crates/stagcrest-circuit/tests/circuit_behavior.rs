@@ -1219,3 +1219,127 @@ fn slime_block_conducts_strong_power_on_bedrock() {
         "Bedrock slime blocks conduct strong power from adjacent sources"
     );
 }
+
+#[test]
+fn lamp_lights_from_adjacent_powered_dust() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let source_pos = BlockPos::new(0, 0, 0);
+    let dust_pos = BlockPos::new(1, 0, 0);
+    let lamp_pos = BlockPos::new(2, 0, 0);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(dust_pos, blocks.wire, BlockState(0));
+    world.set_block(lamp_pos, blocks.lamp, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, dust_pos, lamp_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lamp_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    assert!(
+        stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1),
+        "Lamp should light instantly when dust is powered"
+    );
+}
+
+#[test]
+fn lamp_turns_off_after_six_ticks() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let source_pos = BlockPos::new(0, 0, 0);
+    let dust_pos = BlockPos::new(1, 0, 0);
+    let lamp_pos = BlockPos::new(2, 0, 0);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(dust_pos, blocks.wire, BlockState(0));
+    world.set_block(lamp_pos, blocks.lamp, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, dust_pos, lamp_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lamp_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+    assert!(stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1));
+
+    world.set_block(source_pos, BlockId(0), BlockState(0));
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 5);
+    assert!(
+        stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1),
+        "Lamp should stay lit during the 6-tick off delay"
+    );
+
+    settle(&mut circuit, &mut world, &reg, 7);
+    assert!(
+        !stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1),
+        "Lamp should turn off after 6 ticks without power"
+    );
+}
+
+#[test]
+fn lamp_repower_cancels_off_delay() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let source_pos = BlockPos::new(0, 0, 0);
+    let dust_pos = BlockPos::new(1, 0, 0);
+    let lamp_pos = BlockPos::new(2, 0, 0);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(dust_pos, blocks.wire, BlockState(0));
+    world.set_block(lamp_pos, blocks.lamp, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, dust_pos, lamp_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lamp_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+    assert!(stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1));
+
+    world.set_block(source_pos, BlockId(0), BlockState(0));
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 3);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    assert!(
+        stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1),
+        "Re-powering during off-delay should keep the lamp lit"
+    );
+}
+
+#[test]
+fn lit_lamp_does_not_power_distant_dust() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let source_pos = BlockPos::new(0, 0, 0);
+    let dust_a = BlockPos::new(1, 0, 0);
+    let lamp_pos = BlockPos::new(2, 0, 0);
+    let dust_b = BlockPos::new(3, 0, 0);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(dust_a, blocks.wire, BlockState(0));
+    world.set_block(lamp_pos, blocks.lamp, BlockState(0));
+    world.set_block(dust_b, blocks.wire, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, dust_a, lamp_pos, dust_b]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lamp_pos, &mut world, &reg);
+    circuit.notify_block_changed(dust_b, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    assert!(stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1));
+    assert_eq!(
+        circuit.power_at(dust_b),
+        0,
+        "Lit lamp should not act as a redstone source for dust beyond it"
+    );
+}

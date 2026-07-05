@@ -25,10 +25,17 @@ impl Default for WorldTime {
 
 impl WorldTime {
     pub fn set_from_server(&mut self, time: f64) {
-        self.server_time = time;
+        let wrapped = TimeOfDay::new(time);
+        self.server_time = wrapped.seconds();
         if !self.initialized {
-            self.display = TimeOfDay::new(time);
+            self.display = wrapped;
             self.initialized = true;
+            return;
+        }
+        let diff = (wrapped.seconds() - self.display.seconds()).abs();
+        let wrap_diff = stagcrest_protocol::DAY_LENGTH_SECS - diff;
+        if diff.min(wrap_diff) > SNAP_THRESHOLD {
+            self.display = wrapped;
         }
     }
 
@@ -57,6 +64,14 @@ impl WorldTime {
     pub fn cycle(&self) -> f32 {
         self.display.cycle()
     }
+
+    pub fn sun_disc_factor(&self) -> f32 {
+        self.display.sun_disc_factor()
+    }
+
+    pub fn moon_disc_factor(&self) -> f32 {
+        self.display.moon_disc_factor()
+    }
 }
 
 pub fn update_world_time(time: Res<Time>, mut world_time: ResMut<WorldTime>) {
@@ -65,6 +80,9 @@ pub fn update_world_time(time: Res<Time>, mut world_time: ResMut<WorldTime>) {
     }
 
     let dt = time.delta_secs();
+    world_time.server_time = (world_time.server_time + f64::from(dt))
+        .rem_euclid(stagcrest_protocol::DAY_LENGTH_SECS);
+
     let mut display = world_time.display;
     display.advance(dt as f64);
 

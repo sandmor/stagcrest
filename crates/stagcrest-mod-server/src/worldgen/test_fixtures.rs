@@ -84,6 +84,7 @@ pub fn test_registry() -> BlockRegistry {
                 transparent,
             ),
             light_emission: 0,
+            light_emission_when_lit: false,
             light_attenuation: 0,
             blocks_sky_light: None,
         });

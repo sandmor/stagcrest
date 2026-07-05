@@ -42,28 +42,29 @@ A face pointing **toward** the sun has a positive dot product and receives direc
 
 Defined in `crates/stagcrest-protocol/src/world_time.rs`, synced server → client.
 
-| `cycle` (0..1) | Phase                             |
-| -------------- | --------------------------------- |
-| 0.0            | Midnight (sun below horizon)      |
-| 0.25           | Sunrise (east, `+X`)              |
-| 0.5            | Noon (high elevation, over south) |
-| 0.75           | Sunset (west, `-X`)               |
+| `cycle` (0..1) | Phase                                                     |
+| -------------- | --------------------------------------------------------- |
+| 0.0            | Midnight (sun at nadir below the world, moon near zenith) |
+| 0.25           | Sunrise (east, `+X`)                                      |
+| 0.5            | Noon (high elevation, over south)                         |
+| 0.75           | Sunset (west, `-X`)                                       |
 
-- **`day_factor`**: 0 at night, 1 at noon; derived from sun elevation (`sun_dir.y`).
-- **`moon_dir`**: approximate opposite of the sun with a slight tilt (not a full ephemeris).
+- **`day_factor`**: 0 deep night, ~0.35 at sunrise/sunset, 1 at noon.
+- **`sun_disc_factor` / `moon_disc_factor`**: GPU disc visibility packed in celestial `.w`.
+- **`moon_dir`**: opposite the sun at twilight (west at sunrise, east at sunset), high at night.
 
 ## GPU uniform (`SceneLightingUniform`)
 
 Built each frame in client `sync_scene_lighting` from `WorldTime` and `PlayerEnvironment`.
 
-| Field               | Convention                        |
-| ------------------- | --------------------------------- |
-| `sun_position_dir`  | Toward the sun (not light travel) |
-| `moon_position_dir` | Toward the moon                   |
-| `params.x`          | `day_factor`                      |
-| `params.y`          | `cycle` 0..1                      |
-| `params.z`          | medium (0 = air, 1 = water)       |
-| `params.w`          | camera submersion 0..1            |
+| Field               | Convention                                                    |
+| ------------------- | ------------------------------------------------------------- |
+| `sun_position_dir`  | Toward the sun (not light travel); `.w` = sun disc visibility |
+| `moon_position_dir` | Toward the moon; `.w` = moon disc visibility                  |
+| `params.x`          | `day_factor`                                                  |
+| `params.y`          | `cycle` 0..1                                                  |
+| `params.z`          | medium (0 = air, 1 = water)                                   |
+| `params.w`          | camera submersion 0..1                                        |
 
 Shared WGSL helpers live in `assets/shaders/scene_lighting.wgsl` and are imported by
 `voxel.wgsl`, `skybox.wgsl`, and future entity shaders.

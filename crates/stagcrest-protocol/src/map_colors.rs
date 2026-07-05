@@ -42,6 +42,8 @@ pub fn default_map_color(namespaced_id: &str) -> [u8; 3] {
         "stagcrest:redstone_torch_off" => [180, 80, 0],
         "stagcrest:redstone_torch_on" => [255, 120, 0],
         "stagcrest:redstone_block" => [200, 0, 0],
+        "stagcrest:redstone_lamp" => [180, 140, 80],
+        "stagcrest:redstone_lamp_on" => [255, 220, 140],
         "stagcrest:lever" => [100, 100, 100],
         "stagcrest:repeater" => [180, 160, 140],
         "stagcrest:repeater_on" => [200, 180, 160],

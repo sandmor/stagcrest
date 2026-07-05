@@ -562,6 +562,7 @@ fn power_tag(ctx: &ModContext, id: BlockId, source: BlockPos, target: BlockPos) 
         | CircuitKind::Source { .. }
         | CircuitKind::Switch { .. } => "(S)",
         CircuitKind::Piston { .. } => "",
+        CircuitKind::Lamp => "",
     }
 }
 
@@ -621,6 +622,7 @@ fn format_circuit_kind(kind: CircuitKind) -> String {
         CircuitKind::Repeater { output } => format!("repeater out {output}"),
         CircuitKind::Observer { output } => format!("observer out {output}"),
         CircuitKind::Piston { sticky } => format!("piston sticky={sticky}"),
+        CircuitKind::Lamp => "lamp".into(),
     }
 }
 

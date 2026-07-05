@@ -358,6 +358,15 @@ impl CircuitWorld {
                     try_retract(self, world, registry, pos, sticky);
                 }
             }
+            CircuitKind::Lamp => {
+                let new_state = crate::eval::lamp::apply_scheduled_off(state);
+                if new_state != state {
+                    world.set_block(pos, id, new_state);
+                    world.mark_dirty_face_neighbors(pos.chunk_pos());
+                    self.visual_updates.push((id, pos, new_state));
+                    self.mark_chunk_dirty(pos);
+                }
+            }
             _ => {}
         }
     }
@@ -489,7 +498,34 @@ impl CircuitWorld {
             } => {
                 self.arm_delay(pos, input, delay_ticks, target);
             }
+            EvalResult::SetLit(lit) => {
+                self.set_lamp_lit(pos, id, state, lit, world, registry);
+            }
         }
+    }
+
+    fn set_lamp_lit(
+        &mut self,
+        pos: BlockPos,
+        id: stagcrest_protocol::BlockId,
+        state: BlockState,
+        lit: bool,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        if lit {
+            self.queue.cancel_delay(pos);
+            self.delay_input.remove(&pos);
+        }
+        let new_state = stagcrest_protocol::set_lamp_lit(state, lit);
+        if new_state == state {
+            return;
+        }
+        world.set_block(pos, id, new_state);
+        world.mark_dirty_face_neighbors(pos.chunk_pos());
+        self.visual_updates.push((id, pos, new_state));
+        self.mark_chunk_dirty(pos);
+        self.enqueue_block_power_dependents(pos, world, registry);
     }
 
     fn set_published_power(
@@ -717,7 +753,8 @@ impl CircuitWorld {
             | CircuitKind::Wire { .. }
             | CircuitKind::Repeater { .. }
             | CircuitKind::Observer { .. }
-            | CircuitKind::Piston { .. } => return,
+            | CircuitKind::Piston { .. }
+            | CircuitKind::Lamp => return,
         };
 
         world.set_block(pos, id, new_state);

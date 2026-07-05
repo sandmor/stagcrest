@@ -1,7 +1,7 @@
 use stagcrest_protocol::{
-    observer_powered, piston_extended, piston_head_sticky, repeater_powered, torch_lit, AtlasRect,
-    BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures, FaceTexture, TextureAnimation,
-    TextureDef, TextureId, TintKind,
+    lamp_lit, observer_powered, piston_extended, piston_head_sticky, repeater_powered, torch_lit,
+    AtlasRect, BlockDef, BlockFaceTextures, BlockId, BlockState, BlockTextures, FaceTexture,
+    TextureAnimation, TextureDef, TextureId, TintKind,
 };
 use std::collections::HashMap;
 
@@ -246,6 +246,13 @@ impl BlockRegistry {
                 "stagcrest:redstone_torch_on",
                 "stagcrest:redstone_torch_on",
                 "stagcrest:redstone_torch_on",
+            );
+        }
+        if def.namespaced_id == "stagcrest:redstone_lamp" && lamp_lit(state) {
+            return self.resolve_face_textures(
+                "stagcrest:redstone_lamp_on",
+                "stagcrest:redstone_lamp_on",
+                "stagcrest:redstone_lamp_on",
             );
         }
         if def.namespaced_id == "stagcrest:repeater" && repeater_powered(state) {

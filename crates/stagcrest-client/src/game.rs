@@ -18,6 +18,7 @@ use stagcrest_mod_client::{
     BiomeRegistryClient, BlockRegistry, ColormapSet, ModelRegistry, TextureAtlas,
 };
 use stagcrest_net::ServerMessage;
+use stagcrest_protocol::TimeOfDay;
 use stagcrest_render::{
     BlockAtlasResource, Medium, MeshCacheResource, SceneLighting, SceneLightingUniform,
     SkyMaterial, UnderwaterEffect, VoxelMaterial, VoxelRenderPlugin,
@@ -259,7 +260,15 @@ fn sync_underwater_vision(
     let s = env.submersion;
     effect.set(env.water_tint, s);
 
-    clear.0 = Color::srgba(env.sky_color[0], env.sky_color[1], env.sky_color[2], 1.0);
+    let day = lighting.uniform.day_factor();
+    let night = 1.0 - day;
+    let night_sky = [0.02_f32, 0.02, 0.08];
+    let clear_rgb = [
+        env.sky_color[0].lerp(night_sky[0], night),
+        env.sky_color[1].lerp(night_sky[1], night),
+        env.sky_color[2].lerp(night_sky[2], night),
+    ];
+    clear.0 = Color::srgba(clear_rgb[0], clear_rgb[1], clear_rgb[2], 1.0);
 
     let scene_ambient = lighting.uniform.ambient_color;
     let ambient_rgb = scene_ambient.truncate();
@@ -277,10 +286,15 @@ fn sync_underwater_vision(
         ambient.brightness = air_brightness * (1.0 - s) + water_brightness * s;
         ambient.color = Color::linear_rgb(ambient_rgb.x, ambient_rgb.y, ambient_rgb.z);
     } else {
+        let night_fog = [
+            env.fog_color[0].lerp(0.05, night),
+            env.fog_color[1].lerp(0.06, night),
+            env.fog_color[2].lerp(0.15, night),
+        ];
         fog.color = Color::srgba(
-            env.fog_color[0],
-            env.fog_color[1],
-            env.fog_color[2],
+            night_fog[0],
+            night_fog[1],
+            night_fog[2],
             env.fog_density,
         );
         ambient.brightness = 800.0 * ambient_strength;
@@ -304,9 +318,32 @@ fn sync_scene_lighting(
         With<game_session::GameSessionEntity>,
     >,
 ) {
-    if !world_time.initialized {
-        return;
-    }
+    let (sun_dir, moon_dir, day_factor, cycle, sun_light_dir, sun_disc, moon_disc) =
+        if world_time.initialized {
+            (
+                world_time.sun_dir(),
+                world_time.moon_dir(),
+                world_time.day_factor(),
+                world_time.cycle(),
+                world_time.sun_light_dir(),
+                world_time.sun_disc_factor(),
+                world_time.moon_disc_factor(),
+            )
+        } else {
+            let t = TimeOfDay::default();
+            let s = t.sun_dir();
+            let m = t.moon_dir();
+            let l = t.sun_light_dir();
+            (
+                Vec3::new(s.x, s.y, s.z),
+                Vec3::new(m.x, m.y, m.z),
+                t.day_factor(),
+                t.cycle(),
+                Vec3::new(l.x, l.y, l.z),
+                t.sun_disc_factor(),
+                t.moon_disc_factor(),
+            )
+        };
 
     let medium = if env.submersion > 0.5 {
         Medium::Water
@@ -315,16 +352,18 @@ fn sync_scene_lighting(
     };
 
     lighting.uniform = SceneLightingUniform::from_scene(
-        world_time.sun_dir(),
-        world_time.moon_dir(),
-        world_time.day_factor(),
-        world_time.cycle(),
+        sun_dir,
+        moon_dir,
+        day_factor,
+        cycle,
         env.sky_color,
         env.fog_color,
         env.water_tint,
         env.submersion,
         medium,
     );
+    lighting.uniform.sun_position_dir.w = sun_disc;
+    lighting.uniform.moon_position_dir.w = moon_disc;
 
     if let Ok(mut sky_mat) = sky.single_mut() {
         sky_mat.scene_lighting = lighting.uniform;
@@ -341,12 +380,14 @@ fn sync_scene_lighting(
     }
 
     // Bevy directional light: shadow maps for non-voxel meshes only (see scene_lighting_conventions.md).
-    let light_dir = world_time.sun_light_dir();
     for (mut light, mut transform) in &mut sun {
-        light.illuminance = 4_000.0 + world_time.day_factor() * 12_000.0;
-        light.shadow_maps_enabled = world_time.day_factor() > 0.25;
-        if light_dir.length_squared() > 0.001 {
-            *transform = Transform::from_rotation(Quat::from_rotation_arc(Vec3::NEG_Z, light_dir));
+        light.illuminance = 4_000.0 + day_factor * 12_000.0;
+        light.shadow_maps_enabled = day_factor > 0.25;
+        if sun_light_dir.length_squared() > 0.001 {
+            *transform = Transform::from_rotation(Quat::from_rotation_arc(
+                Vec3::NEG_Z,
+                sun_light_dir,
+            ));
         }
     }
 }

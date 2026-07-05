@@ -68,9 +68,16 @@ impl SceneLightingUniform {
         let warm = Vec3::new(1.0, 0.85, 0.65);
         let sun_color = Vec3::new(1.0, 0.98, 0.92).lerp(warm, dusk * 0.6);
         let moon_color = Vec3::new(0.65, 0.72, 0.95);
-        let ambient_base = Vec3::from_array(fog_color).lerp(Vec3::from_array(sky_color), 0.35);
+        let night = 1.0 - day_factor;
+        let night_zenith = Vec3::new(0.02, 0.02, 0.08);
+        let night_horizon = Vec3::new(0.05, 0.06, 0.15);
+        let day_sky = Vec3::from_array(sky_color);
+        let day_fog = Vec3::from_array(fog_color);
+        let sky = day_sky.lerp(night_zenith, night);
+        let fog = day_fog.lerp(night_horizon, night);
+        let ambient_base = fog.lerp(sky, 0.35);
         let ambient_intensity = 0.15 + day_factor * 0.35;
-        let zenith = Vec3::from_array(sky_color);
+        let zenith = sky;
         let horizon = ambient_base.lerp(zenith, 0.5);
 
         Self {
