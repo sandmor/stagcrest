@@ -1,5 +1,6 @@
 pub mod block_model;
 pub mod colormap;
+pub mod entity;
 pub mod manifest;
 pub mod map_colors;
 pub mod tints;
@@ -7,6 +8,10 @@ pub mod world_time;
 
 pub use colormap::sample_colormap_rgb;
 pub use map_colors::default_map_color;
+
+pub use entity::{
+    EntityAssetTransfer, EntityAssetsChunk, EntityId, EntityManifest, EntityTypeId, EntityWireDef,
+};
 
 pub use manifest::{
     ColormapSnapshot, ContentManifest, RegistrySnapshot, RegistryWireSnapshot,

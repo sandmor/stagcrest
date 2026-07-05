@@ -1,4 +1,5 @@
 use stagcrest_protocol::manifest::{ColormapSnapshot, ContentManifest, TextureAssetsChunk};
+use stagcrest_protocol::{EntityAssetsChunk, EntityManifest};
 
 use crate::colormap::ColormapSet;
 use crate::host::ModHost;
@@ -57,6 +58,14 @@ impl ModHost {
         let manifest = self.build_content_manifest(colormaps);
         let textures = self.build_texture_asset_chunks();
         (manifest, textures)
+    }
+
+    /// Entity type manifest + chunked Bedrock asset transfers for the handshake.
+    pub fn build_entity_content(&self) -> (EntityManifest, Vec<EntityAssetsChunk>) {
+        (
+            self.entity_registry.to_manifest(),
+            self.entity_registry.build_asset_chunks(),
+        )
     }
 }
 

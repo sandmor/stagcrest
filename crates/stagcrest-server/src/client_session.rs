@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use stagcrest_net::{AsyncTcpSession, GameMessage, PlayerPose, ServerMessage};
-use stagcrest_protocol::ChunkPos;
+use stagcrest_protocol::{ChunkPos, EntityId};
 
 use crate::map_streaming::ClientMapState;
 use crate::streaming::TerrainStreamState;
@@ -19,6 +19,7 @@ pub struct ConnectedClient {
     pub stream: TerrainStreamState,
     pub last_center: Option<ChunkPos>,
     pub sent_chunks: HashSet<ChunkPos>,
+    pub sent_entities: HashSet<EntityId>,
     pub map: ClientMapState,
     pub handshake_complete: bool,
     pub handshake_pending: bool,
@@ -37,6 +38,7 @@ impl ConnectedClient {
             stream: TerrainStreamState::default(),
             last_center: None,
             sent_chunks: HashSet::new(),
+            sent_entities: HashSet::new(),
             map: ClientMapState::default(),
             handshake_complete: false,
             handshake_pending: false,
@@ -82,6 +84,7 @@ impl ConnectedClient {
 
     pub fn reset_streaming_state(&mut self) {
         self.sent_chunks.clear();
+        self.sent_entities.clear();
         self.map.reset();
         self.handshake_complete = false;
         self.handshake_pending = false;

@@ -6,8 +6,9 @@ pub mod transport;
 pub use config::NetConfig;
 pub use message::{
     BlockUpdate, ChatKind, ChatLine, ChunkSnapshot, CircuitPowerBatch, ClientHello, ClientMessage,
-    GameMessage, HelloReject, InitialState, MapChunkSnapshot, MapViewSubscribe, PlayerAck,
-    PlayerAction, PlayerActionKind, PlayerPose, ServerHello, ServerMessage,
+    EntitySpawn, EntityUpdate, GameMessage, HelloReject, InitialState, MapChunkSnapshot,
+    MapViewSubscribe, PlayerAck, PlayerAction, PlayerActionKind, PlayerPose, ServerHello,
+    ServerMessage,
 };
 pub use transport::{
     send_message, spawn_tcp_session, AsyncTcpSession, GameTransport, InProcessTransport,

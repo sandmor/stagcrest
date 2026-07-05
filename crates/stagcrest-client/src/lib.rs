@@ -12,6 +12,7 @@ pub mod chunk_streaming;
 pub mod client_content;
 pub mod connect_screen;
 pub mod debug_overlay;
+pub mod entity_render;
 pub mod environment;
 pub mod game;
 pub mod game_session;
@@ -64,8 +65,10 @@ pub fn run_app(launch: LaunchConfig) {
         .add_plugins(UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
         .add_plugins(MaterialPlugin::<stagcrest_render::VoxelMaterial>::default())
+        .add_plugins(stagcrest_render::EntityMaterialPlugin)
         .add_plugins((
             menu::MenuPlugin,
+            entity_render::EntityRenderPlugin,
             resource_pack_setup::ResourcePackSetupPlugin,
             resource_packs::ResourcePacksPlugin,
             connect_screen::ConnectScreenPlugin,

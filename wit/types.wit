@@ -87,6 +87,24 @@ interface types {
         rgba: list<u8>,
     }
 
+    /// Register a Bedrock-format entity type. Asset paths are relative to the
+    /// mod's assets directory (e.g. `entity/player.geo.json`); the host reads
+    /// the files at load time.
+    record register-entity-request {
+        namespaced-id: string,
+        archetype: string,
+        geometry-path: string,
+        texture-path: string,
+        animation-path: option<string>,
+        texture-width: u32,
+        texture-height: u32,
+        scale: f32,
+        idle-animation: string,
+        walk-animation: option<string>,
+        spawn-per-chunk-chance: f32,
+        spawn-max-per-chunk: u8,
+    }
+
     record register-command-request {
         name: string,
         description: string,

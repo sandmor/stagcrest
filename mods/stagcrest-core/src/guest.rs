@@ -3,8 +3,8 @@
 use stagcrest_mod_sdk::{
     BehaviorKindRequest, ContentRegistrar, NativeBehaviorRequest, RegisterBiomeFeatureRequest,
     RegisterBiomeRequest, RegisterBlockRequest, RegisterCaveConfigRequest,
-    RegisterCommandRequest, RegisterFeatureRequest, RegisterRiverConfigRequest,
-    RegisterRiverFeatureRequest, RegisterTextureRequest,
+    RegisterCommandRequest, RegisterEntityRequest, RegisterFeatureRequest,
+    RegisterRiverConfigRequest, RegisterRiverFeatureRequest, RegisterTextureRequest,
 };
 
 use crate::bindings::stagcrest::plugin::types::{
@@ -14,6 +14,7 @@ use crate::bindings::stagcrest::plugin::types::{
     RegisterBiomeRequest as WitRegisterBiomeRequest, RegisterBlockRequest as WitRegisterBlockRequest,
     RegisterCaveConfigRequest as WitRegisterCaveConfigRequest,
     RegisterCommandRequest as WitRegisterCommandRequest,
+    RegisterEntityRequest as WitRegisterEntityRequest,
     RegisterFeatureRequest as WitRegisterFeatureRequest,
     RegisterRiverConfigRequest as WitRegisterRiverConfigRequest,
     RegisterRiverFeatureRequest as WitRegisterRiverFeatureRequest,
@@ -43,6 +44,24 @@ impl ContentRegistrar for HostRegistrar {
         crate::bindings::stagcrest::plugin::host::register_block(&sdk_block_to_wit(req))
             .map(|_| 0)
             .unwrap_or(1)
+    }
+
+    fn register_entity(&mut self, req: RegisterEntityRequest) -> i32 {
+        crate::bindings::stagcrest::plugin::host::register_entity(&WitRegisterEntityRequest {
+            namespaced_id: req.namespaced_id,
+            archetype: req.archetype,
+            geometry_path: req.geometry_path,
+            texture_path: req.texture_path,
+            animation_path: req.animation_path,
+            texture_width: req.texture_width,
+            texture_height: req.texture_height,
+            scale: req.scale,
+            idle_animation: req.idle_animation,
+            walk_animation: req.walk_animation,
+            spawn_per_chunk_chance: req.spawn_per_chunk_chance,
+            spawn_max_per_chunk: req.spawn_max_per_chunk,
+        })
+        .unwrap_or(-1)
     }
 
     fn register_biome(&mut self, req: RegisterBiomeRequest) -> i32 {

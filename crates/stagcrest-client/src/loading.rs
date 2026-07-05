@@ -10,8 +10,9 @@ use futures_lite::future;
 use stagcrest_atlas::AtlasLimits;
 use stagcrest_content::ContentSettings;
 use stagcrest_mod_client::content::ContentRuntime;
+use crate::entity_render::build_entity_catalog;
 use stagcrest_protocol::manifest::{ContentManifest, TextureAssetTransfer};
-use stagcrest_protocol::BlockId;
+use stagcrest_protocol::{BlockId, EntityAssetTransfer, EntityManifest};
 use stagcrest_render::{next_atlas_revision, BlockAtlasResource, MeshCacheResource};
 use stagcrest_storage::DATA_DIR;
 
@@ -28,6 +29,11 @@ struct LoadingState {
     pending_textures: Vec<TextureAssetTransfer>,
     pending_world_time: Option<f64>,
     all_textures_received: bool,
+    pending_entity_manifest: Option<EntityManifest>,
+    pending_entity_assets: Vec<EntityAssetTransfer>,
+    all_entity_assets_received: bool,
+    content_ready: bool,
+    entities_built: bool,
 }
 
 #[derive(Component)]
@@ -179,6 +185,16 @@ fn poll_connection_system(
                     state.all_textures_received = true;
                 }
             }
+            ServerMessage::EntityManifest(manifest) => {
+                state.pending_entity_manifest = Some(manifest);
+            }
+            ServerMessage::EntityAssets(chunk) => {
+                let is_last = chunk.index + 1 >= chunk.total;
+                state.pending_entity_assets.extend(chunk.entities);
+                if is_last {
+                    state.all_entity_assets_received = true;
+                }
+            }
             ServerMessage::Initial(initial) => {
                 net.initial_received = true;
                 state.pending_world_time = Some(initial.world_time);
@@ -239,7 +255,7 @@ fn poll_connection_system(
                     wt.set_from_server(t);
                 }
                 commands.insert_resource(wt);
-                net.handshake_done = true;
+                state.content_ready = true;
             }
             Err(err) => {
                 state.error = Some(format!("Failed to build texture atlases: {err}"));
@@ -247,6 +263,20 @@ fn poll_connection_system(
                 return;
             }
         }
+    }
+
+    // Build the entity catalog once the manifest and all asset chunks arrived.
+    let entities_complete = state.pending_entity_manifest.as_ref().is_some_and(|m| {
+        m.entities.is_empty() || state.all_entity_assets_received
+    });
+    if state.content_ready && entities_complete && !state.entities_built {
+        if let Some(manifest) = state.pending_entity_manifest.take() {
+            let assets = std::mem::take(&mut state.pending_entity_assets);
+            let catalog = build_entity_catalog(&manifest, &assets);
+            commands.insert_resource(catalog);
+        }
+        state.entities_built = true;
+        net.handshake_done = true;
     }
 
     if !state.done && net.handshake_done && net.initial_received {

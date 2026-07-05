@@ -1,3 +1,4 @@
+mod entity_material;
 mod outline;
 mod plugin;
 mod scene_lighting;
@@ -5,6 +6,7 @@ mod skybox;
 mod underwater;
 mod voxel_material;
 
+pub use entity_material::{EntityMaterial, EntityMaterialPlugin, ENTITY_SHADER_HANDLE};
 pub use outline::{
     block_outline_mesh, spawn_block_outline, BlockOutlineMarker, OutlineMaterial,
     OutlineMaterialPlugin,

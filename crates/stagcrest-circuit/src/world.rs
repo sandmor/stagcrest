@@ -592,7 +592,18 @@ impl CircuitWorld {
             let new_state = set_torch_burnt_out(set_torch_lit(state, false), true);
             world.set_block(pos, id, new_state);
             self.visual_updates.push((id, pos, new_state));
-            self.torch_flicker.remove(&pos);
+            // Keep the flicker entry: its `window_start` gates recovery so the
+            // torch stays burnt out until the rapid-toggle window elapses
+            // (mirrors Minecraft's "fewer than 8 toggles in the last 60 ticks").
+        }
+    }
+
+    /// A burnt-out torch may recover only once its rapid-toggle window has
+    /// elapsed, i.e. it is no longer being toggled too frequently.
+    fn torch_burnout_window_elapsed(&self, pos: BlockPos) -> bool {
+        match self.torch_flicker.get(&pos) {
+            Some(entry) => self.tick.saturating_sub(entry.window_start) > BURNOUT_WINDOW_TICKS,
+            None => true,
         }
     }
 
@@ -686,17 +697,27 @@ impl CircuitWorld {
                 continue;
             }
             let (nid, nstate) = world.get_block(npos);
-            if registry.block(nid).is_some_and(|d| d.has_circuit()) {
-                self.torch_flicker.remove(&npos);
-                if let Some(ndef) = registry.block(nid) {
-                    if is_torch_geometry(ndef) && torch_burnt_out(nstate) {
-                        let cleared = set_torch_burnt_out(nstate, false);
-                        world.set_block(npos, nid, cleared);
-                        self.visual_updates.push((nid, npos, cleared));
-                    }
-                }
-                self.queue.enqueue_evaluate(npos);
+            let Some(ndef) = registry.block(nid) else {
+                continue;
+            };
+            if !ndef.has_circuit() {
+                continue;
             }
+            if is_torch_geometry(ndef) && torch_burnt_out(nstate) {
+                // A burnt-out torch treats this as a block update: it recovers
+                // only if its rapid-toggle window has settled, otherwise it
+                // stays off (and keeps its toggle history). This preserves
+                // burnout as a way to break fast torch clocks.
+                if self.torch_burnout_window_elapsed(npos) {
+                    let cleared = set_torch_burnt_out(nstate, false);
+                    world.set_block(npos, nid, cleared);
+                    self.visual_updates.push((nid, npos, cleared));
+                    self.torch_flicker.remove(&npos);
+                    self.queue.enqueue_evaluate(npos);
+                }
+                continue;
+            }
+            self.queue.enqueue_evaluate(npos);
         }
     }
 

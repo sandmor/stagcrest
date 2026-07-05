@@ -2,6 +2,7 @@ mod build_world;
 mod chunk_gen;
 mod client_session;
 mod commands;
+mod entity_store;
 mod export_minimap;
 mod interest;
 mod map_generation;
@@ -41,6 +42,7 @@ pub use build_world::{
     build_world_region, iter_circle_chunk_positions, BuildMapConfig, BuildMapError, BuildMapReport,
 };
 pub use client_session::{ClientId, ClientRegistry, ConnectedClient};
+pub use entity_store::{EntityInstance, EntityStore, SpawnRule};
 pub use export_minimap::{
     export_minimap, rebuild_all_map_chunks, ExportError, ExportMinimapConfig,
 };
@@ -100,6 +102,9 @@ pub struct GameServer {
     pub server_id: u64,
     cached_manifest: stagcrest_protocol::manifest::ContentManifest,
     cached_texture_chunks: Vec<TextureAssetsChunk>,
+    cached_entity_manifest: stagcrest_protocol::EntityManifest,
+    cached_entity_chunks: Vec<stagcrest_protocol::EntityAssetsChunk>,
+    pub entities: EntityStore,
     map_pipeline: MapChunkPipeline,
     map_ctx: Arc<MapResolveContext>,
     map_y_chunks: Vec<i32>,
@@ -160,10 +165,25 @@ impl GameServer {
             let mut reg = registry;
             std::mem::swap(&mut host.registry, &mut reg);
             let (cached_manifest, cached_texture_chunks) = host.build_handshake_content(&colormaps);
+            let (cached_entity_manifest, cached_entity_chunks) = host.build_entity_content();
             std::mem::swap(&mut host.registry, &mut reg);
-            (host, reg, cached_manifest, cached_texture_chunks)
+            (
+                host,
+                reg,
+                cached_manifest,
+                cached_texture_chunks,
+                cached_entity_manifest,
+                cached_entity_chunks,
+            )
         };
-        let (mod_host, registry, cached_manifest, cached_texture_chunks) = cached;
+        let (
+            mod_host,
+            registry,
+            cached_manifest,
+            cached_texture_chunks,
+            cached_entity_manifest,
+            cached_entity_chunks,
+        ) = cached;
 
         let map_ctx = Arc::new(map_generation::make_map_resolve_context(
             &registry,
@@ -198,6 +218,9 @@ impl GameServer {
             server_id: 1,
             cached_manifest,
             cached_texture_chunks,
+            cached_entity_manifest,
+            cached_entity_chunks,
+            entities: EntityStore::new(),
             map_pipeline,
             map_ctx,
             map_y_chunks,
@@ -312,12 +335,14 @@ impl GameServer {
 
             self.queue_map_regen_for_persisted(&stream_result.persisted);
 
+            let mut sent_chunks: Vec<ChunkPos> = Vec::new();
             for (client_id, delta) in stream_result.per_client {
                 let Some(client) = clients.get_mut(client_id) else {
                     continue;
                 };
                 for snapshot in delta.snapshots {
                     let chunk = snapshot.pos;
+                    sent_chunks.push(chunk);
                     client.queue_bulk(GameMessage::Server(ServerMessage::ChunkSnapshot(snapshot)));
                     let seed = self.circuit.power_in_chunk(chunk);
                     if !seed.is_empty() {
@@ -331,6 +356,8 @@ impl GameServer {
                 }
             }
 
+            self.tick_entities(clients, &sent_chunks, &stream_result.persisted);
+
             self.map_pipeline.tick(
                 &self.world,
                 &self.map_y_chunks,
@@ -341,6 +368,51 @@ impl GameServer {
             );
             self.tick_map_streaming(clients);
         }
+    }
+
+    /// Populate freshly-streamed surface chunks with entities, drop entities in
+    /// evicted chunks, then replicate spawn/despawn to clients by interest.
+    fn tick_entities(
+        &mut self,
+        clients: &mut ClientRegistry,
+        sent_chunks: &[ChunkPos],
+        persisted: &[ChunkPos],
+    ) {
+        let rules = self.entity_spawn_rules();
+        if !rules.is_empty() {
+            for &chunk in sent_chunks {
+                if self.world.is_generated(chunk) {
+                    self.entities.populate_chunk(
+                        &self.world,
+                        chunk,
+                        &rules,
+                        self.air,
+                        self.config.world_seed,
+                    );
+                }
+            }
+        }
+        for &chunk in persisted {
+            self.entities.remove_chunk(chunk);
+        }
+        self.entities.sync_clients(
+            clients,
+            self.config.render_distance,
+            self.config.vertical_render_distance,
+        );
+    }
+
+    fn entity_spawn_rules(&self) -> Vec<SpawnRule> {
+        self.mod_host
+            .entity_registry
+            .all()
+            .filter(|e| e.spawn_per_chunk_chance > 0.0)
+            .map(|e| SpawnRule {
+                type_id: e.type_id,
+                chance: e.spawn_per_chunk_chance,
+                max_per_chunk: e.spawn_max_per_chunk,
+            })
+            .collect()
     }
 
     fn tick_map_streaming(&mut self, clients: &mut ClientRegistry) {

@@ -139,6 +139,24 @@ pub struct RegisterTextureRequest {
     pub rgba: Vec<u8>,
 }
 
+/// Register a Bedrock-format entity type. Asset paths are relative to the mod's
+/// assets directory (e.g. `entity/player.geo.json`).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RegisterEntityRequest {
+    pub namespaced_id: String,
+    pub archetype: String,
+    pub geometry_path: String,
+    pub texture_path: String,
+    pub animation_path: Option<String>,
+    pub texture_width: u32,
+    pub texture_height: u32,
+    pub scale: f32,
+    pub idle_animation: String,
+    pub walk_animation: Option<String>,
+    pub spawn_per_chunk_chance: f32,
+    pub spawn_max_per_chunk: u8,
+}
+
 /// A chat slash command registered by a mod.
 ///
 /// `name` is matched case-insensitively against the part after `/` and must
@@ -420,6 +438,12 @@ pub trait ContentRegistrar {
         0
     }
     fn register_block(&mut self, req: RegisterBlockRequest) -> i32;
+    /// Register a Bedrock-format entity type. Returns the assigned type id, or
+    /// negative on error. Default no-op for registrars that don't support it.
+    fn register_entity(&mut self, req: RegisterEntityRequest) -> i32 {
+        let _ = req;
+        -1
+    }
     fn register_biome(&mut self, req: RegisterBiomeRequest) -> i32 {
         let _ = req;
         0

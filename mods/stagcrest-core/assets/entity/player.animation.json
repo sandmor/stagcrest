@@ -1,0 +1,45 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.player.idle": {
+      "loop": true,
+      "animation_length": 4.0,
+      "bones": {
+        "head": {
+          "rotation": [
+            "math.sin(query.anim_time * 90) * 2.5",
+            "math.cos(query.anim_time * 90) * 2.5",
+            0
+          ]
+        },
+        "rightArm": {
+          "rotation": [
+            "math.cos(query.anim_time * 90) * 2",
+            0,
+            "-3 - math.cos(query.anim_time * 90) * 2"
+          ]
+        },
+        "leftArm": {
+          "rotation": [
+            "-math.cos(query.anim_time * 90) * 2",
+            0,
+            "3 + math.cos(query.anim_time * 90) * 2"
+          ]
+        },
+        "body": {
+          "position": [0, "math.sin(query.anim_time * 180) * 0.15", 0]
+        }
+      }
+    },
+    "animation.player.walk": {
+      "loop": true,
+      "animation_length": 1.0,
+      "bones": {
+        "rightArm": { "rotation": ["math.cos(query.anim_time * 360) * 40", 0, 0] },
+        "leftArm": { "rotation": ["-math.cos(query.anim_time * 360) * 40", 0, 0] },
+        "rightLeg": { "rotation": ["-math.cos(query.anim_time * 360) * 40", 0, 0] },
+        "leftLeg": { "rotation": ["math.cos(query.anim_time * 360) * 40", 0, 0] }
+      }
+    }
+  }
+}

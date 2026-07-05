@@ -4,6 +4,7 @@ mod behavior;
 mod block_tints;
 mod colormap;
 mod commands;
+mod entity_registry;
 mod host;
 mod mount_placement;
 mod observer_placement;
@@ -24,6 +25,7 @@ pub use behavior::{
     block_push_reaction, block_redstone_powerable, extra_break_positions, placement_state,
     BehaviorCtx, BehaviorRegistry, BehaviorResult, default_push_reaction, redstone_powerable_for,
 };
+pub use entity_registry::{EntityRegistry, EntityServerDef};
 pub use host::{load_mods, ModError, ModHost};
 pub use mount_placement::{mount_can_attach, validate_mount_placement};
 pub use observer_placement::validate_observer_placement;

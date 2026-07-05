@@ -1,6 +1,6 @@
 use stagcrest_mod_sdk::{
     behavior_from_circuit, BehaviorKindRequest, CircuitKindRequest, ContentRegistrar,
-    NativeBehaviorRequest, RegisterBehaviorRequest, RegisterBlockRequest,
+    NativeBehaviorRequest, RegisterBehaviorRequest, RegisterBlockRequest, RegisterEntityRequest,
     RegisterTextureRequest, RenderLayer,
 };
 use stagcrest_protocol::default_map_color;
@@ -11,8 +11,28 @@ pub fn register_content(reg: &mut impl ContentRegistrar) {
     register_blocks(reg);
     crate::blocks_extra::register_extra_blocks(reg);
     crate::worldgen::register_worldgen(reg);
+    register_entities(reg);
     crate::commands::register_commands();
     reg.log("stagcrest-core registered");
+}
+
+/// Register the Bedrock-format player entity, which doubles as the MVP test
+/// entity that spawns commonly across surface chunks.
+fn register_entities(reg: &mut impl ContentRegistrar) {
+    reg.register_entity(RegisterEntityRequest {
+        namespaced_id: "stagcrest:player".to_string(),
+        archetype: "humanoid".to_string(),
+        geometry_path: "entity/player.geo.json".to_string(),
+        texture_path: "entity/player.png".to_string(),
+        animation_path: Some("entity/player.animation.json".to_string()),
+        texture_width: 64,
+        texture_height: 64,
+        scale: 1.0,
+        idle_animation: "animation.player.idle".to_string(),
+        walk_animation: Some("animation.player.walk".to_string()),
+        spawn_per_chunk_chance: 0.5,
+        spawn_max_per_chunk: 2,
+    });
 }
 
 fn fluid_mask_texture(reg: &mut impl ContentRegistrar, name: &str, alpha: u8) {

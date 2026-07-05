@@ -58,6 +58,15 @@ pub fn send_handshake(server: &GameServer, client: &mut ConnectedClient) {
             chunk.clone(),
         )));
     }
+
+    client.queue_priority(GameMessage::Server(ServerMessage::EntityManifest(
+        server.cached_entity_manifest.clone(),
+    )));
+    for chunk in &server.cached_entity_chunks {
+        client.queue_priority(GameMessage::Server(ServerMessage::EntityAssets(chunk.clone())));
+    }
+
+    client.sent_entities.clear();
     client.handshake_pending = true;
 }
 

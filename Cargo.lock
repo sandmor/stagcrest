@@ -1038,7 +1038,7 @@ dependencies = [
  "arrayvec",
  "bevy_reflect",
  "derive_more",
- "glam 0.32.1",
+ "glam",
  "itertools 0.14.0",
  "libm",
  "rand 0.10.1",
@@ -1068,7 +1068,7 @@ dependencies = [
  "bytemuck",
  "derive_more",
  "encase",
- "glam 0.32.1",
+ "glam",
  "half",
  "hexasphere",
  "thiserror 2.0.18",
@@ -1190,7 +1190,7 @@ dependencies = [
  "downcast-rs 2.0.2",
  "erased-serde",
  "foldhash 0.2.0",
- "glam 0.32.1",
+ "glam",
  "indexmap",
  "inventory",
  "serde",
@@ -1251,7 +1251,7 @@ dependencies = [
  "derive_more",
  "downcast-rs 2.0.2",
  "encase",
- "glam 0.32.1",
+ "glam",
  "image",
  "indexmap",
  "itertools 0.14.0",
@@ -2878,15 +2878,6 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.29.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8babf46d4c1c9d92deac9f7be466f76dfc4482b6452fc5024b5e8daf6ffeb3ee"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "glam"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
@@ -3079,7 +3070,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "177ea6330876de4ef08e184f827b98acc037614a4ce409902c5b0d53a9c2e951"
 dependencies = [
  "constgebra",
- "glam 0.32.1",
+ "glam",
  "tinyvec",
 ]
 
@@ -5474,6 +5465,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stagcrest-bedrock"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "stagcrest-circuit"
 version = "0.1.0"
 dependencies = [
@@ -5490,10 +5491,12 @@ dependencies = [
  "bevy",
  "clap",
  "futures-lite",
- "glam 0.29.3",
+ "glam",
+ "image",
  "serde",
  "serde_json",
  "stagcrest-atlas",
+ "stagcrest-bedrock",
  "stagcrest-circuit",
  "stagcrest-content",
  "stagcrest-mesh",
@@ -5542,7 +5545,7 @@ name = "stagcrest-mesh"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "glam 0.29.3",
+ "glam",
  "image",
  "rayon",
  "stagcrest-atlas",
@@ -5625,7 +5628,7 @@ dependencies = [
 name = "stagcrest-net"
 version = "0.1.0"
 dependencies = [
- "glam 0.29.3",
+ "glam",
  "postcard",
  "serde",
  "socket2 0.5.10",
@@ -5639,7 +5642,7 @@ dependencies = [
 name = "stagcrest-protocol"
 version = "0.1.0"
 dependencies = [
- "glam 0.29.3",
+ "glam",
  "serde",
 ]
 
@@ -5649,7 +5652,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bytemuck",
- "glam 0.29.3",
+ "glam",
  "naga",
  "stagcrest-circuit",
  "stagcrest-mesh",
@@ -5665,7 +5668,7 @@ name = "stagcrest-server"
 version = "0.1.0"
 dependencies = [
  "clap",
- "glam 0.29.3",
+ "glam",
  "image",
  "indicatif",
  "rayon",
@@ -5697,7 +5700,7 @@ dependencies = [
 name = "stagcrest-world"
 version = "0.1.0"
 dependencies = [
- "glam 0.29.3",
+ "glam",
  "lru",
  "serde",
  "slab",

@@ -2,7 +2,8 @@ use glam::Vec3;
 use serde::{Deserialize, Serialize};
 use stagcrest_protocol::{
     manifest::{ContentManifest, TextureAssetsChunk},
-    BlockId, BlockPos, BlockState, ChunkPos,
+    BlockId, BlockPos, BlockState, ChunkPos, EntityAssetsChunk, EntityId, EntityManifest,
+    EntityTypeId,
 };
 
 /// Handshake: client → server.
@@ -135,6 +136,29 @@ pub struct MapChunkSnapshot {
     pub compressed: Vec<u8>,
 }
 
+/// Server → client: a new entity instance entered the client's interest area.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct EntitySpawn {
+    pub id: EntityId,
+    pub type_id: EntityTypeId,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub yaw: f32,
+}
+
+/// Server → client: an existing entity moved / changed animation state.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct EntityUpdate {
+    pub id: EntityId,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub yaw: f32,
+    /// Animation state: 0 = idle, 1 = walk.
+    pub anim: u8,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello(ClientHello),
@@ -152,12 +176,17 @@ pub enum ServerMessage {
     Reject(HelloReject),
     Manifest(ContentManifest),
     TextureAssets(TextureAssetsChunk),
+    EntityManifest(EntityManifest),
+    EntityAssets(EntityAssetsChunk),
     Initial(InitialState),
     ChunkSnapshot(ChunkSnapshot),
     ChunkUnload(ChunkPos),
     BlockUpdate(BlockUpdate),
     CircuitPowerBatch(CircuitPowerBatch),
     MapChunkSnapshot(MapChunkSnapshot),
+    EntitySpawn(EntitySpawn),
+    EntityUpdate(EntityUpdate),
+    EntityDespawn(EntityId),
     PlayerAck(PlayerAck),
     Pong { nonce: u32 },
     Chat(ChatLine),

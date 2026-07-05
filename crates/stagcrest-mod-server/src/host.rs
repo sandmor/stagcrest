@@ -1,6 +1,7 @@
-use crate::assets::AssetReader;
+use crate::assets::{AssetReader, FsAssetReader};
 use crate::block_tints::apply_block_face_tints;
 use crate::commands::{CommandHost, CommandRegistry};
+use crate::entity_registry::{EntityRegistry, EntityServerDef};
 use crate::registry::BlockRegistry;
 use crate::resourcepack::{ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES};
 use crate::runtime::{create_engine, load_mod, ModInstance, ModLoadContext};
@@ -8,6 +9,7 @@ use crate::worldgen::BiomeRegistry;
 use crate::behavior::{BehaviorRegistry, BehaviorResult};
 use stagcrest_mod_sdk::{
     BehaviorKindRequest, CircuitKindRequest, RegisterBlockRequest, RegisterBehaviorRequest,
+    RegisterEntityRequest,
 };
 use stagcrest_protocol::{
     BehaviorRef, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CallbackFlags,
@@ -34,6 +36,7 @@ pub enum ModError {
 
 pub struct ModHost {
     pub registry: BlockRegistry,
+    pub entity_registry: EntityRegistry,
     pub biome_registry: BiomeRegistry,
     pub command_registry: CommandRegistry,
     pub behavior_registry: BehaviorRegistry,
@@ -48,6 +51,7 @@ impl ModHost {
         let registry = BlockRegistry::new();
         Self {
             registry,
+            entity_registry: EntityRegistry::new(),
             biome_registry: BiomeRegistry::default(),
             command_registry: CommandRegistry::new(),
             behavior_registry: BehaviorRegistry::new(),
@@ -67,6 +71,7 @@ impl ModHost {
         &mut self,
         reader: &dyn AssetReader,
         packs: Option<&ResourcePackLoader>,
+        repo_root: &std::path::Path,
     ) -> Result<(), ModError> {
         let content = reader.read_bytes("mods/mods.toml")?;
         let manifest: ModsManifest = toml::from_str(
@@ -75,7 +80,7 @@ impl ModHost {
         )?;
 
         for mod_entry in manifest.mods {
-            self.load_mod(reader, &mod_entry, packs)?;
+            self.load_mod(reader, &mod_entry, packs, repo_root)?;
         }
 
         self.finalize_biomes()?;
@@ -88,6 +93,7 @@ impl ModHost {
         reader: &dyn AssetReader,
         entry: &ModManifest,
         packs: Option<&ResourcePackLoader>,
+        repo_root: &std::path::Path,
     ) -> Result<(), ModError> {
         let wasm_path = format!("mods/{}/{}", entry.id, entry.wasm);
         if !reader.exists(&wasm_path) {
@@ -99,13 +105,17 @@ impl ModHost {
 
         let wasm_bytes = reader.read_bytes(&wasm_path)?;
         let mod_index = self.instances.len();
+        let mod_assets_prefix = format!("mods/{}/{}", entry.id, entry.assets);
         let mut ctx = ModLoadContext {
             registry: &mut self.registry,
+            entity_registry: &mut self.entity_registry,
             biome_registry: &mut self.biome_registry,
             command_registry: &mut self.command_registry,
             mod_index,
             packs,
             engine: self.engine.clone(),
+            repo_root: repo_root.to_path_buf(),
+            mod_assets_prefix,
         };
         let instance = load_mod(&mut ctx, &wasm_bytes).map_err(ModError::Runtime)?;
 
@@ -288,6 +298,48 @@ pub fn register_block_host(reg: &mut BlockRegistry, json: RegisterBlockRequest, 
     });
 }
 
+/// Load an entity's Bedrock asset files (relative to the mod assets dir) and
+/// register the type. Returns the assigned type id, or an error string.
+pub fn register_entity_host(
+    reg: &mut EntityRegistry,
+    req: RegisterEntityRequest,
+    repo_root: &std::path::Path,
+    mod_assets_prefix: &str,
+) -> Result<stagcrest_protocol::EntityTypeId, String> {
+    let reader = FsAssetReader::new(repo_root);
+    let read = |rel: &str| -> Result<Vec<u8>, String> {
+        let full = format!("{mod_assets_prefix}/{rel}");
+        reader
+            .read_bytes(&full)
+            .map_err(|e| format!("entity asset {full}: {e}"))
+    };
+
+    let geometry_json = read(&req.geometry_path)?;
+    let texture_png = read(&req.texture_path)?;
+    let animation_json = match &req.animation_path {
+        Some(p) => Some(read(p)?),
+        None => None,
+    };
+
+    let type_id = reg.allocate_type_id();
+    reg.register(EntityServerDef {
+        type_id,
+        namespaced_id: req.namespaced_id,
+        archetype: req.archetype,
+        texture_width: req.texture_width,
+        texture_height: req.texture_height,
+        scale: if req.scale > 0.0 { req.scale } else { 1.0 },
+        idle_animation: req.idle_animation,
+        walk_animation: req.walk_animation,
+        geometry_json,
+        texture_png,
+        animation_json,
+        spawn_per_chunk_chance: req.spawn_per_chunk_chance,
+        spawn_max_per_chunk: req.spawn_max_per_chunk,
+    });
+    Ok(type_id)
+}
+
 /// Register the reserved unknown placeholder block.
 pub fn register_unknown_block(reg: &mut BlockRegistry) {
     if reg.block_by_name(UNKNOWN_BLOCK_ID).is_some() {
@@ -353,7 +405,7 @@ pub fn load_mods(repo_root: &std::path::Path) -> Result<ModHost, ModError> {
         register_pack_fluid_textures(&mut host.registry, packs, &reader);
         register_pack_plant_textures(&mut host.registry, packs, &reader);
     }
-    host.load_all(&reader, packs.as_ref())?;
+    host.load_all(&reader, packs.as_ref(), repo_root)?;
     register_unknown_block(&mut host.registry);
     host.rebuild_behaviors();
     Ok(host)
@@ -494,5 +546,27 @@ mod tests {
             .invoke_command(&mut mock, 1, "bogus", "")
             .expect_err("unknown command should error");
         assert!(err.contains("unknown command"));
+    }
+
+    /// The core mod registers the Bedrock player entity with loaded asset bytes.
+    #[test]
+    fn core_mod_registers_player_entity() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let wasm = root.join("mods/stagcrest-core/stagcrest-core.wasm");
+        if !wasm.exists() {
+            eprintln!("skipping: {wasm:?} not built (run scripts/build-core-mod.sh)");
+            return;
+        }
+        let host = load_mods(&root).expect("load core mod");
+        let player = host
+            .entity_registry
+            .all()
+            .find(|e| e.namespaced_id == "stagcrest:player")
+            .expect("player entity registered");
+        assert_eq!(player.archetype, "humanoid");
+        assert!(!player.geometry_json.is_empty(), "geometry bytes loaded");
+        assert!(!player.texture_png.is_empty(), "texture bytes loaded");
+        assert!(player.animation_json.is_some(), "animation bytes loaded");
+        assert!(player.spawn_per_chunk_chance > 0.0);
     }
 }

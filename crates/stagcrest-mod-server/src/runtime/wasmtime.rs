@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::assets::FsAssetReader;
 use crate::commands::{CommandHost, CommandRegistry};
-use crate::host::register_block_host;
+use crate::entity_registry::EntityRegistry;
+use crate::host::{register_block_host, register_entity_host};
 use crate::registry::BlockRegistry;
 use crate::resourcepack::ResourcePackLoader;
 use crate::worldgen::{
@@ -11,7 +12,7 @@ use crate::worldgen::{
 };
 use stagcrest_mod_sdk::{
     RegisterBiomeFeatureRequest, RegisterBiomeRequest, RegisterBlockRequest,
-    RegisterCaveConfigRequest, RegisterCommandRequest, RegisterFeatureRequest,
+    RegisterCaveConfigRequest, RegisterCommandRequest, RegisterEntityRequest, RegisterFeatureRequest,
     RegisterRiverConfigRequest, RegisterRiverFeatureRequest, RegisterTextureRequest,
 };
 use wasmtime::component::{Component, Linker};
@@ -28,11 +29,14 @@ const MAX_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 
 pub struct ModLoadContext<'a> {
     pub registry: &'a mut BlockRegistry,
+    pub entity_registry: &'a mut EntityRegistry,
     pub biome_registry: &'a mut BiomeRegistry,
     pub command_registry: &'a mut CommandRegistry,
     pub mod_index: usize,
     pub packs: Option<&'a ResourcePackLoader>,
     pub engine: Arc<Engine>,
+    pub repo_root: std::path::PathBuf,
+    pub mod_assets_prefix: String,
 }
 
 struct CommandCtx {
@@ -49,10 +53,13 @@ struct BehaviorCtx {
 
 struct HostState {
     registry: Option<*mut BlockRegistry>,
+    entity_registry: Option<*mut EntityRegistry>,
     biome_registry: Option<*mut BiomeRegistry>,
     command_registry: Option<*mut CommandRegistry>,
     current_mod_index: usize,
     packs: Option<*const ResourcePackLoader>,
+    repo_root: std::path::PathBuf,
+    mod_assets_prefix: String,
     command: Option<CommandCtx>,
     behavior: Option<BehaviorCtx>,
     limiter: StoreLimiter,
@@ -101,6 +108,35 @@ impl Host for HostState {
                 .block_by_name(&namespaced)
                 .ok_or_else(|| "block not registered".to_string())?;
             Ok(wit_types::BlockId { value: id.0 })
+        }
+    }
+
+    fn register_entity(&mut self, req: wit_types::RegisterEntityRequest) -> Result<i32, String> {
+        let registry = self
+            .entity_registry
+            .ok_or_else(|| "register_entity called outside load phase".to_string())?;
+        let sdk = RegisterEntityRequest {
+            namespaced_id: req.namespaced_id,
+            archetype: req.archetype,
+            geometry_path: req.geometry_path,
+            texture_path: req.texture_path,
+            animation_path: req.animation_path,
+            texture_width: req.texture_width,
+            texture_height: req.texture_height,
+            scale: req.scale,
+            idle_animation: req.idle_animation,
+            walk_animation: req.walk_animation,
+            spawn_per_chunk_chance: req.spawn_per_chunk_chance,
+            spawn_max_per_chunk: req.spawn_max_per_chunk,
+        };
+        unsafe {
+            let type_id = register_entity_host(
+                &mut *registry,
+                sdk,
+                &self.repo_root,
+                &self.mod_assets_prefix,
+            )?;
+            Ok(type_id.0 as i32)
         }
     }
 
@@ -449,10 +485,13 @@ pub fn load_mod(ctx: &mut ModLoadContext<'_>, wasm_bytes: &[u8]) -> Result<ModIn
     let component = Component::from_binary(&ctx.engine, wasm_bytes).map_err(|e| e.to_string())?;
     let state = HostState {
         registry: Some(ctx.registry as *mut BlockRegistry),
+        entity_registry: Some(ctx.entity_registry as *mut EntityRegistry),
         biome_registry: Some(ctx.biome_registry as *mut BiomeRegistry),
         command_registry: Some(ctx.command_registry as *mut CommandRegistry),
         current_mod_index: ctx.mod_index,
         packs: ctx.packs.map(|p| p as *const ResourcePackLoader),
+        repo_root: ctx.repo_root.clone(),
+        mod_assets_prefix: ctx.mod_assets_prefix.clone(),
         command: None,
         behavior: None,
         limiter: StoreLimiter { memory_bytes: 0 },
@@ -470,6 +509,7 @@ pub fn load_mod(ctx: &mut ModLoadContext<'_>, wasm_bytes: &[u8]) -> Result<ModIn
         .map_err(|e| e.to_string())?;
     let store_data = store.data_mut();
     store_data.registry = None;
+    store_data.entity_registry = None;
     store_data.biome_registry = None;
     store_data.command_registry = None;
     store_data.packs = None;

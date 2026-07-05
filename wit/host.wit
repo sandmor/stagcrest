@@ -5,11 +5,14 @@ interface host {
     use types.{block-id, block-pos, block-state, callback-flags, native-behavior, behavior-ref,
         register-block-request, register-texture-request, register-command-request,
         register-biome-request, register-feature-request, register-river-config-request,
-        register-river-feature-request, register-cave-config-request, register-biome-feature-request};
+        register-river-feature-request, register-cave-config-request, register-biome-feature-request,
+        register-entity-request};
 
     /// Register a block; returns the assigned runtime id.
     register-block: func(req: register-block-request) -> result<block-id, string>;
     register-texture: func(req: register-texture-request) -> result<s32, string>;
+    /// Register a Bedrock-format entity type; returns the assigned type id.
+    register-entity: func(req: register-entity-request) -> result<s32, string>;
     /// Load a texture from a resource pack. Returns 1 if loaded, 0 if not found, -1 if no packs.
     register-texture-from-pack: func(namespaced-id: string, mc-name: string) -> s32;
     register-biome: func(req: register-biome-request) -> result<s32, string>;

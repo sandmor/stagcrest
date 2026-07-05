@@ -151,10 +151,21 @@ pub(crate) fn net_poll_system(
     mut power_overlay: ResMut<CircuitPowerOverlay>,
     mut world_time: ResMut<WorldTime>,
     mut decode_queue: Option<ResMut<MinimapDecodeQueue>>,
+    mut entity_events: MessageWriter<crate::entity_render::EntityNetEvent>,
     mut commands: Commands,
 ) {
+    use crate::entity_render::EntityNetEvent;
     for msg in net.poll() {
         match msg {
+            ServerMessage::EntitySpawn(s) => {
+                entity_events.write(EntityNetEvent::Spawn(s));
+            }
+            ServerMessage::EntityUpdate(u) => {
+                entity_events.write(EntityNetEvent::Update(u));
+            }
+            ServerMessage::EntityDespawn(id) => {
+                entity_events.write(EntityNetEvent::Despawn(id));
+            }
             ServerMessage::CircuitPowerBatch(batch) => {
                 apply_power_batch(&mut power_overlay, &batch, &mut mesh_scheduler);
             }
