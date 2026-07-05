@@ -1,6 +1,7 @@
 mod build_world;
 mod chunk_gen;
 mod client_session;
+mod commands;
 mod export_minimap;
 mod interest;
 mod map_generation;

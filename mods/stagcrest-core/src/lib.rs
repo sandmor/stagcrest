@@ -1,4 +1,5 @@
 mod blocks_extra;
+mod commands;
 mod content;
 mod worldgen;
 
@@ -44,6 +45,10 @@ impl stagcrest_mod_sdk::ContentRegistrar for WasmRegistrar {
         stagcrest_mod_sdk::register_cave_config(req)
     }
 
+    fn register_command(&mut self, req: stagcrest_mod_sdk::RegisterCommandRequest) -> i32 {
+        stagcrest_mod_sdk::register_command(req)
+    }
+
     fn register_biome_feature(
         &mut self,
         req: stagcrest_mod_sdk::RegisterBiomeFeatureRequest,
@@ -62,4 +67,13 @@ pub extern "C" fn _stagcrest_register() -> i32 {
     let mut reg = WasmRegistrar;
     register_content(&mut reg);
     0
+}
+
+/// Command dispatch entry point invoked by the host when a slash command
+/// registered by this mod is run. Delegates to the command handler which pulls
+/// the command name/args from host imports.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn _stagcrest_command() -> i32 {
+    commands::handle_command()
 }

@@ -167,6 +167,18 @@ impl ClientRegistry {
         }
     }
 
+    /// Send a chat line to a single client (no-op if the client is gone or not
+    /// yet finished the handshake).
+    pub fn send_chat_to(&mut self, id: ClientId, line: stagcrest_net::ChatLine) {
+        let Some(client) = self.get_mut(id) else {
+            return;
+        };
+        if !client.handshake_complete {
+            return;
+        }
+        client.queue_priority(GameMessage::Server(ServerMessage::Chat(line)));
+    }
+
     pub fn broadcast_world_time(&mut self, time: f64) {
         let msg = GameMessage::Server(ServerMessage::WorldTime { time });
         for client in self.clients.iter_mut() {

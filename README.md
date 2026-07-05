@@ -79,15 +79,15 @@ cargo run -p stagcrest-client -- --connect 127.0.0.1:4242
 
 ### CLI flags
 
-| Binary             | Flag                        | Description                                     |
-| ------------------ | --------------------------- | ----------------------------------------------- |
-| `stagcrest-client` | `--connect HOST:PORT`       | Remote server (omit for embedded single-player) |
-| `stagcrest-client` | `--net-sim-latency-ms N`    | Artificial latency for localhost testing        |
-| `stagcrest-server` | `--bind HOST:PORT`          | Listen address (default `0.0.0.0:4242`)         |
-| `stagcrest-server` | `--net-sim-latency-ms N`    | Artificial latency on outbound frames           |
-| `stagcrest-server` | `export-minimap` subcommand | PNG minimap of all saved chunks (see below)     |
-| `stagcrest-server` | `build-map` subcommand      | Pregenerate world chunks in a circular region   |
-| `stagcrest-server` | `rebuild-minimap` subcommand | Rebuild stored minimap tiles from world chunks |
+| Binary             | Flag                         | Description                                     |
+| ------------------ | ---------------------------- | ----------------------------------------------- |
+| `stagcrest-client` | `--connect HOST:PORT`        | Remote server (omit for embedded single-player) |
+| `stagcrest-client` | `--net-sim-latency-ms N`     | Artificial latency for localhost testing        |
+| `stagcrest-server` | `--bind HOST:PORT`           | Listen address (default `0.0.0.0:4242`)         |
+| `stagcrest-server` | `--net-sim-latency-ms N`     | Artificial latency on outbound frames           |
+| `stagcrest-server` | `export-minimap` subcommand  | PNG minimap of all saved chunks (see below)     |
+| `stagcrest-server` | `build-map` subcommand       | Pregenerate world chunks in a circular region   |
+| `stagcrest-server` | `rebuild-minimap` subcommand | Rebuild stored minimap tiles from world chunks  |
 
 Export a minimap PNG from explored/saved terrain (streams chunks from disk; does not load the full world into memory):
 
@@ -198,8 +198,21 @@ Mods export `_stagcrest_register()` and import from module `stagcrest_host`:
 | ------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------- |
 | `register_block`         | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → block definition (includes `map_color: [u8;3]`)                     |
 | `register_texture`       | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → RGBA texture                                                        |
+| `register_command`       | `(ptr: i32, len: i32) -> i32`                   | UTF-8 JSON → slash command definition (name, description, usage)                 |
 | `log_message`            | `(ptr: i32, len: i32)`                          | UTF-8 string                                                                     |
 | `load_texture_from_pack` | `(name_ptr, name_len, out_ptr, out_max) -> i32` | Load MC-format block PNG from host resource packs; returns bytes written or `-1` |
+
+Mods that register commands also export `_stagcrest_command() -> i32`, invoked by the host when a registered slash command is run. While it runs, these command-phase imports are available:
+
+| Import           | Signature                             | Behavior                                                                 |
+| ---------------- | ------------------------------------- | ------------------------------------------------------------------------ |
+| `command_name`   | `(out_ptr: i32, out_max: i32) -> i32` | Write the dispatched command name into the buffer; bytes written or `-1` |
+| `command_args`   | `(out_ptr: i32, out_max: i32) -> i32` | Write the command argument string into the buffer; bytes written or `-1` |
+| `command_reply`  | `(ptr: i32, len: i32)`                | Send a `System` chat reply to the invoking client only                   |
+| `set_world_time` | `(time: f64) -> i32`                  | Set the world day/night time (seconds); `0` on success                   |
+| `get_world_time` | `() -> f64`                           | Read the world day/night time                                            |
+
+`stagcrest-core` defines `/time [<value|day|night|noon|midnight>]` this way. Chat lines starting with `/` are dispatched to mod callbacks instead of broadcast as player chat.
 
 Mods must export WebAssembly `memory`. See `mods/stagcrest-core/src/content.rs` for a full example.
 

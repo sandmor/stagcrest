@@ -1,4 +1,5 @@
 use stagcrest_minimap::{expected_subscribe_tiles, MINIMAP_ZOOM_LEVELS};
+use stagcrest_mod_server::split_command;
 use stagcrest_net::{
     validate_username, ChatKind, ChatLine, ClientHello, ClientMessage, GameMessage, InitialState,
     MapViewSubscribe, PlayerPose, ServerHello, ServerMessage, PROTOCOL_VERSION,
@@ -6,6 +7,7 @@ use stagcrest_net::{
 use stagcrest_protocol::BlockPos;
 
 use crate::client_session::{ClientId, ClientRegistry, ConnectedClient};
+use crate::commands::CommandHostImpl;
 use crate::GameServer;
 
 pub fn handle_client_hello(
@@ -137,6 +139,33 @@ pub fn handle_client_message(
             if text.is_empty() || text.len() > 256 {
                 return;
             }
+
+            // Slash commands are dispatched to mod callbacks instead of being
+            // broadcast as player chat. A leading `/` (optionally followed by
+            // a command name and args) routes to the mod-defined handler.
+            if let Some(body) = text.strip_prefix('/') {
+                if let Some((name, args)) = split_command(body) {
+                    let mut host = CommandHostImpl {
+                        session: &mut server.session,
+                        clients,
+                    };
+                    match server.mod_host.invoke_command(&mut host, client_id.0, name, args) {
+                        Ok(_) => {}
+                        Err(reason) => {
+                            host.clients.send_chat_to(
+                                client_id,
+                                ChatLine {
+                                    kind: ChatKind::System,
+                                    text: format!("Command failed: {reason}"),
+                                },
+                            );
+                        }
+                    }
+                }
+                // An empty `/` or whitespace-only body is silently ignored.
+                return;
+            }
+
             clients.broadcast_chat(ChatLine {
                 kind: ChatKind::Player { sender },
                 text,
@@ -181,6 +210,16 @@ mod tests {
     use super::*;
     use crate::client_session::ClientRegistry;
     use stagcrest_net::{ClientHello, PROTOCOL_VERSION};
+
+    // Compile-time guard: GameServer must stay `Send` because `run_standalone`
+    // holds it across `tokio::select!` awaits on a multi-thread runtime. The
+    // mod runtime now stores wasmi `Store<HostState>` inside `ModHost`, so this
+    // catches any non-Send host state regressions.
+    #[test]
+    fn game_server_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<GameServer>();
+    }
 
     #[test]
     fn hello_rejects_invalid_username() {

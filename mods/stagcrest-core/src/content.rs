@@ -10,6 +10,7 @@ pub fn register_content(reg: &mut impl ContentRegistrar) {
     register_blocks(reg);
     crate::blocks_extra::register_extra_blocks(reg);
     crate::worldgen::register_worldgen(reg);
+    crate::commands::register_commands();
     reg.log("stagcrest-core registered");
 }
 

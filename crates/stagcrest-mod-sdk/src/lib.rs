@@ -79,6 +79,18 @@ pub struct RegisterTextureRequest {
     pub rgba: Vec<u8>,
 }
 
+/// A chat slash command registered by a mod.
+///
+/// `name` is matched case-insensitively against the part after `/` and must
+/// match `[a-z0-9_]{1,32}` (the host lowercases and validates). `usage` is a
+/// short human-readable hint shown in error replies.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RegisterCommandRequest {
+    pub name: String,
+    pub description: String,
+    pub usage: String,
+}
+
 /// Inclusive placement range on a noise axis (vanilla-style multi-noise).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct NoiseRange {
@@ -368,6 +380,14 @@ pub trait ContentRegistrar {
         let _ = req;
         0
     }
+    /// Register a chat slash command handled by this mod. Only valid during
+    /// `_stagcrest_register`; the host records the command and associates it
+    /// with the currently-loading mod so its `_stagcrest_command` export can
+    /// be invoked later. Returns 0 on success, nonzero on validation error.
+    fn register_command(&mut self, req: RegisterCommandRequest) -> i32 {
+        let _ = req;
+        0
+    }
     /// Deprecated — use `register_feature`.
     fn register_biome_feature(&mut self, req: RegisterBiomeFeatureRequest) -> i32 {
         let _ = req;
@@ -381,7 +401,8 @@ mod wasm;
 
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{
-    log, register_biome, register_biome_feature, register_block, register_cave_config,
+    command_args, command_name, command_reply, get_world_time, log, register_biome,
+    register_biome_feature, register_block, register_cave_config, register_command,
     register_feature, register_river_config, register_river_feature, register_texture,
-    register_texture_from_pack,
+    register_texture_from_pack, set_world_time,
 };

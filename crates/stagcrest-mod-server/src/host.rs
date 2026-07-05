@@ -1,8 +1,9 @@
 use crate::assets::AssetReader;
 use crate::block_tints::apply_block_face_tints;
+use crate::commands::{CommandHost, CommandRegistry};
 use crate::registry::BlockRegistry;
 use crate::resourcepack::{ResourcePackLoader, DEFAULT_MC_BLOCK_TEXTURES};
-use crate::runtime::{load_mod, ModLoadContext};
+use crate::runtime::{load_mod, ModInstance, ModLoadContext};
 use crate::worldgen::BiomeRegistry;
 use stagcrest_mod_sdk::{CircuitKindRequest, RegisterBlockRequest};
 use stagcrest_protocol::{
@@ -28,7 +29,9 @@ pub enum ModError {
 pub struct ModHost {
     pub registry: BlockRegistry,
     pub biome_registry: BiomeRegistry,
+    pub command_registry: CommandRegistry,
     pub loaded_mods: Vec<String>,
+    instances: Vec<ModInstance>,
 }
 
 impl ModHost {
@@ -36,7 +39,9 @@ impl ModHost {
         Self {
             registry: BlockRegistry::new(),
             biome_registry: BiomeRegistry::default(),
+            command_registry: CommandRegistry::new(),
             loaded_mods: Vec::new(),
+            instances: Vec::new(),
         }
     }
 
@@ -81,16 +86,60 @@ impl ModHost {
         }
 
         let wasm_bytes = reader.read_bytes(&wasm_path)?;
+        let mod_index = self.instances.len();
         let mut ctx = ModLoadContext {
             registry: &mut self.registry,
             biome_registry: &mut self.biome_registry,
+            command_registry: &mut self.command_registry,
+            mod_index,
             packs,
         };
-        load_mod(&mut ctx, &wasm_bytes).map_err(ModError::Runtime)?;
+        let instance = load_mod(&mut ctx, &wasm_bytes).map_err(ModError::Runtime)?;
 
+        // If this mod registered commands, it must export `_stagcrest_command`.
+        let registered_commands = self
+            .command_registry
+            .names()
+            .any(|name| self.command_registry.get(name).map(|e| e.mod_index) == Some(mod_index));
+        if registered_commands && !instance.has_command_export() {
+            return Err(ModError::Message(format!(
+                "mod {} registered slash commands but does not export _stagcrest_command",
+                entry.id
+            )));
+        }
+
+        self.instances.push(instance);
         self.loaded_mods.push(entry.id.clone());
         tracing::info!("loaded wasm mod: {} v{}", entry.name, entry.version);
         Ok(())
+    }
+
+    /// Invoke a registered slash command's mod callback. Looks up `name` in the
+    /// command registry, dispatches to the owning mod's `_stagcrest_command`
+    /// export with the given argument string, and routes host calls
+    /// (`set_world_time`, `command_reply`, …) through `host`. Returns the mod's
+    /// exit code, or an error if the command is unknown or the callback trapped.
+    pub fn invoke_command(
+        &mut self,
+        host: &mut dyn CommandHost,
+        client_id: u64,
+        name: &str,
+        args: &str,
+    ) -> Result<i32, String> {
+        let Some(entry) = self.command_registry.get(name) else {
+            return Err(format!("unknown command: /{}", name));
+        };
+        let mod_index = entry.mod_index;
+        let name = entry.name.clone();
+        let args = args.to_string();
+        let Some(instance) = self.instances.get_mut(mod_index) else {
+            return Err(format!("command owner mod {mod_index} not loaded"));
+        };
+        instance.invoke_command(host, client_id, name, args)
+    }
+
+    pub fn has_commands(&self) -> bool {
+        !self.command_registry.is_empty()
     }
 
     pub fn air_block(&self) -> BlockId {
@@ -268,4 +317,88 @@ pub(crate) fn register_texture_from_pack(
         animation.or(anim),
     );
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::CommandHost;
+    use std::path::Path;
+
+    /// A minimal `CommandHost` recording calls for assertion.
+    struct MockHost {
+        world_time: f64,
+        replies: Vec<(u64, String)>,
+    }
+
+    impl CommandHost for MockHost {
+        fn set_world_time(&mut self, time: f64) {
+            self.world_time = time;
+        }
+        fn world_time(&self) -> f64 {
+            self.world_time
+        }
+        fn send_chat_to(&mut self, client_id: u64, text: String) {
+            self.replies.push((client_id, text));
+        }
+    }
+
+    /// End-to-end: load the real `stagcrest-core` mod wasm, confirm it
+    /// registered `/time`, and dispatch `/time 6000` — verifying the mod's
+    /// `_stagcrest_command` callback runs and calls `set_world_time`. Skipped
+    /// when the mod wasm has not been built (e.g. bare `cargo test` in CI).
+    #[test]
+    fn core_mod_time_command_sets_world_time() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let wasm = root.join("mods/stagcrest-core/stagcrest-core.wasm");
+        if !wasm.exists() {
+            eprintln!("skipping: {wasm:?} not built (run scripts/build-core-mod.sh)");
+            return;
+        }
+
+        let mut host = load_mods(&root).expect("load core mod");
+        assert!(
+            host.command_registry.get("time").is_some(),
+            "stagcrest-core should register the /time command"
+        );
+
+        let mut mock = MockHost {
+            world_time: 0.0,
+            replies: Vec::new(),
+        };
+        let rc = host
+            .invoke_command(&mut mock, 1, "time", "6000")
+            .expect("invoke /time");
+        assert_eq!(rc, 0, "mod should report success");
+        assert_eq!(mock.world_time, 6000.0, "set_world_time should be called");
+        assert!(
+            mock.replies.iter().any(|(_, t)| t.contains("Time set to 6000")),
+            "mod should reply with confirmation: {replies:?}",
+            replies = mock.replies
+        );
+
+        // Query path: empty args reports the current time.
+        mock.replies.clear();
+        let rc = host
+            .invoke_command(&mut mock, 1, "time", "")
+            .expect("invoke /time query");
+        assert_eq!(rc, 0);
+        assert!(mock
+            .replies
+            .iter()
+            .any(|(_, t)| t.contains("World time")), "query reply: {replies:?}", replies = mock.replies);
+
+        // Named preset path.
+        let rc = host
+            .invoke_command(&mut mock, 1, "time", "night")
+            .expect("invoke /time night");
+        assert_eq!(rc, 0);
+        assert_eq!(mock.world_time, 13000.0);
+
+        // Unknown command surfaces an error.
+        let err = host
+            .invoke_command(&mut mock, 1, "bogus", "")
+            .expect_err("unknown command should error");
+        assert!(err.contains("unknown command"));
+    }
 }
