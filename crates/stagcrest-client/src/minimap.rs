@@ -13,6 +13,7 @@ use stagcrest_protocol::BlockPos;
 
 use crate::game::AppState;
 use crate::game_session::GameCamera;
+use crate::input::text_field_focused;
 use crate::mesh_scheduler::poll_future_now;
 use crate::net_client::GameNetClient;
 use crate::ui::UiTheme;
@@ -120,8 +121,8 @@ impl Plugin for MinimapPlugin {
         app.add_systems(
             Update,
             (
-                toggle_minimap,
-                zoom_minimap,
+                toggle_minimap.run_if(not(text_field_focused)),
+                zoom_minimap.run_if(not(text_field_focused)),
                 minimap_decode_apply.after(crate::game::net_poll_system),
                 minimap_track_camera,
                 minimap_subscribe,

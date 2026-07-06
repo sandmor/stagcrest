@@ -1,5 +1,6 @@
 use crate::block_icons::{bake_block_icons, BlockIconCache};
 use crate::game::{AppState, ModContext};
+use crate::input::text_field_focused;
 use crate::player::SelectedBlock;
 use bevy::prelude::*;
 use bevy::text::EditableTextSystems;
@@ -31,11 +32,13 @@ impl Plugin for InventoryPlugin {
             .add_systems(
                 Update,
                 (
-                    toggle_inventory_screen.before(EditableTextSystems),
+                    toggle_inventory_screen
+                        .before(EditableTextSystems)
+                        .run_if(not(text_field_focused)),
                     clear_search_on_escape,
                     inventory_click,
                     inventory_cursor_ghost,
-                    hotbar_keyboard,
+                    hotbar_keyboard.run_if(not(text_field_focused)),
                     hotbar_scroll,
                     hotbar_click,
                     sync_selected_block,

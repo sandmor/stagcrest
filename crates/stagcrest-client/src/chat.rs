@@ -9,7 +9,7 @@ use stagcrest_net::ChatLine;
 
 use crate::game::{AppState, GameplayState};
 use crate::game_session::GameCamera;
-use crate::inventory::input::editable_text_has_focus;
+use crate::input::text_field_focused;
 use crate::net_client::GameNetClient;
 use crate::player::{release_cursor, FlyCamera};
 use crate::ui::UiTheme;
@@ -52,7 +52,9 @@ impl Plugin for ChatPlugin {
         app.init_resource::<ChatUiState>().add_systems(
             Update,
             (
-                toggle_chat_input.before(EditableTextSystems),
+                toggle_chat_input
+                    .before(EditableTextSystems)
+                    .run_if(not(text_field_focused)),
                 submit_chat.after(EditableTextSystems),
                 close_chat_input,
                 update_chat_display,
@@ -221,7 +223,6 @@ fn update_chat_display(
 
 fn toggle_chat_input(
     keys: Res<ButtonInput<KeyCode>>,
-    editable: Query<Entity, With<EditableText>>,
     mut chat: ResMut<ChatUiState>,
     mut input_row: Query<&mut Visibility, With<ChatInputRow>>,
     input_field: Query<Entity, With<ChatInputField>>,
@@ -231,9 +232,6 @@ fn toggle_chat_input(
     gameplay: Res<State<GameplayState>>,
 ) {
     if *gameplay.get() != GameplayState::Active || !keys.just_pressed(KeyCode::KeyT) {
-        return;
-    }
-    if editable_text_has_focus(&input_focus, &editable) {
         return;
     }
 

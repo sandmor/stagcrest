@@ -16,6 +16,7 @@ pub mod entity_render;
 pub mod environment;
 pub mod game;
 pub mod game_session;
+pub mod input;
 pub mod inventory;
 pub mod loading;
 pub mod logging;

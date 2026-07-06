@@ -1,10 +1,7 @@
 use super::state::{CreativeInventory, InventoryUiState, SlotKind, HOTBAR_SLOTS};
 use crate::block_icons::BlockIconCache;
-use crate::inventory::input::editable_text_has_focus;
 use crate::ui::UiTheme;
-use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
-use bevy::text::EditableText;
 use bevy::ui::widget::NodeImageMode;
 use bevy::ui::RelativeCursorPosition;
 
@@ -98,13 +95,11 @@ pub struct SlotIcon {
 
 pub fn hotbar_keyboard(
     keys: Res<ButtonInput<KeyCode>>,
-    input_focus: Res<InputFocus>,
-    editable: Query<Entity, With<EditableText>>,
     ui: Res<InventoryUiState>,
     chat: Res<crate::chat::ChatUiState>,
     mut inventory: ResMut<CreativeInventory>,
 ) {
-    if ui.open || chat.input_open || editable_text_has_focus(&input_focus, &editable) {
+    if ui.open || chat.input_open {
         return;
     }
     for i in 0..HOTBAR_SLOTS {

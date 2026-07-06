@@ -17,19 +17,8 @@ use bevy::window::{CursorOptions, PrimaryWindow};
 #[derive(Component)]
 pub struct CursorGhost;
 
-/// True when keyboard input should go to a focused [`EditableText`] widget.
-pub(crate) fn editable_text_has_focus(
-    input_focus: &InputFocus,
-    editable: &Query<Entity, With<EditableText>>,
-) -> bool {
-    input_focus
-        .get()
-        .is_some_and(|entity| editable.contains(entity))
-}
-
 pub fn toggle_inventory_screen(
     keys: Res<ButtonInput<KeyCode>>,
-    editable: Query<Entity, With<EditableText>>,
     mut ui: ResMut<InventoryUiState>,
     chat: Res<ChatUiState>,
     mut commands: Commands,
@@ -46,10 +35,6 @@ pub fn toggle_inventory_screen(
         return;
     }
     if chat.input_open {
-        return;
-    }
-    // Let the focused search field receive printable keys (including E).
-    if editable_text_has_focus(&input_focus, &editable) {
         return;
     }
 
