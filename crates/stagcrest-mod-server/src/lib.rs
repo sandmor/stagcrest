@@ -22,8 +22,9 @@ pub use block_tints::apply_block_face_tints;
 pub use colormap::{sample_colormap_rgb, ColormapSet};
 pub use commands::{split_command, validate_command_name, CommandEntry, CommandHost, CommandRegistry};
 pub use behavior::{
-    block_push_reaction, block_redstone_powerable, extra_break_positions, placement_state,
-    BehaviorCtx, BehaviorRegistry, BehaviorResult, default_push_reaction, redstone_powerable_for,
+    block_push_reaction, block_redstone_powerable, break_positions_for, extra_break_positions,
+    placement_state, BehaviorCtx, BehaviorRegistry, BehaviorResult, default_push_reaction,
+    redstone_powerable_for,
 };
 pub use entity_registry::{EntityRegistry, EntityServerDef};
 pub use host::{load_mods, ModError, ModHost};

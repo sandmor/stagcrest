@@ -30,8 +30,9 @@ pub fn is_redstone_powerable_block(def: &BlockDef) -> bool {
 }
 
 /// Strong power on a redstone-powerable opaque block from adjacent components.
-/// Sources: mounted switches (attachment), source blocks, inverter/torch (above only),
-/// repeater (output face), observer (output face). No wire/dust contribution.
+/// Sources: mounted switches (attachment), inverter/torch (above only),
+/// repeater (output face), observer (output face). Blocks of redstone do not
+/// power adjacent opaque blocks. No wire/dust contribution.
 fn block_strong_power(
     circuit: &CircuitWorld,
     block_pos: BlockPos,
@@ -62,9 +63,7 @@ fn block_strong_power(
                     }
                 }
             }
-            CircuitKind::Source { level } => {
-                strong = strong.max(level);
-            }
+            CircuitKind::Source { .. } => {}
             CircuitKind::Inverter { .. } => {
                 if is_torch_geometry(def) && circuit.power_at(npos) > 0 {
                     let above = BlockPos::new(npos.x, npos.y + 1, npos.z);

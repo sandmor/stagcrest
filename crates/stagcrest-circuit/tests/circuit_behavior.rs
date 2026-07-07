@@ -340,7 +340,7 @@ fn repeater_locks_when_side_output_faces_in() {
 }
 
 #[test]
-fn source_strongly_powers_adjacent_opaque_block() {
+fn source_does_not_power_adjacent_opaque_block() {
     let (reg, blocks) = setup_registry();
     let mut world = World::new(BlockId(0));
     let mut circuit = CircuitWorld::new();
@@ -356,7 +356,61 @@ fn source_strongly_powers_adjacent_opaque_block() {
     settle(&mut circuit, &mut world, &reg, 1);
 
     let power = block_power_at(&circuit, block_pos, &mut world, &reg);
-    assert_eq!(power.strong, 15);
+    assert_eq!(power.strong, 0);
+    assert_eq!(power.weak, 0);
+}
+
+#[test]
+fn torch_stays_lit_on_stone_over_redstone_block() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let source_pos = BlockPos::new(0, 0, 0);
+    let stone_pos = BlockPos::new(0, 1, 0);
+    let torch_pos = BlockPos::new(0, 2, 0);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(stone_pos, blocks.stone, BlockState(0));
+    world.set_block(
+        torch_pos,
+        blocks.torch,
+        torch_state(false, TorchAttachment::Floor),
+    );
+    populate_chunks(&mut world, &[source_pos, stone_pos, torch_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(torch_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 6);
+
+    assert_eq!(
+        circuit.power_at(torch_pos),
+        15,
+        "Torch on stone above redstone block should stay lit"
+    );
+}
+
+#[test]
+fn lamp_lights_from_adjacent_redstone_block() {
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let source_pos = BlockPos::new(0, 0, 0);
+    let lamp_pos = BlockPos::new(1, 0, 0);
+
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(lamp_pos, blocks.lamp, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, lamp_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lamp_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 2);
+
+    assert!(
+        stagcrest_protocol::lamp_lit(world.get_block(lamp_pos).1),
+        "Lamp should light from directly adjacent redstone block"
+    );
 }
 
 #[test]
@@ -617,10 +671,11 @@ fn piston_push_limit_and_bedrock() {
         world.set_block(pos, blocks.stone, BlockState(0));
         positions.push(pos);
     }
+    positions.push(BlockPos::new(13, 0, 0));
     populate_chunks(&mut world, &positions);
 
     circuit.notify_block_changed(piston_pos, &mut world, &reg);
-    settle(&mut circuit, &mut world, &reg, 2);
+    settle(&mut circuit, &mut world, &reg, 4);
     let (_, extended) = world.get_block(piston_pos);
     assert!(stagcrest_protocol::piston_extended(extended));
     let (end_id, _) = world.get_block(BlockPos::new(13, 0, 0));
@@ -712,178 +767,301 @@ fn slime_block_drags_adjacent_stone() {
     assert_eq!(world.get_block(dest_rider).0, blocks.stone);
 }
 
+/// Honey-block flying machine (2x4):
+/// ```text
+/// O   H
+/// NP  H
+/// H   SP
+/// H   O
+/// ```
+/// Travels -Z. Observers watch outward air; moved observers re-pulse to self-sustain.
 #[test]
-fn flying_machine_cycle_advances() {
+fn honey_flying_machine_runs_three_strides() {
     use stagcrest_protocol::{observer_state, piston_state, Facing, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let start = |dx: i32, dz: i32| BlockPos::new(dx, 0, dz);
+
+    let obs_a = start(0, 3);
+    let np = start(0, 2);
+    let honey_l1 = start(0, 1);
+    let honey_l0 = start(0, 0);
+    let honey_r3 = start(1, 3);
+    let honey_r2 = start(1, 2);
+    let sp = start(1, 1);
+    let obs_b = start(1, 0);
+    let watch_a = start(0, 4);
+    let _watch_b = start(1, -1);
+
+    fn find_blocks(world: &World, id: BlockId, min_z: i32, max_z: i32) -> Vec<BlockPos> {
+        let mut found = Vec::new();
+        for z in min_z..=max_z {
+            for x in 0..=1 {
+                let pos = BlockPos::new(x, 0, z);
+                if world.get_block(pos).0 == id {
+                    found.push(pos);
+                }
+            }
+        }
+        found
+    }
+
+    world.set_block(obs_a, blocks.observer, observer_state(false, Facing::North));
+    world.set_block(np, blocks.piston, piston_state(false, Facing6::North));
+    world.set_block(honey_l1, blocks.honey, BlockState(0));
+    world.set_block(honey_l0, blocks.honey, BlockState(0));
+    world.set_block(honey_r3, blocks.honey, BlockState(0));
+    world.set_block(honey_r2, blocks.honey, BlockState(0));
+    world.set_block(sp, blocks.sticky_piston, piston_state(false, Facing6::South));
+    world.set_block(obs_b, blocks.observer, observer_state(false, Facing::South));
+
+    let mut chunk_positions = Vec::new();
+    for z in -80..=20 {
+        for x in -2..=4 {
+            chunk_positions.push(BlockPos::new(x, 0, z));
+        }
+    }
+    populate_chunks(&mut world, &chunk_positions);
+
+    circuit.notify_block_changed(obs_a, &mut world, &reg);
+    circuit.notify_block_changed(obs_b, &mut world, &reg);
+    circuit.notify_block_changed(np, &mut world, &reg);
+    circuit.notify_block_changed(sp, &mut world, &reg);
+
+    // Single external trigger: block change in Observer A's watched cell.
+    world.set_block(watch_a, blocks.stone, BlockState(0));
+    circuit.notify_block_changed(watch_a, &mut world, &reg);
+    world.set_block(watch_a, BlockId(0), BlockState(0));
+    circuit.notify_block_changed(watch_a, &mut world, &reg);
+
+    let mut ticks = 0;
+    let mut strides = 0;
+    let mut last_a_z = obs_a.z;
+    while ticks < 120 && strides < 3 {
+        circuit.tick(&mut world, &reg);
+        ticks += 1;
+        if let Some(pos) = find_blocks(&world, blocks.observer, -80, 20)
+            .into_iter()
+            .find(|p| p.x == obs_a.x)
+        {
+            if pos.z < last_a_z {
+                strides += 1;
+                last_a_z = pos.z;
+            }
+        }
+    }
+
+    let observers = find_blocks(&world, blocks.observer, -80, 20);
+    assert_eq!(strides, 3, "Machine should self-run for 3 strides after one trigger");
+    assert_eq!(observers.len(), 2, "Both observers should remain intact");
+
+    let stride = 3;
+    let obs_a_final = observers
+        .iter()
+        .find(|pos| pos.x == obs_a.x)
+        .copied()
+        .expect("Observer A should still exist");
+    let obs_b_final = observers
+        .iter()
+        .find(|pos| pos.x == obs_b.x)
+        .copied()
+        .expect("Observer B should still exist");
+
+    assert_eq!(
+        obs_a_final.z,
+        obs_a.z - stride,
+        "Observer A should advance {stride} cells along -Z (got {:?})",
+        obs_a_final
+    );
+    assert_eq!(
+        obs_b_final.z,
+        obs_b.z - stride,
+        "Observer B should advance {stride} cells along -Z (got {:?})",
+        obs_b_final
+    );
+
+    let honey_count = (-80..=20)
+        .flat_map(|z| (0..=1).map(move |x| BlockPos::new(x, 0, z)))
+        .filter(|pos| world.get_block(*pos).0 == blocks.honey)
+        .count();
+    assert_eq!(honey_count, 4, "All four honey blocks should remain intact");
+
+    let piston_count = (-80..=20)
+        .flat_map(|z| (0..=1).map(move |x| BlockPos::new(x, 0, z)))
+        .filter(|pos| {
+            let id = world.get_block(*pos).0;
+            id == blocks.piston || id == blocks.sticky_piston
+        })
+        .count();
+    assert_eq!(piston_count, 2, "Both pistons should remain intact");
+}
+
+#[test]
+fn opposing_pistons_one_extends_deterministically() {
+    use stagcrest_protocol::{piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let left = BlockPos::new(0, 0, 0);
+    let stone = BlockPos::new(1, 0, 0);
+    let air = BlockPos::new(2, 0, 0);
+    let right = BlockPos::new(3, 0, 0);
+    let source_left = BlockPos::new(-1, 0, 0);
+    let source_right = BlockPos::new(4, 0, 0);
+
+    world.set_block(
+        left,
+        blocks.sticky_piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(stone, blocks.stone, BlockState(0));
+    world.set_block(air, BlockId(0), BlockState(0));
+    world.set_block(
+        right,
+        blocks.sticky_piston,
+        piston_state(false, Facing6::West),
+    );
+    world.set_block(source_left, blocks.source, BlockState(0));
+    world.set_block(source_right, blocks.source, BlockState(0));
+    populate_chunks(
+        &mut world,
+        &[source_left, left, stone, air, right, source_right],
+    );
+
+    circuit.notify_block_changed(source_left, &mut world, &reg);
+    circuit.notify_block_changed(source_right, &mut world, &reg);
+    circuit.notify_block_changed(left, &mut world, &reg);
+    circuit.notify_block_changed(right, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    let left_ext = stagcrest_protocol::piston_extended(world.get_block(left).1);
+    let right_ext = stagcrest_protocol::piston_extended(world.get_block(right).1);
+    assert!(left_ext ^ right_ext, "Exactly one opposing piston should extend");
+    assert_eq!(
+        world.get_block(stone).0,
+        blocks.stone,
+        "Stone should remain intact when one piston wins"
+    );
+}
+
+#[test]
+fn sticky_piston_drops_block_on_short_pulse() {
+    use stagcrest_protocol::{piston_state, Facing6};
 
     let (reg, blocks) = setup_registry();
     let mut world = World::new(BlockId(0));
     let mut circuit = CircuitWorld::new();
 
     let piston_pos = BlockPos::new(0, 0, 0);
-    let slime_pos = BlockPos::new(1, 0, 0);
-    let observer_pos = BlockPos::new(1, 0, 1);
-    let watch_pos = BlockPos::new(2, 0, 1);
+    let block_pos = BlockPos::new(1, 0, 0);
+    let source_pos = BlockPos::new(-1, 0, 0);
 
     world.set_block(
         piston_pos,
         blocks.sticky_piston,
         piston_state(false, Facing6::East),
     );
-    world.set_block(slime_pos, blocks.slime, BlockState(0));
-    world.set_block(
-        observer_pos,
-        blocks.observer,
-        observer_state(false, Facing::East),
-    );
-    world.set_block(watch_pos, blocks.stone, BlockState(0));
-    world.set_block(BlockPos::new(-1, 0, 0), blocks.source, BlockState(0));
+    world.set_block(block_pos, blocks.stone, BlockState(0));
+    world.set_block(source_pos, blocks.source, BlockState(0));
     populate_chunks(
         &mut world,
         &[
-            BlockPos::new(-1, 0, 0),
+            source_pos,
             piston_pos,
-            slime_pos,
-            observer_pos,
-            watch_pos,
+            block_pos,
             BlockPos::new(2, 0, 0),
             BlockPos::new(3, 0, 0),
         ],
     );
 
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
     circuit.notify_block_changed(piston_pos, &mut world, &reg);
-    settle(&mut circuit, &mut world, &reg, 3);
-
-    assert_eq!(world.get_block(BlockPos::new(2, 0, 0)).0, blocks.slime);
-    assert_eq!(world.get_block(BlockPos::new(2, 0, 1)).0, blocks.observer);
-    assert!(stagcrest_protocol::piston_extended(
-        world.get_block(piston_pos).1
-    ));
-
-    world.set_block(BlockPos::new(-1, 0, 0), blocks.stone, BlockState(0));
-    circuit.notify_block_changed(BlockPos::new(-1, 0, 0), &mut world, &reg);
-    settle(&mut circuit, &mut world, &reg, 3);
+    circuit.tick(&mut world, &reg);
+    world.set_block(source_pos, blocks.stone, BlockState(0));
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.tick(&mut world, &reg);
+    circuit.tick(&mut world, &reg);
 
     assert!(!stagcrest_protocol::piston_extended(
         world.get_block(piston_pos).1
     ));
-    assert_eq!(world.get_block(BlockPos::new(1, 0, 0)).0, blocks.slime);
+    assert_eq!(
+        world.get_block(BlockPos::new(2, 0, 0)).0,
+        blocks.stone,
+        "Sticky piston should drop the block forward instead of pulling it back"
+    );
+    assert_eq!(world.get_block(BlockPos::new(1, 0, 0)).0, BlockId(0));
 }
 
-/// Reproduces user flying-machine layout (2x4 grid):
-/// ```text
-/// O S
-/// R S
-/// S P
-/// S O
-/// ```
 #[test]
-fn flying_machine_drags_sticky_piston_on_push() {
-    use stagcrest_protocol::{observer_state, piston_state, Facing, Facing6};
+fn redstone_block_toggles_between_opposing_sticky_pistons() {
+    use stagcrest_protocol::{piston_state, Facing6};
 
     let (reg, blocks) = setup_registry();
     let mut world = World::new(BlockId(0));
     let mut circuit = CircuitWorld::new();
 
-    // Grid: x=0,1  z=0..3 (y=0). P at (1,0,1) pushes South (+Z).
-    let p_pos = BlockPos::new(1, 0, 1);
-    let r_pos = BlockPos::new(0, 0, 2);
-    world.set_block(p_pos, blocks.piston, piston_state(false, Facing6::South));
+    let left = BlockPos::new(0, 0, 0);
+    let block_pos = BlockPos::new(1, 0, 0);
+    let right = BlockPos::new(2, 0, 0);
+    let source = BlockPos::new(-1, 0, 0);
+
     world.set_block(
-        r_pos,
+        left,
         blocks.sticky_piston,
-        piston_state(false, Facing6::North),
+        piston_state(false, Facing6::East),
     );
-    world.set_block(BlockPos::new(0, 0, 0), blocks.slime, BlockState(0));
-    world.set_block(BlockPos::new(0, 0, 1), blocks.slime, BlockState(0));
+    world.set_block(block_pos, blocks.source, BlockState(0));
     world.set_block(
-        BlockPos::new(1, 0, 0),
-        blocks.observer,
-        observer_state(false, Facing::South),
-    );
-    world.set_block(BlockPos::new(1, 0, 2), blocks.slime, BlockState(0));
-    world.set_block(BlockPos::new(1, 0, 3), blocks.slime, BlockState(0));
-    world.set_block(
-        BlockPos::new(0, 0, 3),
-        blocks.observer,
-        observer_state(false, Facing::North),
-    );
-    world.set_block(BlockPos::new(1, 0, 4), blocks.stone, BlockState(0)); // stopper
-    world.set_block(BlockPos::new(2, 0, 1), blocks.source, BlockState(0)); // power east of P
-
-    let all = [
-        BlockPos::new(2, 0, 1),
-        BlockPos::new(1, 0, 0),
-        BlockPos::new(0, 0, 0),
-        BlockPos::new(0, 0, 1),
-        BlockPos::new(0, 0, 2),
-        BlockPos::new(0, 0, 3),
-        BlockPos::new(1, 0, 0),
-        p_pos,
-        BlockPos::new(1, 0, 2),
-        BlockPos::new(1, 0, 3),
-        BlockPos::new(1, 0, 4),
-        BlockPos::new(0, 0, 5),
-        BlockPos::new(1, 0, 5),
-    ];
-    populate_chunks(&mut world, &all);
-
-    circuit.notify_block_changed(p_pos, &mut world, &reg);
-    settle(&mut circuit, &mut world, &reg, 2);
-
-    // Minecraft semantics: the firing piston P is anchored and extends in place.
-    assert_eq!(
-        world.get_block(p_pos).0,
-        blocks.piston,
-        "pusher piston body stays anchored at its cell"
-    );
-    assert!(
-        stagcrest_protocol::piston_extended(world.get_block(p_pos).1),
-        "pusher piston should be extended"
-    );
-    assert_eq!(
-        world.get_block(BlockPos::new(1, 0, 2)).0,
-        blocks.piston_head,
-        "piston head occupies the cell in front of P"
-    );
-
-    // The slime block in front of P must be pushed forward, NOT destroyed.
-    assert_eq!(
-        world.get_block(BlockPos::new(1, 0, 3)).0,
-        blocks.slime,
-        "front slime is pushed to (1,0,3), not turned to air"
-    );
-    assert_eq!(
-        world.get_block(BlockPos::new(1, 0, 4)).0,
-        blocks.slime,
-        "second front slime is pushed to (1,0,4)"
-    );
-
-    // R is glued to the front slime, so it is dragged along the push direction.
-    assert_eq!(
-        world.get_block(BlockPos::new(0, 0, 3)).0,
+        right,
         blocks.sticky_piston,
-        "sticky piston R is dragged by the slime it is stuck to"
+        piston_state(false, Facing6::West),
+    );
+    world.set_block(source, blocks.source, BlockState(0));
+    populate_chunks(
+        &mut world,
+        &[
+            source,
+            left,
+            block_pos,
+            right,
+            BlockPos::new(3, 0, 0),
+            BlockPos::new(-2, 0, 0),
+        ],
     );
 
-    // Stickiness does NOT propagate through R (a non-slime block) to the puller
-    // slimes behind it, so they stay put during a push (they only move when R
-    // retracts). This matches Minecraft.
-    assert_eq!(
-        world.get_block(BlockPos::new(0, 0, 1)).0,
-        blocks.slime,
-        "puller slime at (0,0,1) stays during push"
-    );
-    assert_eq!(
-        world.get_block(BlockPos::new(0, 0, 0)).0,
-        blocks.slime,
-        "puller slime at (0,0,0) stays during push"
-    );
-    // The observer behind P is only connected through R, so it stays put.
-    assert_eq!(
-        world.get_block(BlockPos::new(1, 0, 0)).0,
-        blocks.observer,
-        "observer behind P stays during push"
+    circuit.notify_block_changed(source, &mut world, &reg);
+    circuit.notify_block_changed(left, &mut world, &reg);
+    circuit.notify_block_changed(right, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    let block_start = block_pos;
+    let block_after_first = if world.get_block(BlockPos::new(2, 0, 0)).0 == blocks.source {
+        BlockPos::new(2, 0, 0)
+    } else if world.get_block(BlockPos::new(0, 0, 0)).0 == blocks.source {
+        BlockPos::new(0, 0, 0)
+    } else if world.get_block(BlockPos::new(3, 0, 0)).0 == blocks.source {
+        BlockPos::new(3, 0, 0)
+    } else {
+        block_start
+    };
+
+    world.set_block(source, blocks.stone, BlockState(0));
+    circuit.notify_block_changed(source, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    world.set_block(source, blocks.source, BlockState(0));
+    circuit.notify_block_changed(source, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    assert_ne!(
+        block_after_first, block_start,
+        "Redstone block should move on first power cycle"
     );
 }
 
@@ -895,23 +1073,27 @@ fn strongly_powered_stone_does_not_power_adjacent_stone() {
     let mut world = World::new(BlockId(0));
     let mut circuit = CircuitWorld::new();
 
-    // [Source] -> [Stone A] -> [Stone B]
-    let source_pos = BlockPos::new(0, 0, 0);
+    // [Lever on Stone A] -> [Stone B]
+    let lever_pos = BlockPos::new(0, 0, 0);
     let stone_a = BlockPos::new(1, 0, 0);
     let stone_b = BlockPos::new(2, 0, 0);
 
-    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(
+        lever_pos,
+        blocks.switch,
+        mount_state(true, AttachFace::Wall, Facing::West),
+    );
     world.set_block(stone_a, blocks.stone, BlockState(0));
     world.set_block(stone_b, blocks.stone, BlockState(0));
-    populate_chunks(&mut world, &[source_pos, stone_a, stone_b]);
+    populate_chunks(&mut world, &[lever_pos, stone_a, stone_b]);
 
-    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lever_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
 
     let bp_a = block_power_at(&circuit, stone_a, &world, &reg);
     assert!(
         bp_a.strong > 0,
-        "Stone A should be strongly powered by source"
+        "Stone A should be strongly powered by lever"
     );
 
     let bp_b = block_power_at(&circuit, stone_b, &world, &reg);
@@ -991,17 +1173,21 @@ fn strongly_powered_stone_feeds_adjacent_dust() {
     let mut world = World::new(BlockId(0));
     let mut circuit = CircuitWorld::new();
 
-    // [Source] -> [Stone] -> [Dust]
-    let source_pos = BlockPos::new(0, 0, 0);
+    // [Lever on Stone] -> [Dust]
+    let lever_pos = BlockPos::new(0, 0, 0);
     let stone_pos = BlockPos::new(1, 0, 0);
     let dust_pos = BlockPos::new(2, 0, 0);
 
-    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(
+        lever_pos,
+        blocks.switch,
+        mount_state(true, AttachFace::Wall, Facing::West),
+    );
     world.set_block(stone_pos, blocks.stone, BlockState(0));
     world.set_block(dust_pos, blocks.wire, BlockState(0));
-    populate_chunks(&mut world, &[source_pos, stone_pos, dust_pos]);
+    populate_chunks(&mut world, &[lever_pos, stone_pos, dust_pos]);
 
-    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lever_pos, &mut world, &reg);
     circuit.notify_block_changed(dust_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 6);
 
@@ -1203,20 +1389,24 @@ fn slime_block_conducts_strong_power_on_bedrock() {
     let mut world = World::new(BlockId(0));
     let mut circuit = CircuitWorld::new();
 
-    let source_pos = BlockPos::new(0, 0, 0);
+    let lever_pos = BlockPos::new(0, 0, 0);
     let slime_pos = BlockPos::new(1, 0, 0);
 
-    world.set_block(source_pos, blocks.source, BlockState(0));
+    world.set_block(
+        lever_pos,
+        blocks.switch,
+        mount_state(true, AttachFace::Wall, Facing::West),
+    );
     world.set_block(slime_pos, blocks.slime, BlockState(0));
-    populate_chunks(&mut world, &[source_pos, slime_pos]);
+    populate_chunks(&mut world, &[lever_pos, slime_pos]);
 
-    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(lever_pos, &mut world, &reg);
     settle(&mut circuit, &mut world, &reg, 4);
 
     let bp = block_power_at(&circuit, slime_pos, &world, &reg);
     assert!(
         bp.strong > 0,
-        "Bedrock slime blocks conduct strong power from adjacent sources"
+        "Bedrock slime blocks conduct strong power from adjacent levers"
     );
 }
 
@@ -1342,4 +1532,106 @@ fn lit_lamp_does_not_power_distant_dust() {
         0,
         "Lit lamp should not act as a redstone source for dust beyond it"
     );
+}
+
+#[test]
+fn piston_extends_through_destroyable_torch() {
+    use stagcrest_protocol::{piston_state, torch_state, Facing6, TorchAttachment};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let torch_pos = BlockPos::new(1, 0, 0);
+    let source_pos = BlockPos::new(-1, 0, 0);
+
+    world.set_block(
+        piston_pos,
+        blocks.piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(
+        torch_pos,
+        blocks.torch,
+        torch_state(false, TorchAttachment::Floor),
+    );
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, piston_pos, torch_pos, BlockPos::new(2, 0, 0)]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    assert!(stagcrest_protocol::piston_extended(
+        world.get_block(piston_pos).1
+    ));
+    assert_eq!(world.get_block(torch_pos).0, blocks.piston_head);
+}
+
+#[test]
+fn remove_extended_piston_also_removes_head() {
+    use stagcrest_protocol::{piston_state, Facing6};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let head_pos = BlockPos::new(1, 0, 0);
+    let source_pos = BlockPos::new(-1, 0, 0);
+
+    world.set_block(
+        piston_pos,
+        blocks.piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, piston_pos, head_pos]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    assert_eq!(world.get_block(head_pos).0, blocks.piston_head);
+
+    circuit.remove_block_at(piston_pos, &mut world, &reg);
+
+    assert_eq!(world.get_block(piston_pos).0, BlockId(0));
+    assert_eq!(world.get_block(head_pos).0, BlockId(0));
+}
+
+#[test]
+fn piston_extend_sustained_survives_chunk_snapshot() {
+    use stagcrest_protocol::{piston_state, ChunkPos, Facing6, LocalBlockPos};
+
+    let (reg, blocks) = setup_registry();
+    let mut world = World::new(BlockId(0));
+    let mut circuit = CircuitWorld::new();
+
+    let piston_pos = BlockPos::new(0, 0, 0);
+    let source_pos = BlockPos::new(-1, 0, 0);
+
+    world.set_block(
+        piston_pos,
+        blocks.sticky_piston,
+        piston_state(false, Facing6::East),
+    );
+    world.set_block(source_pos, blocks.source, BlockState(0));
+    populate_chunks(&mut world, &[source_pos, piston_pos, BlockPos::new(1, 0, 0)]);
+
+    circuit.notify_block_changed(source_pos, &mut world, &reg);
+    circuit.notify_block_changed(piston_pos, &mut world, &reg);
+    settle(&mut circuit, &mut world, &reg, 4);
+
+    let chunk = ChunkPos { x: 0, y: 0, z: 0 };
+    let snapshot = circuit.export_chunk_snapshot(chunk);
+    assert_eq!(
+        snapshot.piston_extend_sustained,
+        vec![(LocalBlockPos { x: 0, y: 0, z: 0 }, true)]
+    );
+
+    let wire = snapshot.encode_wire();
+    let decoded = stagcrest_storage::ChunkCircuitSnapshot::decode_wire(&wire).unwrap();
+    assert_eq!(decoded.piston_extend_sustained, snapshot.piston_extend_sustained);
 }

@@ -8,8 +8,7 @@ use crate::runtime::{create_engine, load_mod, ModInstance, ModLoadContext};
 use crate::worldgen::BiomeRegistry;
 use crate::behavior::{BehaviorRegistry, BehaviorResult};
 use stagcrest_mod_sdk::{
-    BehaviorKindRequest, CircuitKindRequest, RegisterBlockRequest, RegisterBehaviorRequest,
-    RegisterEntityRequest,
+    BehaviorKindRequest, RegisterBlockRequest, RegisterEntityRequest,
 };
 use stagcrest_protocol::{
     BehaviorRef, BlockDef, BlockFaceTextures, BlockGeometry, BlockId, CallbackFlags,
@@ -367,12 +366,6 @@ pub fn register_unknown_block(reg: &mut BlockRegistry) {
         behavior: None,
         callbacks: CallbackFlags::default(),
     });
-}
-
-fn push_reaction_from_sdk(
-    _reaction: stagcrest_mod_sdk::PushReaction,
-) -> stagcrest_protocol::PushReaction {
-    stagcrest_protocol::PushReaction::Normal
 }
 
 fn resolve_render_layer(transparent: bool) -> stagcrest_protocol::ModelRenderLayer {

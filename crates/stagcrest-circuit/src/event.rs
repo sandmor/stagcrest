@@ -9,6 +9,7 @@ pub enum CircuitEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduledEval {
     pub fire_tick: u64,
+    pub seq: u64,
     pub pos: BlockPos,
     pub output: u8,
 }
@@ -18,6 +19,7 @@ pub struct EventQueue {
     pub events: VecDeque<CircuitEvent>,
     pub pending: HashSet<BlockPos>,
     pending_delays: HashMap<BlockPos, ScheduledEval>,
+    next_seq: u64,
 }
 
 impl EventQueue {
@@ -35,10 +37,26 @@ impl EventQueue {
     }
 
     pub fn schedule_delay(&mut self, fire_tick: u64, pos: BlockPos, output: u8) {
+        self.schedule_delay_with_seq(fire_tick, pos, output, None);
+    }
+
+    pub fn schedule_delay_with_seq(
+        &mut self,
+        fire_tick: u64,
+        pos: BlockPos,
+        output: u8,
+        seq: Option<u64>,
+    ) {
+        let seq = seq.unwrap_or_else(|| {
+            let next = self.next_seq;
+            self.next_seq = self.next_seq.saturating_add(1);
+            next
+        });
         self.pending_delays.insert(
             pos,
             ScheduledEval {
                 fire_tick,
+                seq,
                 pos,
                 output,
             },
@@ -65,9 +83,12 @@ impl EventQueue {
             .map(|(pos, _)| *pos)
             .collect();
 
-        due.into_iter()
+        let mut drained: Vec<ScheduledEval> = due
+            .into_iter()
             .filter_map(|pos| self.pending_delays.remove(&pos))
-            .collect()
+            .collect();
+        drained.sort_by_key(|eval| (eval.seq, eval.pos.x, eval.pos.y, eval.pos.z));
+        drained
     }
 
     pub fn pending_delays_in_chunk(

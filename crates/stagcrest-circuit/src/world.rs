@@ -1,5 +1,6 @@
 use crate::power::inverter_support_block;
 use crate::registry::BlockRegistry;
+use stagcrest_mod_server::break_positions_for;
 use stagcrest_protocol::{
     mount_on, observer_facing, observer_watches, set_torch_burnt_out, set_torch_lit, torch_burnt_out,
     BlockPos, BlockState, ChunkPos, CircuitKind, LocalBlockPos,
@@ -13,7 +14,6 @@ use crate::eval::{
     BURNOUT_TOGGLE_LIMIT, BURNOUT_WINDOW_TICKS, OBSERVER_PULSE_TICKS,
 };
 use crate::event::{CircuitEvent, EventQueue};
-use crate::piston::{try_extend, try_retract};
 
 pub const MAX_EVALS_PER_TICK: usize = 4096;
 pub const BUTTON_HOLD_TICKS: u64 = 30;
@@ -33,6 +33,8 @@ pub(crate) struct MovedNodeState {
     pending_delay: Option<crate::event::ScheduledEval>,
     button_release: Option<u64>,
     torch_flicker: Option<TorchFlicker>,
+    /// Whether the piston was still powered when its extension completed.
+    extend_sustained: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,6 +44,8 @@ pub struct CircuitWorld {
     delay_input: HashMap<BlockPos, u8>,
     pending_button_release: HashMap<BlockPos, u64>,
     torch_flicker: HashMap<BlockPos, TorchFlicker>,
+    /// Whether each piston was still powered when it last finished extending.
+    piston_extend_sustained: HashMap<BlockPos, bool>,
     tick: u64,
     visual_updates: Vec<(stagcrest_protocol::BlockId, BlockPos, BlockState)>,
     power_updates: Vec<(BlockPos, u8)>,
@@ -121,11 +125,19 @@ impl CircuitWorld {
             })
             .collect();
 
+        let piston_extend_sustained = self
+            .piston_extend_sustained
+            .iter()
+            .filter(|(pos, _)| pos.chunk_pos() == chunk)
+            .map(|(pos, &sustained)| (to_local(*pos), sustained))
+            .collect();
+
         ChunkCircuitSnapshot {
             power,
             delay_input,
             pending_delays,
             button_release,
+            piston_extend_sustained,
         }
     }
 
@@ -150,6 +162,7 @@ impl CircuitWorld {
         self.pending_button_release
             .retain(|pos, _| pos.chunk_pos() != chunk);
         self.torch_flicker.retain(|pos, _| pos.chunk_pos() != chunk);
+        self.piston_extend_sustained.retain(|pos, _| pos.chunk_pos() != chunk);
         for eval in self.queue.pending_delays_in_chunk(chunk) {
             self.queue.cancel_delay(eval.pos);
         }
@@ -177,6 +190,11 @@ impl CircuitWorld {
             let pos = to_world(local);
             let fire_tick = global_tick.saturating_add(u64::from(remaining));
             self.pending_button_release.insert(pos, fire_tick);
+        }
+
+        for (local, sustained) in snapshot.piston_extend_sustained {
+            self.piston_extend_sustained
+                .insert(to_world(local), sustained);
         }
     }
 
@@ -222,6 +240,7 @@ impl CircuitWorld {
             pending_delay: self.queue.take_delay(pos),
             button_release: self.pending_button_release.remove(&pos),
             torch_flicker: self.torch_flicker.remove(&pos),
+            extend_sustained: self.piston_extend_sustained.remove(&pos),
         }
     }
 
@@ -250,13 +269,17 @@ impl CircuitWorld {
             self.delay_input.insert(pos, d);
         }
         if let Some(eval) = moved.pending_delay {
-            self.queue.schedule_delay(eval.fire_tick, pos, eval.output);
+            self.queue
+                .schedule_delay_with_seq(eval.fire_tick, pos, eval.output, Some(eval.seq));
         }
         if let Some(t) = moved.button_release {
             self.pending_button_release.insert(pos, t);
         }
         if let Some(f) = moved.torch_flicker {
             self.torch_flicker.insert(pos, f);
+        }
+        if let Some(s) = moved.extend_sustained {
+            self.piston_extend_sustained.insert(pos, s);
         }
         if had_power {
             self.enqueue_circuit_neighbors(pos, world, registry);
@@ -277,6 +300,7 @@ impl CircuitWorld {
         self.queue.cancel_delay(pos);
         self.delay_input.remove(&pos);
         self.torch_flicker.remove(&pos);
+        self.piston_extend_sustained.remove(&pos);
 
         let (id, _) = world.get_block(pos);
         if registry.block(id).is_none_or(|d| !d.has_circuit()) {
@@ -289,6 +313,44 @@ impl CircuitWorld {
         self.queue_update(pos);
         self.enqueue_circuit_neighbors(pos, world, registry);
         self.notify_observers_watching(pos, world, registry);
+    }
+
+    /// Replace the block at `pos`, also removing any multipart companions (e.g. a
+    /// piston head when breaking an extended piston body).
+    pub fn replace_block_at(
+        &mut self,
+        pos: BlockPos,
+        new_id: stagcrest_protocol::BlockId,
+        new_state: BlockState,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        let (old_id, old_state) = world.get_block(pos);
+        let mut positions = vec![pos];
+        if let Some(def) = registry.block(old_id) {
+            for companion in break_positions_for(def, pos, old_state) {
+                if companion != pos && !positions.contains(&companion) {
+                    positions.push(companion);
+                }
+            }
+        }
+        for block_pos in positions {
+            world.set_block(block_pos, new_id, new_state);
+            self.notify_block_changed(block_pos, world, registry);
+        }
+    }
+
+    /// Remove the block at `pos` and any multipart companions, replacing them with air.
+    pub fn remove_block_at(
+        &mut self,
+        pos: BlockPos,
+        world: &mut World,
+        registry: &BlockRegistry,
+    ) {
+        let air = registry
+            .block_by_name("stagcrest:air")
+            .unwrap_or(stagcrest_protocol::BlockId(0));
+        self.replace_block_at(pos, air, BlockState(0), world, registry);
     }
 
     pub fn drain_visual_updates(
@@ -317,9 +379,16 @@ impl CircuitWorld {
 
         self.drain_button_releases(world, registry);
 
-        for scheduled in self.queue.drain_due_delays(self.tick) {
-            self.apply_scheduled_output(scheduled.pos, scheduled.output, world, registry);
+        let due = self.queue.drain_due_delays(self.tick);
+        let mut piston_actions = Vec::new();
+        for scheduled in due {
+            if self.is_piston_scheduled_action(world, registry, scheduled.pos) {
+                piston_actions.push(scheduled);
+            } else {
+                self.apply_scheduled_output(scheduled.pos, scheduled.output, world, registry);
+            }
         }
+        crate::piston::resolve_piston_actions(self, world, registry, piston_actions);
 
         let mut steps = 0usize;
         while steps < MAX_EVALS_PER_TICK {
@@ -329,6 +398,36 @@ impl CircuitWorld {
             steps += 1;
             self.evaluate_node(pos, world, registry);
         }
+    }
+
+    fn is_piston_scheduled_action(
+        &self,
+        world: &World,
+        registry: &BlockRegistry,
+        pos: BlockPos,
+    ) -> bool {
+        let (id, _) = world.get_block(pos);
+        registry.block(id).is_some_and(|def| {
+            def.circuit_kind()
+                .is_some_and(|kind| matches!(kind, CircuitKind::Piston { .. }))
+        })
+    }
+
+    pub(crate) fn record_piston_extended(&mut self, pos: BlockPos, sustained: bool) {
+        self.piston_extend_sustained.insert(pos, sustained);
+        self.mark_chunk_dirty(pos);
+    }
+
+    pub(crate) fn clear_piston_extended(&mut self, pos: BlockPos) {
+        self.piston_extend_sustained.remove(&pos);
+        self.mark_chunk_dirty(pos);
+    }
+
+    pub(crate) fn piston_extend_was_sustained(&self, pos: BlockPos) -> bool {
+        self.piston_extend_sustained
+            .get(&pos)
+            .copied()
+            .unwrap_or(true)
     }
 
     fn apply_scheduled_output(
@@ -351,12 +450,8 @@ impl CircuitWorld {
             | CircuitKind::Observer { .. } => {
                 self.set_published_power(pos, output, id, state, def, kind, world, registry);
             }
-            CircuitKind::Piston { sticky } => {
-                if output == 1 {
-                    try_extend(self, world, registry, pos, sticky);
-                } else {
-                    try_retract(self, world, registry, pos, sticky);
-                }
+            CircuitKind::Piston { .. } => {
+                // Handled by resolve_piston_actions in tick().
             }
             CircuitKind::Lamp => {
                 let new_state = crate::eval::lamp::apply_scheduled_off(state);

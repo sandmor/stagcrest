@@ -101,7 +101,7 @@ pub fn bake_block_icons(
         let power = if mod_ctx
             .registry
             .block(block_id)
-            .is_some_and(|d| is_wire_line_block(&mod_ctx.registry, block_id))
+            .is_some_and(|_| is_wire_line_block(&mod_ctx.registry, block_id))
         {
             15
         } else {

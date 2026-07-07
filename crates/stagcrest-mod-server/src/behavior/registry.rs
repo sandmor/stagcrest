@@ -5,7 +5,7 @@ use crate::{
     validate_repeater_placement, validate_torch_placement, BlockRegistry,
 };
 use stagcrest_protocol::{
-    BehaviorRef, BlockDef, BlockId, BlockPos, BlockState, CallbackFlags, NativeBehaviorId,
+    BehaviorRef, BlockDef, BlockId, BlockPos, BlockState, NativeBehaviorId,
 };
 use stagcrest_world::World;
 

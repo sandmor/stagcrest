@@ -16,6 +16,8 @@ pub struct ChunkCircuitSnapshot {
     pub delay_input: Vec<(LocalBlockPos, u8)>,
     pub pending_delays: Vec<PendingDelaySnapshot>,
     pub button_release: Vec<(LocalBlockPos, u8)>,
+    /// Extended pistons and whether they were still powered when they finished extending.
+    pub piston_extend_sustained: Vec<(LocalBlockPos, bool)>,
 }
 
 impl ChunkCircuitSnapshot {
@@ -39,6 +41,11 @@ impl ChunkCircuitSnapshot {
         for (local, remaining) in &self.button_release {
             write_u16(&mut out, local.index() as u16);
             out.push(*remaining);
+        }
+        write_u16(&mut out, self.piston_extend_sustained.len() as u16);
+        for (local, sustained) in &self.piston_extend_sustained {
+            write_u16(&mut out, local.index() as u16);
+            out.push(u8::from(*sustained));
         }
         out
     }
@@ -86,11 +93,26 @@ impl ChunkCircuitSnapshot {
             button_release.push((local, remaining));
         }
 
+        let piston_extend_sustained = if version >= CIRCUIT_SNAPSHOT_WIRE_VERSION {
+            let sustained_count = read_u16(bytes, &mut cursor)? as usize;
+            let mut entries = Vec::with_capacity(sustained_count);
+            for _ in 0..sustained_count {
+                let index = read_u16(bytes, &mut cursor)? as usize;
+                let local = local_from_index(index)?;
+                let sustained = read_u8(bytes, &mut cursor)? != 0;
+                entries.push((local, sustained));
+            }
+            entries
+        } else {
+            Vec::new()
+        };
+
         Ok(Self {
             power,
             delay_input,
             pending_delays,
             button_release,
+            piston_extend_sustained,
         })
     }
 }
@@ -168,6 +190,10 @@ mod tests {
                 output: 15,
             }],
             button_release: vec![(LocalBlockPos { x: 1, y: 0, z: 0 }, 20)],
+            piston_extend_sustained: vec![
+                (LocalBlockPos { x: 3, y: 0, z: 0 }, true),
+                (LocalBlockPos { x: 4, y: 1, z: 2 }, false),
+            ],
         };
         let wire = snapshot.encode_wire();
         let decoded = ChunkCircuitSnapshot::decode_wire(&wire).unwrap();

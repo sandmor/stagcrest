@@ -48,7 +48,7 @@ struct CommandCtx {
 
 struct BehaviorCtx {
     world: *mut stagcrest_world::World,
-    registry: *const BlockRegistry,
+    _registry: *const BlockRegistry,
 }
 
 struct HostState {
@@ -65,6 +65,7 @@ struct HostState {
     limiter: StoreLimiter,
 }
 
+#[allow(dead_code)]
 struct StoreLimiter {
     memory_bytes: usize,
 }
@@ -418,7 +419,7 @@ impl ModInstance {
     ) -> Result<crate::behavior::BehaviorResult, String> {
         self.store.data_mut().behavior = Some(BehaviorCtx {
             world: world as *mut _,
-            registry: registry as *const _,
+            _registry: registry as *const _,
         });
         self.store.set_epoch_deadline(BEHAVIOR_EPOCH_TICKS);
         let wit_pos = block_pos_to_wit(pos);
@@ -549,10 +550,9 @@ fn wit_to_behavior_result(r: wit_types::BehaviorResult) -> crate::behavior::Beha
 
 fn wit_register_block_to_sdk(
     req: wit_types::RegisterBlockRequest,
-    mod_index: usize,
+    _mod_index: usize,
 ) -> RegisterBlockRequest {
-    use stagcrest_mod_sdk::{BehaviorKindRequest, NativeBehaviorRequest, RegisterBehaviorRequest};
-    use stagcrest_protocol::{BehaviorRef, CallbackFlags};
+    use stagcrest_mod_sdk::{BehaviorKindRequest, RegisterBehaviorRequest};
 
     let behavior = req.behavior.map(|b| match b {
         wit_types::BehaviorRef::Native(native) => RegisterBehaviorRequest {

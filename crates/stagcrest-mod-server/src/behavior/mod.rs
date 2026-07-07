@@ -4,14 +4,14 @@ mod native;
 mod registry;
 
 pub use native::{
-    break_positions_for, default_push_reaction, dynamic_light_for, redstone_powerable_for,
+    break_positions_for, default_push_reaction, redstone_powerable_for,
 };
 pub use registry::{BehaviorCtx, BehaviorRegistry, BehaviorResult};
 
-use crate::registry::BlockRegistry;
-use stagcrest_protocol::{BlockDef, BlockId, BlockPos, BlockState, PushReaction};
+use stagcrest_protocol::{BlockDef, BlockPos, BlockState, PushReaction};
 
 /// Trait implemented by native block behaviors.
+#[allow(dead_code)]
 pub trait BlockBehavior: Send {
     fn on_place(&self, ctx: &mut BehaviorCtx<'_>) -> BehaviorResult {
         let _ = ctx;
@@ -62,22 +62,6 @@ pub fn block_push_reaction(def: &BlockDef) -> PushReaction {
 
 pub fn block_redstone_powerable(def: &BlockDef) -> bool {
     def.redstone_powerable()
-}
-
-pub fn push_reaction(registry: &BehaviorRegistry, def: &BlockDef) -> PushReaction {
-    registry.push_reaction(def)
-}
-
-pub fn redstone_powerable(registry: &BehaviorRegistry, def: &BlockDef) -> bool {
-    registry.redstone_powerable(def)
-}
-
-pub fn effective_light_emission(
-    registry: &BehaviorRegistry,
-    def: &BlockDef,
-    state: BlockState,
-) -> u8 {
-    registry.dynamic_light(def, state)
 }
 
 pub fn extra_break_positions(

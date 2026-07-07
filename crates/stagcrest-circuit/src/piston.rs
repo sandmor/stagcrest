@@ -1,4 +1,5 @@
 use crate::eval::EvalContext;
+use crate::event::ScheduledEval;
 use stagcrest_mod_server::block_push_reaction;
 use crate::power::{block_power_at, is_redstone_powerable_block, signal_into};
 use crate::registry::BlockRegistry;
@@ -10,6 +11,23 @@ use stagcrest_protocol::{
 use stagcrest_world::World;
 
 pub const PISTON_PUSH_LIMIT: usize = 12;
+
+fn piston_is_powered_at(
+    circuit: &CircuitWorld,
+    world: &World,
+    registry: &BlockRegistry,
+    pos: BlockPos,
+    state: BlockState,
+) -> bool {
+    let ctx = EvalContext {
+        pos,
+        state,
+        circuit,
+        world,
+        registry,
+    };
+    piston_is_powered(&ctx)
+}
 
 pub fn piston_is_powered(ctx: &EvalContext<'_>) -> bool {
     let facing = piston_facing(ctx.state);
@@ -201,9 +219,6 @@ fn expand_slime_honey_group(
                 PushReaction::Normal => {}
             }
             set.insert(npos);
-            // Minecraft: stickiness only propagates *from* slime/honey blocks. A
-            // dragged non-slime block (piston body, observer, stone, ...) is carried
-            // along but does NOT drag its own neighbours.
             let queued = is_slime_block(&ndef.namespaced_id) || is_honey_block(&ndef.namespaced_id);
             if queued {
                 queue.push_back(npos);
@@ -219,6 +234,102 @@ fn air_id(registry: &BlockRegistry) -> stagcrest_protocol::BlockId {
     registry
         .block_by_name("stagcrest:air")
         .unwrap_or(stagcrest_protocol::BlockId(0))
+}
+
+fn validate_extend_plan(
+    world: &World,
+    registry: &BlockRegistry,
+    piston_pos: BlockPos,
+    facing: stagcrest_protocol::Facing6,
+    plan: &PushPlan,
+) -> bool {
+    let (dx, dy, dz) = facing.delta();
+    let air = air_id(registry);
+
+    let dot = |p: BlockPos| {
+        (p.x - piston_pos.x) * dx + (p.y - piston_pos.y) * dy + (p.z - piston_pos.z) * dz
+    };
+
+    let mut order: Vec<BlockPos> = plan.to_move.clone();
+    order.sort_by_key(|p| std::cmp::Reverse(dot(*p)));
+
+    let mut vacating: std::collections::HashSet<BlockPos> = std::collections::HashSet::new();
+    if let Some(destroy_pos) = plan.destroy_at {
+        if !world.is_chunk_interactive(destroy_pos.chunk_pos()) {
+            return false;
+        }
+        vacating.insert(destroy_pos);
+    }
+
+    for pos in order {
+        let dest = BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz);
+        if !world.is_chunk_interactive(dest.chunk_pos()) {
+            return false;
+        }
+        if dest == piston_pos {
+            return false;
+        }
+        let (dest_id, _) = world.get_block(dest);
+        if dest_id != air && !vacating.contains(&dest) {
+            return false;
+        }
+        vacating.insert(pos);
+        vacating.remove(&dest);
+    }
+
+    let _ = (registry, air);
+    true
+}
+
+fn extend_pushes_blocks(
+    world: &World,
+    registry: &BlockRegistry,
+    piston_pos: BlockPos,
+) -> bool {
+    let (_, state) = world.get_block(piston_pos);
+    if piston_extended(state) {
+        return false;
+    }
+    let facing = piston_facing(state);
+    let (dx, dy, dz) = facing.delta();
+    let air = air_id(registry);
+    let front = piston_front_pos(piston_pos, facing);
+    compute_push_plan(world, registry, air, front, (dx, dy, dz), Some(piston_pos))
+        .is_some_and(|plan| !plan.to_move.is_empty())
+}
+
+/// Resolve all due piston scheduled actions for this tick in deterministic order.
+/// Unobstructed extensions (nothing to push) run before extensions that must shove
+/// blocks, so competing pistons behave like Bedrock block events.
+pub fn resolve_piston_actions(
+    circuit: &mut CircuitWorld,
+    world: &mut World,
+    registry: &BlockRegistry,
+    mut actions: Vec<ScheduledEval>,
+) {
+    actions.sort_by_key(|action| {
+        let pushes = if action.output == 1 {
+            extend_pushes_blocks(world, registry, action.pos)
+        } else {
+            false
+        };
+        (pushes, action.seq, action.pos.x, action.pos.y, action.pos.z)
+    });
+
+    for action in actions {
+        let (id, _state) = world.get_block(action.pos);
+        let Some(def) = registry.block(id) else {
+            continue;
+        };
+        let Some(stagcrest_protocol::CircuitKind::Piston { sticky }) = def.circuit_kind() else {
+            continue;
+        };
+        if action.output == 1 {
+            try_extend(circuit, world, registry, action.pos, sticky);
+        } else {
+            try_retract(circuit, world, registry, action.pos, sticky);
+        }
+    }
 }
 
 pub fn try_extend(
@@ -244,10 +355,13 @@ pub fn try_extend(
         None => return,
     };
 
-    if let Some(destroy_pos) = plan.destroy_at {
-        world.set_block(destroy_pos, air, BlockState(0));
-        circuit.record_block_move(world, registry, destroy_pos, air, BlockState(0));
+    if !validate_extend_plan(world, registry, piston_pos, facing, &plan) {
+        return;
     }
+
+    let dot = |p: BlockPos| {
+        (p.x - piston_pos.x) * dx + (p.y - piston_pos.y) * dy + (p.z - piston_pos.z) * dz
+    };
 
     let mut moves: Vec<(BlockPos, BlockPos, stagcrest_protocol::BlockId, BlockState)> = Vec::new();
     for pos in &plan.to_move {
@@ -255,17 +369,15 @@ pub fn try_extend(
         let dest = BlockPos::new(pos.x + dx, pos.y + dy, pos.z + dz);
         moves.push((dest, *pos, id, st));
     }
-
-    let dot = |p: BlockPos| {
-        (p.x - piston_pos.x) * dx + (p.y - piston_pos.y) * dy + (p.z - piston_pos.z) * dz
-    };
     moves.sort_by_key(|(dest, _, _, _)| std::cmp::Reverse(dot(*dest)));
+
+    if let Some(destroy_pos) = plan.destroy_at {
+        world.set_block(destroy_pos, air, BlockState(0));
+        circuit.record_block_move(world, registry, destroy_pos, air, BlockState(0));
+    }
 
     let mut moved_observers: Vec<BlockPos> = Vec::new();
     for (dest, src, id, st) in moves {
-        if !world.is_chunk_interactive(dest.chunk_pos()) {
-            return;
-        }
         let moved_state = circuit.take_moved_node_state(src);
         world.set_block(dest, id, st);
         circuit.record_block_move(world, registry, dest, id, st);
@@ -277,7 +389,6 @@ pub fn try_extend(
         }
     }
 
-    // A firing piston is anchored: its body never moves, the head appears in front.
     let new_state = piston_state(true, facing);
     world.set_block(piston_pos, piston_id, new_state);
     circuit.record_block_move(world, registry, piston_pos, piston_id, new_state);
@@ -285,6 +396,10 @@ pub fn try_extend(
     let head_state = piston_head_state(facing, sticky);
     world.set_block(front, head_id, head_state);
     circuit.record_block_move(world, registry, front, head_id, head_state);
+
+    let sustained =
+        piston_is_powered_at(circuit, world, registry, piston_pos, piston_state(true, facing));
+    circuit.record_piston_extended(piston_pos, sustained);
 
     for obs in moved_observers {
         circuit.fire_moved_observer(obs, world, registry);
@@ -315,7 +430,9 @@ pub fn try_retract(
     world.set_block(head_pos, air, BlockState(0));
     circuit.record_block_move(world, registry, head_pos, air, BlockState(0));
 
-    if sticky {
+    let should_drop = sticky && !circuit.piston_extend_was_sustained(piston_pos);
+
+    if sticky && !should_drop {
         let pull_start = piston_front_pos(head_pos, facing);
         let (pull_id, _) = world.get_block(pull_start);
         let pull_reaction = push_reaction_for(registry, pull_id);
@@ -334,6 +451,10 @@ pub fn try_retract(
                 for pos in pull_set {
                     let dest = BlockPos::new(pos.x - dx, pos.y - dy, pos.z - dz);
                     if !world.is_chunk_interactive(dest.chunk_pos()) {
+                        break;
+                    }
+                    let (dest_id, _) = world.get_block(dest);
+                    if dest_id != air && dest != piston_pos {
                         break;
                     }
                     let (id, st) = world.get_block(pos);
@@ -357,4 +478,5 @@ pub fn try_retract(
     let new_state = piston_state(false, facing);
     world.set_block(piston_pos, piston_id, new_state);
     circuit.record_block_move(world, registry, piston_pos, piston_id, new_state);
+    circuit.clear_piston_extended(piston_pos);
 }

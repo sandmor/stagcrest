@@ -908,7 +908,7 @@ impl BlockDef {
             }) => PushReaction::Block,
             Some(BehaviorRef::Native {
                 id: NativeBehaviorId::PistonHead,
-            }) => PushReaction::Destroy,
+            }) => PushReaction::Block,
             _ if self.solid && self.opaque => PushReaction::Normal,
             _ => PushReaction::Destroy,
         }
