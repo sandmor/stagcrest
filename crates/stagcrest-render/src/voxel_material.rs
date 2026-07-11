@@ -4,7 +4,8 @@ use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef};
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError, VertexFormat,
+    AsBindGroup, Face, FrontFace, PolygonMode, PrimitiveState, RenderPipelineDescriptor,
+    SpecializedMeshPipelineError, VertexFormat,
 };
 use bevy::shader::{Shader, ShaderRef};
 
@@ -12,6 +13,9 @@ use crate::scene_lighting::SceneLightingUniform;
 
 pub const VOXEL_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("a7c3e891-4f2b-4d1e-9c8a-0123456789ab");
+
+pub const VOXEL_PREPASS_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("b8d4f902-5c3c-5e2f-ad9b-123456789abc");
 
 pub const SCENE_LIGHTING_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("d1e2f3a4-b5c6-7890-abcd-ef1234567890");
@@ -33,6 +37,12 @@ impl Plugin for VoxelMaterialPlugin {
             app,
             VOXEL_SHADER_HANDLE,
             "../../../assets/shaders/voxel.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            VOXEL_PREPASS_SHADER_HANDLE,
+            "../../../assets/shaders/voxel_prepass.wgsl",
             Shader::from_wgsl
         );
     }
@@ -108,6 +118,14 @@ impl Material for VoxelMaterial {
         VOXEL_SHADER_HANDLE.into()
     }
 
+    fn prepass_vertex_shader() -> ShaderRef {
+        VOXEL_PREPASS_SHADER_HANDLE.into()
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
+        VOXEL_PREPASS_SHADER_HANDLE.into()
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
     }
@@ -133,6 +151,12 @@ impl Material for VoxelMaterial {
             ATTRIBUTE_FLAGS.at_shader_location(11),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
+        descriptor.primitive = PrimitiveState {
+            cull_mode: Some(Face::Back),
+            front_face: FrontFace::Ccw,
+            polygon_mode: PolygonMode::Fill,
+            ..default()
+        };
         Ok(())
     }
 }

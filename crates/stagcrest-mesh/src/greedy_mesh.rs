@@ -62,6 +62,7 @@ fn merge_key(
             MeshBucket::Opaque => 0,
             MeshBucket::Blend => 1,
             MeshBucket::Cutout => 2,
+            MeshBucket::Water => 3,
         },
     }
 }

@@ -1,9 +1,9 @@
 //! Fullscreen underwater post-process pass.
 
 use bevy::asset::{load_internal_asset, uuid_handle, Handle};
+use bevy::anti_alias::contrast_adaptive_sharpening::cas;
 use bevy::core_pipeline::{
     schedule::{Core3d, Core3dSystems},
-    tonemapping::tonemapping,
     upscaling::upscaling,
     FullscreenShader,
 };
@@ -53,7 +53,7 @@ impl Plugin for UnderwaterPlugin {
             .add_systems(
                 Core3d,
                 underwater_post_process
-                    .after(tonemapping)
+                    .after(cas)
                     .before(upscaling)
                     .in_set(Core3dSystems::PostProcess),
             );
@@ -150,7 +150,7 @@ fn init_underwater_pipeline(
             shader_defs: vec![],
             entry_point: Some("fragment".into()),
             targets: vec![Some(ColorTargetState {
-                format: TextureFormat::Rgba8UnormSrgb,
+                format: TextureFormat::Rgba16Float,
                 blend: None,
                 write_mask: ColorWrites::ALL,
             })],

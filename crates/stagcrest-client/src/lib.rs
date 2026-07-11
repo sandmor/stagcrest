@@ -1,12 +1,16 @@
 use bevy::prelude::*;
 use bevy::window::WindowResolution;
-use stagcrest_render::{SceneLightingPlugin, SkyboxPlugin, UnderwaterPlugin};
+use stagcrest_render::{
+    GraphicsSettingsPlugin, ReflectionCameraPlugin, SceneLightingPlugin, SceneReflectionPlugin,
+    SkyboxPlugin, UnderwaterPlugin, VolumetricLightPlugin,
+};
 
 use camera::UiCameraPlugin;
 
 pub mod block_icons;
 pub mod block_outline;
 pub mod camera;
+pub mod celestial_light;
 pub mod chat;
 pub mod chunk_streaming;
 pub mod client_content;
@@ -14,6 +18,8 @@ pub mod connect_screen;
 pub mod debug_overlay;
 pub mod entity_render;
 pub mod environment;
+pub mod graphics;
+pub mod graphics_settings_screen;
 pub mod game;
 pub mod game_session;
 pub mod input;
@@ -61,8 +67,12 @@ pub fn run_app(launch: LaunchConfig) {
         .init_state::<AppState>()
         .add_sub_state::<game::GameplayState>()
         .add_plugins(stagcrest_render::OutlineMaterialPlugin)
+        .add_plugins(GraphicsSettingsPlugin)
         .add_plugins(SceneLightingPlugin)
+        .add_plugins(SceneReflectionPlugin)
         .add_plugins(SkyboxPlugin)
+        .add_plugins(VolumetricLightPlugin)
+        .add_plugins(ReflectionCameraPlugin)
         .add_plugins(UnderwaterPlugin)
         .add_plugins(MaterialPlugin::<stagcrest_render::OutlineMaterial>::default())
         .add_plugins(MaterialPlugin::<stagcrest_render::VoxelMaterial>::default())
@@ -77,10 +87,14 @@ pub fn run_app(launch: LaunchConfig) {
             loading::LoadingPlugin,
             game::GamePlugin,
             game_session::GameSessionPlugin,
+        ))
+        .add_plugins((
             chat::ChatPlugin,
             debug_overlay::DebugPlugin,
             minimap::MinimapPlugin,
             pause::PausePlugin,
+            graphics::GraphicsApplyPlugin,
+            graphics_settings_screen::GraphicsSettingsScreenPlugin,
             ui::UiPlugin,
             UiCameraPlugin,
         ))

@@ -1,6 +1,6 @@
 //! Server-authoritative day/night cycle.
 //!
-//! World axes and lighting conventions: see `stagcrest-render/docs/scene_lighting_conventions.md`.
+//! World axes and lighting conventions: see `stagcrest-render/docs/RENDERING.md` §5.5.
 
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -53,25 +53,25 @@ impl TimeOfDay {
     ///
     /// At night the moon is near zenith. At sunrise/sunset it sits on the horizon
     /// opposite the sun. During the day it stays low on the far side of the sky.
+    /// Direction blends smoothly across elevation bands (no piecewise jumps).
     pub fn moon_dir(&self) -> Vec3 {
         let sun = self.sun_dir();
         let y = sun.y;
 
-        if y > 0.12 {
-            Vec3::new(-sun.x, 0.12, -sun.z).normalize_or_zero()
-        } else if y > -0.12 {
-            let azimuth = Vec3::new(-sun.x, 0.0, -sun.z);
-            let horiz = if azimuth.length_squared() > 1e-6 {
-                azimuth.normalize()
-            } else {
-                Vec3::NEG_Z
-            };
-            let elev = (y * 0.4 + 0.05).clamp(0.03, 0.12);
-            let flat = (1.0 - elev * elev).max(0.0).sqrt();
-            (horiz * flat + Vec3::Y * elev).normalize_or_zero()
-        } else {
-            (-sun + Vec3::new(0.0, 0.5, 0.0)).normalize_or_zero()
-        }
+        let moon_day = Vec3::new(-sun.x, 0.12, -sun.z).normalize_or_zero();
+        let moon_twilight = moon_twilight_dir(sun, y);
+        let moon_night = (-sun + Vec3::new(0.0, 0.5, 0.0)).normalize_or_zero();
+
+        let twilight_to_night = 1.0 - smoothstep(-0.18, -0.06, y);
+        let twilight_night = slerp_dir(moon_twilight, moon_night, twilight_to_night);
+
+        let day_to_twilight = smoothstep(0.06, 0.18, y);
+        slerp_dir(twilight_night, moon_day, day_to_twilight)
+    }
+
+    /// Unit vector **from the moon toward the scene** (incoming moonlight / shadow cast direction).
+    pub fn moon_light_dir(&self) -> Vec3 {
+        -self.moon_dir()
     }
 
     /// 0 deep night, ~0.35 at sunrise/sunset, 1 at noon.
@@ -83,33 +83,65 @@ impl TimeOfDay {
     /// Multiplier for rendering the sun disc (0 below horizon, 1 well above).
     pub fn sun_disc_factor(&self) -> f32 {
         let y = self.sun_dir().y;
-        if y <= -0.08 {
-            return 0.0;
-        }
-        if y >= 0.08 {
-            return 1.0;
-        }
-        ((y + 0.08) / 0.16).clamp(0.0, 1.0)
+        smoothstep(-0.12, 0.12, y)
     }
 
     /// Multiplier for rendering the moon disc.
     pub fn moon_disc_factor(&self) -> f32 {
         let y = self.sun_dir().y;
-        if y > 0.12 {
-            // Faint daytime moon.
-            0.15
-        } else if y > -0.12 {
-            // Twilight: moon opposite the sun, dimmer while both are near the horizon.
-            0.45
-        } else {
-            1.0
-        }
+        let twilight_to_night = 1.0 - smoothstep(-0.18, -0.06, y);
+        let twilight_night = 0.45 + (1.0 - 0.45) * twilight_to_night;
+        let day_to_twilight = smoothstep(0.06, 0.18, y);
+        0.15 + (twilight_night - 0.15) * (1.0 - day_to_twilight)
     }
 
     /// Normalized 0..1 position within the day cycle.
     pub fn cycle(&self) -> f32 {
         (self.0 / DAY_LENGTH_SECS) as f32
     }
+}
+
+/// Hermite smoothstep on `[edge0, edge1]`.
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge0 >= edge1 {
+        return f32::from(x >= edge0);
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn moon_twilight_dir(sun: Vec3, y: f32) -> Vec3 {
+    let azimuth = Vec3::new(-sun.x, 0.0, -sun.z);
+    let horiz = if azimuth.length_squared() > 1e-6 {
+        azimuth.normalize()
+    } else {
+        Vec3::NEG_Z
+    };
+    let elev = (y * 0.4 + 0.05).clamp(0.03, 0.12);
+    let flat = (1.0 - elev * elev).max(0.0).sqrt();
+    (horiz * flat + Vec3::Y * elev).normalize_or_zero()
+}
+
+/// Spherical interpolation between unit directions.
+fn slerp_dir(a: Vec3, b: Vec3, t: f32) -> Vec3 {
+    let a = a.normalize_or_zero();
+    let b = b.normalize_or_zero();
+    if a.length_squared() < 1e-6 {
+        return b;
+    }
+    if b.length_squared() < 1e-6 {
+        return a;
+    }
+    let dot = a.dot(b).clamp(-1.0, 1.0);
+    if dot > 0.9995 {
+        return (a * (1.0 - t) + b * t).normalize_or_zero();
+    }
+    let omega = dot.acos();
+    let sin_omega = omega.sin();
+    if sin_omega.abs() < 1e-6 {
+        return a;
+    }
+    (a * ((1.0 - t) * omega).sin() + b * (t * omega).sin()) / sin_omega
 }
 
 #[cfg(test)]
@@ -141,11 +173,12 @@ mod tests {
     }
 
     #[test]
-    fn sun_light_travels_opposite_position() {
+    fn celestial_light_dir_is_negated_position_dir() {
         let morning = TimeOfDay(DAY_LENGTH_SECS * 0.3);
-        let to_sun = morning.sun_dir();
-        let light = morning.sun_light_dir();
-        assert!(to_sun.dot(light) < -0.9);
+        assert!(morning.sun_dir().dot(morning.sun_light_dir()) < -0.9);
+
+        let midnight = TimeOfDay(0.0);
+        assert!(midnight.moon_dir().dot(midnight.moon_light_dir()) < -0.9);
     }
 
     #[test]
@@ -194,5 +227,37 @@ mod tests {
         let mut t = TimeOfDay(DAY_LENGTH_SECS - 1.0);
         t.advance(2.0);
         assert!(t.seconds() < 2.0);
+    }
+
+    #[test]
+    fn dusk_celestial_curves_are_continuous() {
+        let mut prev_moon = TimeOfDay(880.0).moon_dir();
+        let mut prev_sun_disc = TimeOfDay(880.0).sun_disc_factor();
+        let mut prev_moon_disc = TimeOfDay(880.0).moon_disc_factor();
+
+        for sec in 881..=960 {
+            let t = TimeOfDay(sec as f64);
+            let moon = t.moon_dir();
+            let sun_disc = t.sun_disc_factor();
+            let moon_disc = t.moon_disc_factor();
+
+            assert!(
+                prev_moon.dot(moon) > 0.98,
+                "moon_dir jump at {sec}s: dot={}",
+                prev_moon.dot(moon)
+            );
+            assert!(
+                (sun_disc - prev_sun_disc).abs() < 0.05,
+                "sun_disc jump at {sec}s: {prev_sun_disc} -> {sun_disc}"
+            );
+            assert!(
+                (moon_disc - prev_moon_disc).abs() < 0.06,
+                "moon_disc jump at {sec}s: {prev_moon_disc} -> {moon_disc}"
+            );
+
+            prev_moon = moon;
+            prev_sun_disc = sun_disc;
+            prev_moon_disc = moon_disc;
+        }
     }
 }

@@ -72,6 +72,12 @@ impl WorldTime {
     pub fn moon_disc_factor(&self) -> f32 {
         self.display.moon_disc_factor()
     }
+
+    /// Incoming moonlight; orients the moon Bevy `DirectionalLight`. Equals `-moon_dir()`.
+    pub fn moon_light_dir(&self) -> Vec3 {
+        let d = self.display.moon_light_dir();
+        Vec3::new(d.x, d.y, d.z)
+    }
 }
 
 pub fn update_world_time(time: Res<Time>, mut world_time: ResMut<WorldTime>) {

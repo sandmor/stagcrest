@@ -5,5 +5,6 @@ mod settings;
 
 pub use installer::{ContentError, ContentInstaller, InstalledPack};
 pub use settings::{
-    ContentSettings, ContentSource, MoveDirection, ResourcePackEntry, SettingsError, SETTINGS_FILE,
+    ContentSettings, ContentSource, GraphicsQualityTier, GraphicsReflectionTier, GraphicsSection,
+    MoveDirection, ResourcePackEntry, SettingsError, SETTINGS_FILE,
 };

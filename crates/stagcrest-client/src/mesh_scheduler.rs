@@ -4,6 +4,7 @@ use stagcrest_mesh::{build_chunk_mesh_snapshot, capture_power_grid, MeshSnapshot
 use stagcrest_protocol::{BlockPos, ChunkPos, CHUNK_SIZE};
 
 use crate::chunk_streaming::BiomeGridCache;
+use crate::player::{player_block_pos, LocalPlayer};
 use crate::world_replica::WorldReplica;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::future::Future;
@@ -249,12 +250,11 @@ fn cpu_pool() -> &'static bevy::tasks::TaskPool {
 }
 
 pub fn chunk_distance_sq_from_camera(cam: &Transform, chunk: ChunkPos) -> i32 {
-    let player_block = BlockPos::new(
-        cam.translation.x.floor() as i32,
-        cam.translation.y.floor() as i32,
-        cam.translation.z.floor() as i32,
-    );
-    chunk_distance_sq_from_block(player_block, chunk)
+    chunk_distance_sq_from_block(player_block_pos(cam.translation), chunk)
+}
+
+pub fn chunk_distance_sq_from_player(player: &Transform, chunk: ChunkPos) -> i32 {
+    chunk_distance_sq_from_block(player_block_pos(player.translation), chunk)
 }
 
 pub fn chunk_distance_sq_from_block(player_block: BlockPos, chunk: ChunkPos) -> i32 {
@@ -337,7 +337,7 @@ pub fn mesh_recover_unmeshed(
     world: Res<crate::world_replica::WorldReplica>,
     cache: Res<stagcrest_render::MeshCacheResource>,
     mut scheduler: ResMut<MeshScheduler>,
-    camera: Query<&Transform, With<crate::game_session::GameCamera>>,
+    player: Query<&Transform, With<LocalPlayer>>,
     config: Res<crate::game::GameConfig>,
     mut tick: Local<u32>,
 ) {
@@ -345,16 +345,11 @@ pub fn mesh_recover_unmeshed(
     if *tick % 60 != 0 {
         return;
     }
-    let Ok(cam) = camera.single() else { return };
+    let Ok(player_tf) = player.single() else { return };
 
     let h = config.render_distance;
     let v = config.vertical_render_distance;
-    let center_chunk = BlockPos::new(
-        cam.translation.x.floor() as i32,
-        cam.translation.y.floor() as i32,
-        cam.translation.z.floor() as i32,
-    )
-    .chunk_pos();
+    let center_chunk = player_block_pos(player_tf.translation).chunk_pos();
 
     for pos in world.loaded_chunk_positions() {
         if (pos.x - center_chunk.x).abs() > h
@@ -375,7 +370,7 @@ pub fn mesh_recover_unmeshed(
         scheduler.request(
             pos,
             RemeshUrgency::Visible,
-            chunk_distance_sq_from_camera(cam, pos),
+            chunk_distance_sq_from_player(player_tf, pos),
         );
     }
 }
@@ -397,9 +392,9 @@ pub fn mesh_rebuild_after_atlas_change(
 pub fn mesh_drain_dirty(
     mut world: ResMut<WorldReplica>,
     mut scheduler: ResMut<MeshScheduler>,
-    camera: Query<&Transform, With<crate::game_session::GameCamera>>,
+    player: Query<&Transform, With<LocalPlayer>>,
 ) {
-    let Ok(cam) = camera.single() else { return };
+    let Ok(player_tf) = player.single() else { return };
     let dirty = world.take_dirty_chunks();
     let mut scheduled = 0usize;
     for pos in dirty {
@@ -418,7 +413,7 @@ pub fn mesh_drain_dirty(
         scheduler.request(
             pos,
             RemeshUrgency::Background,
-            chunk_distance_sq_from_camera(cam, pos),
+            chunk_distance_sq_from_player(player_tf, pos),
         );
         scheduled += 1;
     }

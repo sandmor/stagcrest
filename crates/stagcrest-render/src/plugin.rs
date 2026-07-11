@@ -7,7 +7,10 @@ use stagcrest_mod_client::TextureAtlas;
 use stagcrest_protocol::ChunkPos;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::reflection_camera::water_chunk_layers;
+use crate::scene_reflection::SceneReflectionImages;
 use crate::voxel_material::{VoxelMaterial, VoxelMaterialPlugin, MAX_ATLAS_PAGES};
+use crate::water_material::{WaterMaterial, WaterMaterialPlugin};
 
 static ATLAS_REVISION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -18,6 +21,12 @@ pub fn next_atlas_revision() -> u64 {
 
 #[derive(Resource, Default)]
 pub struct MeshCacheResource(pub MeshCache);
+
+impl MeshCacheResource {
+    pub fn light_grid(&self, pos: stagcrest_protocol::ChunkPos) -> Option<&stagcrest_mesh::ChunkLightGrid> {
+        self.0.light_grid(pos)
+    }
+}
 
 /// Chunks that must be remeshed after atlas/tint changes invalidate cached geometry.
 #[derive(Resource, Default)]
@@ -52,7 +61,7 @@ pub fn atlas_pixels_to_image(atlas: &TextureAtlas) -> Image {
     image
 }
 
-/// Render bucket: 0 = opaque, 1 = blend, 2 = cutout.
+/// Render bucket: 0 = opaque, 1 = blend, 2 = cutout, 3 = water.
 #[derive(Component)]
 pub struct ChunkEntityMarker {
     pub pos: ChunkPos,
@@ -60,6 +69,14 @@ pub struct ChunkEntityMarker {
 }
 
 type AtlasKey = [u32; 32];
+
+#[derive(Default)]
+pub struct ChunkMaterialCache {
+    opaque: Option<Handle<VoxelMaterial>>,
+    blend: Option<Handle<VoxelMaterial>>,
+    water: Option<Handle<WaterMaterial>>,
+    cutout: Option<Handle<VoxelMaterial>>,
+}
 
 fn atlas_key_from(
     revision: u64,
@@ -93,11 +110,16 @@ fn atlas_key_from(
 
 pub struct VoxelRenderPlugin;
 
+/// Ordering anchor for systems that must run before chunk mesh materials are built.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct SyncChunkMeshesSet;
+
 impl Plugin for VoxelRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(VoxelMaterialPlugin)
+        app.add_plugins((VoxelMaterialPlugin, WaterMaterialPlugin))
             .init_resource::<MeshCacheResource>()
-            .add_systems(Update, sync_chunk_meshes);
+            .configure_sets(Update, SyncChunkMeshesSet)
+            .add_systems(Update, sync_chunk_meshes.in_set(SyncChunkMeshesSet));
     }
 }
 
@@ -109,13 +131,14 @@ pub fn sync_chunk_meshes(
     mut commands: Commands,
     mut cache: ResMut<MeshCacheResource>,
     atlas: Option<Res<BlockAtlasResource>>,
+    reflection: Option<Res<SceneReflectionImages>>,
+    graphics: Option<Res<crate::graphics_settings::GraphicsSettings>>,
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<VoxelMaterial>>,
+    mut voxel_materials: ResMut<Assets<VoxelMaterial>>,
+    mut water_materials: ResMut<Assets<WaterMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut opaque_mat: Local<Option<Handle<VoxelMaterial>>>,
-    mut blend_mat: Local<Option<Handle<VoxelMaterial>>>,
-    mut cutout_mat: Local<Option<Handle<VoxelMaterial>>>,
+    mut materials: Local<ChunkMaterialCache>,
     mut atlas_image_handles: Local<Vec<Handle<Image>>>,
     mut last_atlas_key: Local<Option<AtlasKey>>,
     existing: Query<(Entity, &ChunkEntityMarker)>,
@@ -141,9 +164,7 @@ pub fn sync_chunk_meshes(
 
     let atlas_changed = *last_atlas_key != Some(atlas_key);
     if atlas_changed {
-        *opaque_mat = None;
-        *blend_mat = None;
-        *cutout_mat = None;
+        *materials = ChunkMaterialCache::default();
         *last_atlas_key = Some(atlas_key);
         let stale = cache.0.clear_meshes();
         if !stale.is_empty() {
@@ -151,18 +172,23 @@ pub fn sync_chunk_meshes(
         }
     }
 
-    if let Some(handle) = opaque_mat.as_ref() {
-        if let Some(mut mat) = materials.get_mut(handle) {
+    if let Some(handle) = materials.opaque.as_ref() {
+        if let Some(mut mat) = voxel_materials.get_mut(handle) {
             mat.fluid_anim.w = fluid_time;
         }
     }
-    if let Some(handle) = blend_mat.as_ref() {
-        if let Some(mut mat) = materials.get_mut(handle) {
+    if let Some(handle) = materials.blend.as_ref() {
+        if let Some(mut mat) = voxel_materials.get_mut(handle) {
             mat.fluid_anim.w = fluid_time;
         }
     }
-    if let Some(handle) = cutout_mat.as_ref() {
-        if let Some(mut mat) = materials.get_mut(handle) {
+    if let Some(handle) = materials.water.as_ref() {
+        if let Some(mut mat) = water_materials.get_mut(handle) {
+            mat.fluid_anim.w = fluid_time;
+        }
+    }
+    if let Some(handle) = materials.cutout.as_ref() {
+        if let Some(mut mat) = voxel_materials.get_mut(handle) {
             mat.fluid_anim.w = fluid_time;
         }
     }
@@ -210,20 +236,52 @@ pub fn sync_chunk_meshes(
         alpha_mode: AlphaMode::Opaque,
     };
 
-    let opaque_handle = opaque_mat.get_or_insert_with(|| materials.add(base_tints()));
-    let blend_handle = blend_mat.get_or_insert_with(|| {
-        materials.add(VoxelMaterial {
+    if materials.opaque.is_none() {
+        materials.opaque = Some(voxel_materials.add(base_tints()));
+    }
+    if materials.blend.is_none() {
+        materials.blend = Some(voxel_materials.add(VoxelMaterial {
             alpha_mode: AlphaMode::Blend,
             ..base_tints()
-        })
+        }));
+    }
+    let reflection_state = reflection.as_deref().cloned().unwrap_or_default();
+    let reflection_tier = graphics
+        .as_ref()
+        .map(|g| g.reflection_tier_index())
+        .unwrap_or(1.0);
+    let has_planar = graphics.as_ref().is_some_and(|g| {
+        matches!(
+            g.reflection_tier,
+            crate::graphics_settings::ReflectionTier::Planar
+        )
     });
-    let cutout_handle = cutout_mat.get_or_insert_with(|| {
-        materials.add(VoxelMaterial {
+    let reflection_params = WaterMaterial::reflection_params(reflection_tier, has_planar);
+    if materials.water.is_none() {
+        materials.water = Some(water_materials.add(WaterMaterial::with_reflection(
+            WaterMaterial {
+                water_atlas: image_handles[0].clone(),
+                water_tint: water,
+                fluid_anim,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            },
+            &reflection_state,
+            reflection_params,
+        )));
+    }
+    if materials.cutout.is_none() {
+        materials.cutout = Some(voxel_materials.add(VoxelMaterial {
             material_flags: Vec4::new(1.0, 0.0, 0.0, 0.0),
             alpha_mode: AlphaMode::Mask(0.5),
             ..base_tints()
-        })
-    });
+        }));
+    }
+
+    let opaque_handle = materials.opaque.as_ref().unwrap().clone();
+    let blend_handle = materials.blend.as_ref().unwrap().clone();
+    let water_handle = materials.water.as_ref().unwrap().clone();
+    let cutout_handle = materials.cutout.as_ref().unwrap().clone();
 
     for pos in &dirty {
         let Some(mesh) = cache.0.get(*pos) else {
@@ -265,6 +323,15 @@ pub fn sync_chunk_meshes(
             &mesh,
             cutout_handle.clone(),
         );
+        sync_water_bucket(
+            &mut commands,
+            &mut meshes,
+            &existing,
+            *pos,
+            bucket_has_vertices(&mesh, 3),
+            &mesh,
+            water_handle.clone(),
+        );
     }
 }
 
@@ -272,8 +339,40 @@ fn bucket_has_vertices(mesh: &ChunkMesh, bucket: u8) -> bool {
     match bucket {
         1 => !mesh.transparent_vertices.is_empty(),
         2 => !mesh.cutout_vertices.is_empty(),
+        3 => !mesh.water_vertices.is_empty(),
         _ => !mesh.opaque_vertices.is_empty(),
     }
+}
+
+fn sync_water_bucket(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    existing: &Query<(Entity, &ChunkEntityMarker)>,
+    pos: ChunkPos,
+    has_vertices: bool,
+    mesh: &ChunkMesh,
+    mat: Handle<WaterMaterial>,
+) {
+    if !has_vertices {
+        despawn_bucket(commands, existing, pos, 3);
+        return;
+    }
+    let mesh_data = chunk_to_mesh(mesh, 3);
+    let mesh_handle = meshes.add(mesh_data);
+    for (entity, chunk) in existing {
+        if chunk.pos == pos && chunk.bucket == 3 {
+            commands
+                .entity(entity)
+                .insert((Mesh3d(mesh_handle.clone()), MeshMaterial3d(mat.clone())));
+            return;
+        }
+    }
+    commands.spawn((
+        ChunkEntityMarker { pos, bucket: 3 },
+        water_chunk_layers(),
+        Mesh3d(mesh_handle),
+        MeshMaterial3d(mat),
+    ));
 }
 
 fn sync_bucket(
@@ -347,6 +446,7 @@ fn chunk_to_mesh(chunk: &ChunkMesh, bucket: u8) -> Mesh {
     let (vertices, indices) = match bucket {
         1 => (&chunk.transparent_vertices, &chunk.transparent_indices),
         2 => (&chunk.cutout_vertices, &chunk.cutout_indices),
+        3 => (&chunk.water_vertices, &chunk.water_indices),
         _ => (&chunk.opaque_vertices, &chunk.opaque_indices),
     };
 

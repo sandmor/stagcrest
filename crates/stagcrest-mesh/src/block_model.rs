@@ -75,6 +75,7 @@ pub enum MeshBucket {
     Opaque,
     Blend,
     Cutout,
+    Water,
 }
 
 pub fn mesh_buffers<'a>(
@@ -88,6 +89,7 @@ pub fn mesh_buffers<'a>(
             &mut mesh.transparent_indices,
         ),
         MeshBucket::Cutout => (&mut mesh.cutout_vertices, &mut mesh.cutout_indices),
+        MeshBucket::Water => (&mut mesh.water_vertices, &mut mesh.water_indices),
     }
 }
 

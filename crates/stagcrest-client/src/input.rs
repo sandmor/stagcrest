@@ -21,7 +21,7 @@
 //! ### Out of scope for this guard
 //!
 //! - **Held movement input** (`camera_system` WASD): already gated by
-//!   `FlyCamera::captured`, which is `false` whenever any text/overlay opens.
+//!   `PlayerController::captured`, which is `false` whenever any text/overlay opens.
 //!   Movement-class input keeps using that mechanism.
 //! - **Function keys** (e.g. `F3` debug overlay): not typeable into text
 //!   fields; no guard needed.

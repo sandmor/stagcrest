@@ -2,6 +2,8 @@ use crate::client_content::{
     cleanup_screen, handle_button_hover, spawn_primary_button, ClientContentSettings,
 };
 use crate::game::AppState;
+use crate::graphics;
+use crate::graphics_settings_screen::GraphicsReturn;
 use crate::ui::UiTheme;
 use crate::LaunchConfig;
 use bevy::prelude::*;
@@ -26,6 +28,7 @@ struct MainMenuRoot;
 enum MenuButton {
     Play,
     ResourcePacks,
+    Graphics,
     Connect,
     Quit,
 }
@@ -37,7 +40,9 @@ fn on_enter_main_menu(
 ) {
     let settings = ClientContentSettings::reload();
     let needs_setup = !settings.0.has_enabled_pack() && !settings.0.resource_pack_setup_dismissed();
+    let graphics = graphics::graphics_settings_from_section(settings.0.graphics());
     commands.insert_resource(settings);
+    commands.insert_resource(graphics);
 
     if needs_setup {
         next_state.set(AppState::ResourcePackSetup);
@@ -75,6 +80,7 @@ fn spawn_main_menu_ui(commands: &mut Commands, theme: &UiTheme) {
             ));
             spawn_primary_button(parent, "Play", MenuButton::Play, theme);
             spawn_primary_button(parent, "Resource Packs", MenuButton::ResourcePacks, theme);
+            spawn_primary_button(parent, "Graphics", MenuButton::Graphics, theme);
             spawn_primary_button(parent, "Connect", MenuButton::Connect, theme);
             spawn_primary_button(parent, "Quit", MenuButton::Quit, theme);
         });
@@ -88,6 +94,7 @@ fn menu_button_system(
     >,
     launch: Res<LaunchConfig>,
     mut next_state: ResMut<NextState<AppState>>,
+    mut return_to: ResMut<GraphicsReturn>,
     mut exit: MessageWriter<AppExit>,
 ) {
     for (interaction, action, mut bg) in &mut interaction_query {
@@ -102,6 +109,10 @@ fn menu_button_system(
                 }
                 MenuButton::ResourcePacks => {
                     next_state.set(AppState::ResourcePacks);
+                }
+                MenuButton::Graphics => {
+                    return_to.0 = AppState::MainMenu;
+                    next_state.set(AppState::GraphicsSettings);
                 }
                 MenuButton::Connect => {
                     next_state.set(AppState::Connect);

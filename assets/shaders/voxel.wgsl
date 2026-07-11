@@ -7,10 +7,9 @@
 #import stagcrest::scene_lighting::{
     SceneLighting,
     decode_normal_axis,
+    fetch_celestial_shadows,
     shade_voxel,
-    sample_sky_direction,
     unpack_light,
-    medium_attenuation,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var atlas0_tex: texture_2d<f32>;
@@ -39,9 +38,9 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(23) var<uniform> scene_lighting: SceneLighting;
 
 const VERTEX_FLAG_EMISSIVE: u32 = 1u;
-const VERTEX_FLAG_FACES_FLUID: u32 = 2u;
 
 struct Vertex {
+    @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) overlay_uv: vec2<f32>,
@@ -70,15 +69,17 @@ struct VertexOutput {
     @location(9) @interpolate(flat) ao: u32,
     @location(10) @interpolate(flat) flags: u32,
     @location(11) world_position: vec3<f32>,
+    @location(12) world_normal: vec3<f32>,
 }
 
 @vertex
 fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
-    let world_from_local = get_world_from_local(0u);
+    let world_from_local = get_world_from_local(vertex.instance_index);
     let world_position = world_from_local * vec4(vertex.position, 1.0);
     out.clip_position = position_world_to_clip(world_position.xyz);
     out.world_position = world_position.xyz;
+    out.world_normal = normalize((world_from_local * vec4(decode_normal_axis(vertex.normal), 0.0)).xyz);
     out.uv = vertex.uv;
     out.overlay_uv = vertex.overlay_uv;
     out.tint = vertex.tint;
@@ -107,10 +108,6 @@ fn sample_atlas(uv: vec2<f32>, atlas_index: u32) -> vec4<f32> {
     }
 }
 
-fn is_water(tint: f32) -> bool {
-    return tint >= 4.25 && tint < 5.0;
-}
-
 fn is_power(tint: f32) -> bool {
     return tint >= 2.875 && tint <= 4.125;
 }
@@ -120,9 +117,6 @@ fn uses_vertex_tint_mul(tint_mul: vec3<f32>) -> bool {
 }
 
 fn apply_tint(rgb: vec3<f32>, tint: f32, tint_mul: vec3<f32>) -> vec3<f32> {
-    if is_water(tint) {
-        return rgb * water_tint.rgb;
-    }
     if is_power(tint) {
         let power = clamp(tint - 3.0, 0.0, 1.0);
         let rs = mix(power_tint_dark.rgb, power_tint_bright.rgb, power);
@@ -143,55 +137,14 @@ fn apply_tint(rgb: vec3<f32>, tint: f32, tint_mul: vec3<f32>) -> vec3<f32> {
     return rgb;
 }
 
-fn animated_uv(uv: vec2<f32>, tint: f32) -> vec2<f32> {
-    if is_water(tint) && fluid_anim.x > 1.0 {
-        let frame = floor(fluid_anim.w / fluid_anim.z) % fluid_anim.x;
-        return vec2<f32>(uv.x, uv.y + frame * fluid_anim.y);
-    }
-    return uv;
-}
-
-fn shade_water(
-    uv: vec2<f32>,
-    tint: f32,
-    atlas_index: u32,
-    normal_axis: u32,
-    light: u32,
-    ao_val: u32,
-    flags: u32,
-    world_pos: vec3<f32>,
-) -> vec4<f32> {
-    let sample_uv = animated_uv(uv, tint);
-    let tex = sample_atlas(sample_uv, atlas_index);
-    let base = vec3<f32>(tex.r) * water_tint.rgb;
-
-    let normal = decode_normal_axis(normal_axis);
-    let levels = unpack_light(light);
-    let ao = 0.55 + f32(ao_val) / 3.0 * 0.45;
-
-    let view_dir = normalize(view.world_position - world_pos);
-    let fresnel = pow(1.0 - max(dot(normal, view_dir), 0.0), 3.0);
-    let reflect_dir = reflect(-view_dir, normal);
-    let sky = sample_sky_direction(reflect_dir, scene_lighting);
-
-    let lit = shade_voxel(
-        base,
-        normal,
-        levels.x,
-        levels.y,
-        ao,
-        (flags & VERTEX_FLAG_EMISSIVE) != 0u,
-        scene_lighting,
-    );
-
-    var rgb = mix(lit, sky * water_tint.rgb, fresnel * 0.55 * scene_lighting.params.x);
-
-    if scene_lighting.params.z > 0.5 {
-        let absorb = medium_attenuation(2.0, scene_lighting.water_absorption.rgb, scene_lighting.params.w);
-        rgb *= absorb;
-    }
-
-    return vec4(rgb, tex.a);
+fn fetch_sun_moon_shadow(world_pos: vec4<f32>, normal: vec3<f32>, frag_coord: vec2<f32>) -> vec2<f32> {
+    let view_z = dot(vec4(
+        view.view_from_world[0].z,
+        view.view_from_world[1].z,
+        view.view_from_world[2].z,
+        view.view_from_world[3].z,
+    ), world_pos);
+    return fetch_celestial_shadows(scene_lighting, world_pos, normal, view_z, frag_coord);
 }
 
 @fragment
@@ -199,24 +152,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let atlas_idx = u32(clamp(in.atlas_index, 0.0, 7.0));
     let overlay_idx = u32(clamp(in.overlay_atlas_index, 0.0, 7.0));
     let levels = unpack_light(in.light);
-    let ao = 0.55 + f32(in.ao) / 3.0 * 0.45;
+    let ao = 0.5 + f32(in.ao) / 3.0 * 0.5;
     let emissive = (in.flags & VERTEX_FLAG_EMISSIVE) != 0u;
-    let normal = decode_normal_axis(in.normal);
+    let normal = normalize(in.world_normal);
+    let world_pos = vec4(in.world_position, 1.0);
+    let shadow = fetch_sun_moon_shadow(world_pos, normal, in.clip_position.xy);
 
-    if is_water(in.tint) {
-        return shade_water(
-            in.uv,
-            in.tint,
-            atlas_idx,
-            in.normal,
-            in.light,
-            in.ao,
-            in.flags,
-            in.world_position,
-        );
-    }
-
-    let uv = animated_uv(in.uv, in.tint);
+    let uv = in.uv;
     var base = sample_atlas(uv, atlas_idx);
     if material_flags.x > 0.5 && base.a < 0.5 {
         discard;
@@ -224,8 +166,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     var rgb = apply_tint(base.rgb, in.tint, in.tint_mul);
 
     if in.overlay_tint >= 0.5 {
-        let ov_uv = animated_uv(in.overlay_uv, in.overlay_tint);
-        let ov = sample_atlas(ov_uv, overlay_idx);
+        let ov = sample_atlas(in.overlay_uv, overlay_idx);
         if material_flags.x > 0.5 && ov.a < 0.5 {
             discard;
         }
@@ -233,6 +174,16 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         rgb = mix(rgb, tinted_overlay, ov.a);
     }
 
-    rgb = shade_voxel(rgb, normal, levels.x, levels.y, ao, emissive, scene_lighting);
+    rgb = shade_voxel(
+        rgb,
+        normal,
+        levels.x,
+        levels.y,
+        ao,
+        emissive,
+        scene_lighting,
+        shadow.x,
+        shadow.y,
+    );
     return vec4(rgb, base.a);
 }

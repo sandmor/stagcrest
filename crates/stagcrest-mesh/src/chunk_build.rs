@@ -9,7 +9,8 @@ use crate::greedy_mesh::{emit_greedy_cubes, is_greedy_eligible, GreedyGrid};
 use crate::mesh_snapshot::{self, MeshSnapshot};
 use crate::{
     build_column_tint_cache, emit_block_geometry, fluid_flow_textures, mesh_bucket_for_layer,
-    should_cull_face, ChunkMesh, LightBuildContext, LightSampler, LightingContext, MeshClimateTint,
+    should_cull_face, ChunkMesh, LightBuildContext, LightSampler, LightingContext, MeshBucket,
+    MeshClimateTint,
 };
 
 pub fn build_chunk_mesh_snapshot(snapshot: &MeshSnapshot) -> ChunkMesh {
@@ -75,7 +76,11 @@ pub(crate) fn build_chunk_mesh_neighbors(
                     }
                 }
 
-                let bucket = mesh_bucket_for_layer(def.render_layer);
+                let bucket = if def.fluid {
+                    MeshBucket::Water
+                } else {
+                    mesh_bucket_for_layer(def.render_layer)
+                };
                 let lighting = LightingContext {
                     sampler: &light_sampler,
                     lx: x,
@@ -174,6 +179,7 @@ pub(crate) fn build_chunk_mesh_neighbors(
         Some(&light_sampler),
     );
 
+    mesh.light_grid = light_grid;
     mesh
 }
 

@@ -24,19 +24,19 @@ pub fn update_block_target(
     mod_ctx: Option<Res<crate::game::ModContext>>,
     world: Res<WorldReplica>,
     inventory_ui: Option<Res<crate::inventory::InventoryUiState>>,
-    camera: Query<(&Transform, &crate::player::FlyCamera), With<GameCamera>>,
+    camera: Query<(&Transform, &crate::player::PlayerController), With<GameCamera>>,
     mut target: ResMut<BlockTarget>,
 ) {
     let Some(ctx) = mod_ctx else {
         target.hit = None;
         return;
     };
-    let Ok((cam, fly)) = camera.single() else {
+    let Ok((cam, ctrl)) = camera.single() else {
         target.hit = None;
         return;
     };
 
-    if !fly.captured || inventory_ui.is_some_and(|ui| ui.open) {
+    if !ctrl.captured || inventory_ui.is_some_and(|ui| ui.open) {
         target.hit = None;
         return;
     }

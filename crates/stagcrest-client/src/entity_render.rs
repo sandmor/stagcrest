@@ -2,8 +2,8 @@
 //!
 //! Parses geometry/animations shipped by the server (via `stagcrest-bedrock`),
 //! bakes per-bone meshes lazily, spawns a transform hierarchy per entity, and
-//! animates bone transforms from the Bedrock clip. Also spawns one client-local
-//! follower that tracks the camera without blocking the view.
+//! animates bone transforms from the Bedrock clip. Also spawns the client-local
+//! player body used by the third-person controller.
 
 use std::collections::HashMap;
 
@@ -15,11 +15,15 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use stagcrest_bedrock::{bedrock_rotation_to_quat, AnimationSet, BakedModel, Geometry};
 use stagcrest_net::{EntitySpawn, EntityUpdate};
-use stagcrest_protocol::{EntityAssetTransfer, EntityId, EntityManifest, EntityTypeId, EntityWireDef};
-use stagcrest_render::{EntityMaterial, SceneLighting};
+use stagcrest_protocol::{BlockPos, CHUNK_SIZE, EntityAssetTransfer, EntityId, EntityManifest, EntityTypeId, EntityWireDef};
+use stagcrest_render::{EntityMaterial, MeshCacheResource, SceneLighting, player_visual_layers};
 
 use crate::game::AppState;
-use crate::game_session::{in_active_gameplay, GameCamera, GameSessionEntity};
+use crate::game_session::{in_active_gameplay, GameSessionEntity};
+use crate::player::{LocalPlayer, PlayerBodyState};
+
+/// Namespaced id for the local player Bedrock model ([`mods/stagcrest-core`](../../mods/stagcrest-core)).
+pub const LOCAL_PLAYER_ENTITY_ID: &str = "stagcrest:player";
 
 pub struct EntityRenderPlugin;
 
@@ -32,10 +36,10 @@ impl Plugin for EntityRenderPlugin {
                 Update,
                 (
                     apply_entity_net_events,
-                    spawn_follower,
-                    update_follower,
+                    spawn_player_model,
                     animate_entities,
                     push_scene_lighting_to_entities,
+                    sync_entity_world_light.after(push_scene_lighting_to_entities),
                 )
                     .chain()
                     .run_if(in_active_gameplay),
@@ -146,13 +150,32 @@ struct EntityBone {
     bind_rotation_deg: [f32; 3],
 }
 
+/// Per-entity material so world light can vary per instance.
+#[derive(Component)]
+struct EntityMaterialHandle(Handle<EntityMaterial>);
+
 /// Points a bone entity back at its animated root.
 #[derive(Component)]
 struct BoneOwner(Entity);
 
-/// The single client-local follower that tracks the camera.
+/// Marks the client-local player visual (child of the [`LocalPlayer`] entity).
 #[derive(Component)]
 struct EntityFollower;
+
+pub fn player_type_id(catalog: &EntityCatalog) -> Option<EntityTypeId> {
+    catalog
+        .types
+        .iter()
+        .find(|(_, assets)| assets.wire.namespaced_id == LOCAL_PLAYER_ENTITY_ID)
+        .map(|(id, _)| *id)
+        .or_else(|| {
+            catalog.types.keys().next().copied().inspect(|_| {
+                tracing::warn!(
+                    "{LOCAL_PLAYER_ENTITY_ID} not in entity catalog; using arbitrary type"
+                );
+            })
+        })
+}
 
 // --- Net events ---
 
@@ -268,14 +291,28 @@ fn decode_entity_texture(png: &[u8]) -> Image {
 fn spawn_entity_instance(
     commands: &mut Commands,
     gpu: &EntityTypeGpu,
+    materials: &mut Assets<EntityMaterial>,
     type_id: EntityTypeId,
     transform: Transform,
     anim: u8,
-    follower: bool,
+    player_visual: bool,
+    parent: Option<Entity>,
 ) -> Entity {
+    let material = materials.add(
+        materials
+            .get(&gpu.material)
+            .cloned()
+            .unwrap_or_else(|| EntityMaterial {
+                texture: default(),
+                scene_lighting: default(),
+                light: Vec4::new(1.0, 0.0, 0.5, 0.0),
+            }),
+    );
+
     let mut root_cmd = commands.spawn((
         GameSessionEntity,
         EntityRoot { type_id },
+        EntityMaterialHandle(material.clone()),
         EntityAnimator {
             time: 0.0,
             life_time: 0.0,
@@ -284,8 +321,8 @@ fn spawn_entity_instance(
         transform.with_scale(Vec3::splat(gpu.scale)),
         Visibility::Visible,
     ));
-    if follower {
-        root_cmd.insert(EntityFollower);
+    if player_visual {
+        root_cmd.insert((EntityFollower, player_visual_layers()));
     }
     let root = root_cmd.id();
 
@@ -304,7 +341,13 @@ fn spawn_entity_instance(
             Visibility::Inherited,
         ));
         if let Some(mesh) = &bone.mesh {
-            cmd.insert((Mesh3d(mesh.clone()), MeshMaterial3d(gpu.material.clone())));
+            let mesh_insert = cmd.insert((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+            ));
+            if player_visual {
+                mesh_insert.insert(player_visual_layers());
+            }
         }
         bone_entities.push(cmd.id());
     }
@@ -316,6 +359,10 @@ fn spawn_entity_instance(
             .and_then(|p| bone_entities.get(p).copied())
             .unwrap_or(root);
         commands.entity(parent).add_child(bone_entities[i]);
+    }
+
+    if let Some(parent) = parent {
+        commands.entity(parent).add_child(root);
     }
 
     root
@@ -355,8 +402,16 @@ fn apply_entity_net_events(
                 };
                 let transform = Transform::from_xyz(spawn.x, spawn.y, spawn.z)
                     .with_rotation(Quat::from_rotation_y(spawn.yaw));
-                let root =
-                    spawn_entity_instance(&mut commands, gpu, spawn.type_id, transform, 0, false);
+                let root = spawn_entity_instance(
+                    &mut commands,
+                    gpu,
+                    &mut materials,
+                    spawn.type_id,
+                    transform,
+                    0,
+                    false,
+                    None,
+                );
                 index.map.insert(spawn.id, root);
             }
             EntityNetEvent::Update(update) => {
@@ -390,14 +445,21 @@ fn animate_entities(
     catalog: Option<Res<EntityCatalog>>,
     mut roots: Query<(Entity, &EntityRoot, &mut EntityAnimator)>,
     mut bones: Query<(&EntityBone, &BoneOwner, &mut Transform)>,
+    body_state: Query<&PlayerBodyState, With<LocalPlayer>>,
+    followers: Query<Entity, With<EntityFollower>>,
 ) {
     let Some(catalog) = catalog else {
         return;
     };
     let dt = time.delta_secs();
+    let walking = body_state.single().map(|body| body.walking).unwrap_or(false);
+    let follower_entities: std::collections::HashSet<Entity> = followers.iter().collect();
 
     let mut states: HashMap<Entity, PoseState> = HashMap::new();
     for (entity, root, mut anim) in &mut roots {
+        if follower_entities.contains(&entity) {
+            anim.anim = u8::from(walking);
+        }
         anim.time += dt;
         anim.life_time += dt;
         let Some(ty) = catalog.types.get(&root.type_id) else {
@@ -433,13 +495,14 @@ fn animate_entities(
     }
 }
 
-// --- Follower ---
+// --- Player visual ---
 
-fn spawn_follower(
+fn spawn_player_model(
     mut commands: Commands,
     catalog: Option<Res<EntityCatalog>>,
     mut cache: ResMut<EntityGpuCache>,
     existing: Query<(), With<EntityFollower>>,
+    local_player: Query<Entity, With<LocalPlayer>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<EntityMaterial>>,
@@ -447,10 +510,14 @@ fn spawn_follower(
     if !existing.is_empty() {
         return;
     }
+    let Ok(player_entity) = local_player.single() else {
+        return;
+    };
     let Some(catalog) = catalog else {
         return;
     };
-    let Some(&type_id) = catalog.types.keys().next() else {
+    let Some(type_id) = player_type_id(&catalog) else {
+        tracing::warn!("entity catalog has no types; skipping player model");
         return;
     };
     let Some(gpu) = ensure_type_gpu(
@@ -461,41 +528,19 @@ fn spawn_follower(
         &mut images,
         &mut materials,
     ) else {
+        tracing::warn!("failed to bake GPU assets for local player model");
         return;
     };
     spawn_entity_instance(
         &mut commands,
         gpu,
+        &mut materials,
         type_id,
-        Transform::from_xyz(0.0, -1000.0, 0.0),
+        Transform::default(),
         0,
         true,
+        Some(player_entity),
     );
-}
-
-fn update_follower(
-    camera: Query<&Transform, (With<GameCamera>, Without<EntityFollower>)>,
-    mut follower: Query<&mut Transform, With<EntityFollower>>,
-) {
-    let Ok(cam) = camera.single() else {
-        return;
-    };
-    let Ok(mut tf) = follower.single_mut() else {
-        return;
-    };
-    // Place the follower behind the camera at ground level, facing the same way
-    // the camera looks, so it never blocks the view (like a third-person self).
-    let forward = cam.forward().as_vec3();
-    let flat_forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-    if flat_forward == Vec3::ZERO {
-        return;
-    }
-    let feet = cam.translation - Vec3::Y * 1.62;
-    tf.translation = feet - flat_forward * 2.0;
-    // The model's front face looks toward -Z at yaw 0, so rotate to align it
-    // with the camera's forward heading.
-    let yaw = flat_forward.x.atan2(flat_forward.z) + std::f32::consts::PI;
-    tf.rotation = Quat::from_rotation_y(yaw);
 }
 
 // --- Lighting sync ---
@@ -506,5 +551,78 @@ fn push_scene_lighting_to_entities(
 ) {
     for (_, mat) in materials.iter_mut() {
         mat.scene_lighting = lighting.uniform;
+    }
+}
+
+fn sync_entity_world_light(
+    cache: Res<MeshCacheResource>,
+    mut materials: ResMut<Assets<EntityMaterial>>,
+    roots: Query<(&Transform, &EntityMaterialHandle), With<EntityRoot>>,
+) {
+    for (transform, handle) in &roots {
+        let foot = BlockPos::new(
+            transform.translation.x.floor() as i32,
+            transform.translation.y.floor() as i32,
+            transform.translation.z.floor() as i32,
+        );
+        let chunk_pos = foot.chunk_pos();
+        let (sky, block) = cache.light_grid(chunk_pos).map_or((15u8, 0u8), |grid| {
+            let chunk_base = BlockPos::new(
+                chunk_pos.x * CHUNK_SIZE,
+                chunk_pos.y * CHUNK_SIZE,
+                chunk_pos.z * CHUNK_SIZE,
+            );
+            grid.sample_world(chunk_base, foot)
+        });
+
+        if let Some(mut mat) = materials.get_mut(&handle.0) {
+            mat.light = Vec4::new(
+                sky as f32 / 15.0,
+                block as f32 / 15.0,
+                0.5,
+                0.0,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use stagcrest_protocol::{EntityTypeId, EntityWireDef};
+
+    fn sample_catalog(ids: &[&str]) -> EntityCatalog {
+        let mut types = HashMap::new();
+        for (index, id) in ids.iter().enumerate() {
+            types.insert(
+                EntityTypeId(index as u32),
+                EntityTypeAssets {
+                    wire: EntityWireDef {
+                        type_id: EntityTypeId(index as u32),
+                        namespaced_id: (*id).into(),
+                        archetype: String::new(),
+                        texture_width: 64,
+                        texture_height: 64,
+                        scale: 1.0,
+                        idle_animation: String::new(),
+                        walk_animation: None,
+                    },
+                    model: BakedModel {
+                        bones: Vec::new(),
+                        texture_width: 64,
+                        texture_height: 64,
+                    },
+                    animations: AnimationSet::default(),
+                    texture_png: Vec::new(),
+                },
+            );
+        }
+        EntityCatalog { types }
+    }
+
+    #[test]
+    fn player_type_id_prefers_stagcrest_player() {
+        let catalog = sample_catalog(&["stagcrest:zombie", "stagcrest:player"]);
+        assert_eq!(player_type_id(&catalog), Some(EntityTypeId(1)));
     }
 }

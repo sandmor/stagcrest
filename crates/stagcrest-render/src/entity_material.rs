@@ -7,7 +7,8 @@ use bevy::pbr::{Material, MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, FrontFace, PolygonMode, PrimitiveState, RenderPipelineDescriptor,
+    SpecializedMeshPipelineError,
 };
 use bevy::shader::{Shader, ShaderRef};
 
@@ -15,6 +16,9 @@ use crate::scene_lighting::SceneLightingUniform;
 
 pub const ENTITY_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("f4a1c2d3-5b6e-4079-9a1b-2c3d4e5f6071");
+
+pub const ENTITY_PREPASS_SHADER_HANDLE: Handle<Shader> =
+    uuid_handle!("a3b2c1d0-e5f4-4321-abcd-9876543210fe");
 
 #[derive(Default)]
 pub struct EntityMaterialPlugin;
@@ -25,6 +29,12 @@ impl Plugin for EntityMaterialPlugin {
             app,
             ENTITY_SHADER_HANDLE,
             "../../../assets/shaders/entity.wgsl",
+            Shader::from_wgsl
+        );
+        load_internal_asset!(
+            app,
+            ENTITY_PREPASS_SHADER_HANDLE,
+            "../../../assets/shaders/entity_prepass.wgsl",
             Shader::from_wgsl
         );
         app.add_plugins(MaterialPlugin::<EntityMaterial>::default());
@@ -52,6 +62,14 @@ impl Material for EntityMaterial {
         ENTITY_SHADER_HANDLE.into()
     }
 
+    fn prepass_vertex_shader() -> ShaderRef {
+        ENTITY_PREPASS_SHADER_HANDLE.into()
+    }
+
+    fn prepass_fragment_shader() -> ShaderRef {
+        ENTITY_PREPASS_SHADER_HANDLE.into()
+    }
+
     fn alpha_mode(&self) -> AlphaMode {
         AlphaMode::Mask(0.5)
     }
@@ -64,10 +82,16 @@ impl Material for EntityMaterial {
     ) -> Result<(), SpecializedMeshPipelineError> {
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
         ])?;
         descriptor.vertex.buffers = vec![vertex_layout];
+        descriptor.primitive = PrimitiveState {
+            cull_mode: None,
+            front_face: FrontFace::Ccw,
+            polygon_mode: PolygonMode::Fill,
+            ..default()
+        };
         Ok(())
     }
 }

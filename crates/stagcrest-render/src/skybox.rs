@@ -3,10 +3,9 @@
 use bevy::asset::{load_internal_asset, uuid_handle, Handle};
 use bevy::camera::Viewport;
 use bevy::core_pipeline::{
-    core_3d::{main_opaque_pass_3d, CORE_3D_DEPTH_FORMAT},
+    core_3d::{main_opaque_pass_3d, main_transparent_pass_3d, CORE_3D_DEPTH_FORMAT},
     schedule::{Core3d, Core3dSystems},
 };
-use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::*;
 use bevy::render::extract_component::{
     ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
@@ -77,6 +76,7 @@ impl Plugin for SkyboxPlugin {
                 Core3d,
                 skybox_pass
                     .after(main_opaque_pass_3d)
+                    .before(main_transparent_pass_3d)
                     .in_set(Core3dSystems::MainPass),
             );
     }
@@ -182,7 +182,7 @@ fn prepare_skybox_pipelines(
     }
 }
 
-pub(crate) fn skybox_pass(
+pub fn skybox_pass(
     view: ViewQuery<(
         &ExtractedCamera,
         &ViewTarget,

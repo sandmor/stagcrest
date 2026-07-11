@@ -4,7 +4,7 @@ use super::state::{CreativeInventory, InventoryUiState, SlotKind};
 use crate::block_icons::BlockIconCache;
 use crate::chat::ChatUiState;
 use crate::game_session::GameCamera;
-use crate::player::{release_cursor, FlyCamera, SelectedBlock};
+use crate::player::{release_cursor, PlayerController, SelectedBlock};
 use crate::ui::UiTheme;
 use bevy::input_focus::InputFocus;
 use bevy::picking::events::{Pointer, Press};
@@ -25,7 +25,7 @@ pub fn toggle_inventory_screen(
     theme: Res<UiTheme>,
     mod_ctx: Option<Res<crate::game::ModContext>>,
     icons: Option<Res<BlockIconCache>>,
-    mut fly: Query<&mut FlyCamera, With<GameCamera>>,
+    mut ctrl: Query<&mut PlayerController, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     existing: Query<Entity, With<super::screen::InventoryScreenRoot>>,
     ghost: Query<Entity, With<CursorGhost>>,
@@ -41,9 +41,9 @@ pub fn toggle_inventory_screen(
     ui.open = !ui.open;
 
     if ui.open {
-        if let Ok(mut fly) = fly.single_mut() {
+        if let Ok(mut ctrl) = ctrl.single_mut() {
             if let Ok(mut c) = cursor.single_mut() {
-                release_cursor(&mut fly, &mut c);
+                release_cursor(&mut ctrl, &mut c);
             }
         }
         let (Some(ctx), Some(icons)) = (mod_ctx, icons) else {
@@ -61,11 +61,11 @@ pub fn toggle_inventory_screen(
         for e in &ghost {
             commands.entity(e).despawn();
         }
-        if let Ok(mut fly) = fly.single_mut() {
+        if let Ok(mut ctrl) = ctrl.single_mut() {
             if let Ok(mut c) = cursor.single_mut() {
                 c.grab_mode = bevy::window::CursorGrabMode::Locked;
                 c.visible = false;
-                fly.captured = true;
+                ctrl.captured = true;
             }
         }
     }

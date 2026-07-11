@@ -23,11 +23,11 @@ pub use block_model::{
     block_selection_bounds, emit_block_model, mesh_bucket_for_layer, MeshBucket, SelectionBounds,
 };
 pub use chunk_build::build_chunk_mesh_snapshot;
+pub use greedy_mesh::greedy_mesh_enabled;
 pub use light::{
     encode_normal_axis, pack_light, shade_vertex, vertex_ao, ChunkLightGrid, LightBuildContext,
     LightSampler, LightingContext, GRID_SIZE,
 };
-pub use greedy_mesh::greedy_mesh_enabled;
 pub use mesh_snapshot::{capture_power_grid, MeshClimateSnapshot, MeshSnapshot};
 pub use model_bake::{
     bake_block_model, bake_cross_plant, bake_unit_quad, bake_wire_quad, BakedMesh, GpuMeshVertex,
@@ -59,8 +59,11 @@ pub struct ChunkMesh {
     pub opaque_indices: Vec<u32>,
     pub transparent_vertices: Vec<VoxelVertex>,
     pub transparent_indices: Vec<u32>,
+    pub water_vertices: Vec<VoxelVertex>,
+    pub water_indices: Vec<u32>,
     pub cutout_vertices: Vec<VoxelVertex>,
     pub cutout_indices: Vec<u32>,
+    pub light_grid: ChunkLightGrid,
 }
 
 pub struct MeshCache {
@@ -81,6 +84,10 @@ impl Default for MeshCache {
 impl MeshCache {
     pub fn get(&self, pos: ChunkPos) -> Option<&ChunkMesh> {
         self.meshes.get(&pos)
+    }
+
+    pub fn light_grid(&self, pos: ChunkPos) -> Option<&ChunkLightGrid> {
+        self.meshes.get(&pos).map(|mesh| &mesh.light_grid)
     }
 
     pub fn commit_mesh(&mut self, pos: ChunkPos, mesh: ChunkMesh) {
@@ -801,7 +808,7 @@ fn emit_flat(
         climate,
         column_tints,
         light,
-        false,
+        true,
     );
 }
 

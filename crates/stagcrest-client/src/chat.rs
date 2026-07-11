@@ -11,7 +11,7 @@ use crate::game::{AppState, GameplayState};
 use crate::game_session::GameCamera;
 use crate::input::text_field_focused;
 use crate::net_client::GameNetClient;
-use crate::player::{release_cursor, FlyCamera};
+use crate::player::{release_cursor, PlayerController};
 use crate::ui::UiTheme;
 
 const MAX_MESSAGES: usize = 100;
@@ -227,7 +227,7 @@ fn toggle_chat_input(
     mut input_row: Query<&mut Visibility, With<ChatInputRow>>,
     input_field: Query<Entity, With<ChatInputField>>,
     mut input_focus: ResMut<InputFocus>,
-    mut fly: Query<&mut FlyCamera, With<GameCamera>>,
+    mut fly: Query<&mut PlayerController, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
     gameplay: Res<State<GameplayState>>,
 ) {
@@ -256,7 +256,7 @@ fn submit_chat(
     mut input_field: Query<&mut EditableText, With<ChatInputField>>,
     mut input_focus: ResMut<InputFocus>,
     mut net: ResMut<GameNetClient>,
-    mut fly: Query<&mut FlyCamera, With<GameCamera>>,
+    mut fly: Query<&mut PlayerController, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !chat.input_open || !keys.just_pressed(KeyCode::Enter) {
@@ -281,7 +281,7 @@ fn close_chat_input(
     mut input_row: Query<&mut Visibility, With<ChatInputRow>>,
     mut input_field: Query<&mut EditableText, With<ChatInputField>>,
     mut input_focus: ResMut<InputFocus>,
-    mut fly: Query<&mut FlyCamera, With<GameCamera>>,
+    mut fly: Query<&mut PlayerController, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !chat.input_open || !keys.just_pressed(KeyCode::Escape) {
@@ -302,7 +302,7 @@ fn close_chat(
     input_row: &mut Query<&mut Visibility, With<ChatInputRow>>,
     input_field: &mut Query<&mut EditableText, With<ChatInputField>>,
     input_focus: &mut InputFocus,
-    fly: &mut Query<&mut FlyCamera, With<GameCamera>>,
+    fly: &mut Query<&mut PlayerController, With<GameCamera>>,
     cursor: &mut Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     chat.input_open = false;

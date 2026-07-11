@@ -28,6 +28,8 @@ pub struct ContentSettingsFile {
     pub content: ContentSection,
     #[serde(default)]
     pub player: PlayerSection,
+    #[serde(default)]
+    pub graphics: GraphicsSection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +48,104 @@ impl Default for PlayerSection {
 
 fn default_username() -> String {
     "Player".into()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum GraphicsQualityTier {
+    Low,
+    #[default]
+    Medium,
+    High,
+    Ultra,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum GraphicsReflectionTier {
+    SkyOnly,
+    Ssr,
+    Planar,
+}
+
+impl Default for GraphicsReflectionTier {
+    fn default() -> Self {
+        Self::Ssr
+    }
+}
+
+impl<'de> Deserialize<'de> for GraphicsReflectionTier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "SkyOnly" => Ok(Self::SkyOnly),
+            "Ssr" => Ok(Self::Ssr),
+            "Planar" => Ok(Self::Planar),
+            // Removed tier; keep old settings files loadable.
+            "VoxelRt" => Ok(Self::Planar),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["SkyOnly", "Ssr", "Planar"],
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphicsSection {
+    #[serde(default)]
+    pub tier: GraphicsQualityTier,
+    #[serde(default)]
+    pub reflection_tier: GraphicsReflectionTier,
+    #[serde(default = "default_shadow_cascades")]
+    pub shadow_cascades: u32,
+    #[serde(default = "default_shadow_distance")]
+    pub shadow_distance: f32,
+    #[serde(default = "default_true")]
+    pub ssao: bool,
+    #[serde(default = "default_true")]
+    pub bloom: bool,
+    #[serde(default = "default_true")]
+    pub taa: bool,
+    #[serde(default)]
+    pub volumetric_light: bool,
+    #[serde(default = "default_true")]
+    pub fog: bool,
+    #[serde(default)]
+    pub dof: bool,
+    #[serde(default = "default_true")]
+    pub sharpen: bool,
+}
+
+fn default_shadow_cascades() -> u32 {
+    3
+}
+
+fn default_shadow_distance() -> f32 {
+    96.0
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for GraphicsSection {
+    fn default() -> Self {
+        Self {
+            tier: GraphicsQualityTier::Medium,
+            reflection_tier: GraphicsReflectionTier::Ssr,
+            shadow_cascades: default_shadow_cascades(),
+            shadow_distance: default_shadow_distance(),
+            ssao: true,
+            bloom: true,
+            taa: true,
+            volumetric_light: false,
+            fog: true,
+            dof: false,
+            sharpen: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -252,6 +352,14 @@ impl ContentSettings {
 
     pub fn content_mut(&mut self) -> &mut ContentSection {
         &mut self.file.content
+    }
+
+    pub fn graphics(&self) -> &GraphicsSection {
+        &self.file.graphics
+    }
+
+    pub fn set_graphics(&mut self, section: GraphicsSection) {
+        self.file.graphics = section;
     }
 
     pub fn player(&self) -> &PlayerSection {
@@ -500,6 +608,40 @@ mod tests {
         settings.move_pack("c", MoveDirection::Up).unwrap();
         settings.move_pack("c", MoveDirection::Up).unwrap();
         assert_eq!(settings.content().resource_pack_order, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn graphics_section_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let mut settings = ContentSettings::empty(dir.path());
+        settings.set_graphics(GraphicsSection {
+            tier: GraphicsQualityTier::High,
+            reflection_tier: GraphicsReflectionTier::Planar,
+            shadow_cascades: 4,
+            shadow_distance: 128.0,
+            ssao: false,
+            bloom: true,
+            taa: false,
+            volumetric_light: true,
+            fog: false,
+            dof: true,
+            sharpen: false,
+        });
+        settings.save().unwrap();
+
+        let loaded = ContentSettings::load(dir.path()).unwrap();
+        let g = loaded.graphics();
+        assert_eq!(g.tier, GraphicsQualityTier::High);
+        assert_eq!(g.reflection_tier, GraphicsReflectionTier::Planar);
+        assert_eq!(g.shadow_cascades, 4);
+        assert!((g.shadow_distance - 128.0).abs() < f32::EPSILON);
+        assert!(!g.ssao);
+        assert!(g.bloom);
+        assert!(!g.taa);
+        assert!(g.volumetric_light);
+        assert!(!g.fog);
+        assert!(g.dof);
+        assert!(!g.sharpen);
     }
 
     #[test]

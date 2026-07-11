@@ -2,6 +2,7 @@ use crate::block_outline;
 use crate::chat::ChatUiState;
 use crate::client_content::{cleanup_screen, spawn_screen_button};
 use crate::game::{AppState, GameplayState};
+use crate::graphics_settings_screen::GraphicsReturn;
 use crate::game_session::in_paused_gameplay;
 use crate::game_session::GameCamera;
 use crate::player;
@@ -19,6 +20,7 @@ struct PauseRoot;
 #[derive(Component)]
 enum PauseAction {
     Resume,
+    Graphics,
     MainMenu,
 }
 
@@ -44,7 +46,7 @@ fn toggle_pause(
     gameplay: Res<State<GameplayState>>,
     chat: Res<ChatUiState>,
     mut next: ResMut<NextState<GameplayState>>,
-    mut fly: Query<&mut player::FlyCamera, With<GameCamera>>,
+    mut ctrl: Query<&mut player::PlayerController, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
@@ -57,10 +59,10 @@ fn toggle_pause(
 
     match gameplay.get() {
         GameplayState::Active => {
-            if let Ok(mut fly) = fly.single_mut() {
-                if fly.captured {
+            if let Ok(mut ctrl) = ctrl.single_mut() {
+                if ctrl.captured {
                     if let Ok(mut c) = cursor.single_mut() {
-                        player::release_cursor(&mut fly, &mut c);
+                        player::release_cursor(&mut ctrl, &mut c);
                     }
                     return;
                 }
@@ -74,12 +76,12 @@ fn toggle_pause(
 fn spawn_pause_menu(
     mut commands: Commands,
     theme: Res<UiTheme>,
-    mut fly: Query<&mut player::FlyCamera, With<GameCamera>>,
+    mut ctrl: Query<&mut player::PlayerController, With<GameCamera>>,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
-    if let Ok(mut fly) = fly.single_mut() {
+    if let Ok(mut ctrl) = ctrl.single_mut() {
         if let Ok(mut c) = cursor.single_mut() {
-            player::release_cursor(&mut fly, &mut c);
+            player::release_cursor(&mut ctrl, &mut c);
         }
     }
 
@@ -112,6 +114,7 @@ fn spawn_pause_menu(
                         TextColor(theme.text_primary),
                     ));
                     spawn_screen_button(menu, "Resume", PauseAction::Resume, &theme);
+                    spawn_screen_button(menu, "Graphics", PauseAction::Graphics, &theme);
                     spawn_screen_button(menu, "Main Menu", PauseAction::MainMenu, &theme);
                 });
         });
@@ -121,11 +124,16 @@ fn pause_button_system(
     mut interaction: Query<(&Interaction, &PauseAction), (Changed<Interaction>, With<Button>)>,
     mut next_app: ResMut<NextState<AppState>>,
     mut next_gameplay: ResMut<NextState<GameplayState>>,
+    mut return_to: ResMut<GraphicsReturn>,
 ) {
     for (interaction, action) in &mut interaction {
         if *interaction == Interaction::Pressed {
             match action {
                 PauseAction::Resume => next_gameplay.set(GameplayState::Active),
+                PauseAction::Graphics => {
+                    return_to.0 = AppState::InGame;
+                    next_app.set(AppState::GraphicsSettings);
+                }
                 PauseAction::MainMenu => next_app.set(AppState::MainMenu),
             }
         }

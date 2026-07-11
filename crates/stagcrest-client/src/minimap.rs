@@ -12,7 +12,7 @@ use stagcrest_net::MapViewSubscribe;
 use stagcrest_protocol::BlockPos;
 
 use crate::game::AppState;
-use crate::game_session::GameCamera;
+use crate::player::{player_block_pos, LocalPlayer};
 use crate::input::text_field_focused;
 use crate::mesh_scheduler::poll_future_now;
 use crate::net_client::GameNetClient;
@@ -298,17 +298,13 @@ fn toggle_minimap(
     mut tiles: ResMut<MapTileCache>,
     mut queue: ResMut<MinimapDecodeQueue>,
     mut roots: Query<&mut Visibility, With<MinimapRoot>>,
-    camera: Query<&Transform, With<GameCamera>>,
+    player: Query<&Transform, With<LocalPlayer>>,
 ) {
     if keys.just_pressed(KeyCode::KeyM) {
         state.visible = !state.visible;
         if state.visible {
-            if let Ok(cam) = camera.single() {
-                state.last_center = BlockPos::new(
-                    cam.translation.x.floor() as i32,
-                    cam.translation.y.floor() as i32,
-                    cam.translation.z.floor() as i32,
-                );
+            if let Ok(player_tf) = player.single() {
+                state.last_center = player_block_pos(player_tf.translation);
                 state.framebuffer.center_x = state.last_center.x;
                 state.framebuffer.center_z = state.last_center.z;
             }
@@ -371,19 +367,15 @@ fn minimap_decode_apply(
 fn minimap_track_camera(
     mut state: ResMut<MinimapState>,
     mut tiles: ResMut<MapTileCache>,
-    camera: Query<&Transform, With<GameCamera>>,
+    player: Query<&Transform, With<LocalPlayer>>,
 ) {
     if !state.visible {
         return;
     }
-    let Ok(cam) = camera.single() else {
+    let Ok(player_tf) = player.single() else {
         return;
     };
-    let center = BlockPos::new(
-        cam.translation.x.floor() as i32,
-        cam.translation.y.floor() as i32,
-        cam.translation.z.floor() as i32,
-    );
+    let center = player_block_pos(player_tf.translation);
     let dx = center.x - state.last_center.x;
     let dz = center.z - state.last_center.z;
     if dx == 0 && dz == 0 {

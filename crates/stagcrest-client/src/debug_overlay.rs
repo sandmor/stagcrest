@@ -12,7 +12,7 @@ use crate::environment::PlayerEnvironment;
 use crate::game::{AppState, GameConfig, ModContext};
 use crate::game_session::GameCamera;
 use crate::net_client::GameNetClient;
-use crate::player::{FlyCamera, SelectedBlock};
+use crate::player::{PlayerController, SelectedBlock};
 use crate::targeting::BlockTarget;
 use crate::ui::UiTheme;
 use crate::world_replica::{CircuitPowerOverlay, WorldReplica};
@@ -113,7 +113,7 @@ fn update_debug_overlay(
     env: Res<PlayerEnvironment>,
     target: Res<BlockTarget>,
     selected: Res<SelectedBlock>,
-    camera: Query<(&Transform, &FlyCamera), With<GameCamera>>,
+    camera: Query<(&Transform, &PlayerController), With<GameCamera>>,
     mesh_cache: Option<Res<MeshCacheResource>>,
     power: Option<Res<CircuitPowerOverlay>>,
     mut text: Query<&mut Text, With<DebugOverlayText>>,
@@ -123,7 +123,7 @@ fn update_debug_overlay(
         return;
     }
 
-    let Ok((transform, fly)) = camera.single() else {
+    let Ok((transform, ctrl)) = camera.single() else {
         return;
     };
     let Ok(mut label) = text.single_mut() else {
@@ -142,7 +142,7 @@ fn update_debug_overlay(
 
     **label = format_debug_text(
         transform,
-        fly,
+        ctrl,
         mod_ctx.as_deref(),
         world.as_deref(),
         biome_cache.as_deref(),
@@ -159,7 +159,7 @@ fn update_debug_overlay(
 
 fn format_debug_text(
     transform: &Transform,
-    fly: &FlyCamera,
+    ctrl: &PlayerController,
     mod_ctx: Option<&ModContext>,
     world: Option<&WorldReplica>,
     biome_cache: Option<&BiomeGridCache>,
@@ -179,9 +179,9 @@ fn format_debug_text(
         pos.z.floor() as i32,
     );
     let chunk = block_pos.chunk_pos();
-    let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+    let (yaw, pitch, _) = (ctrl.yaw, ctrl.pitch, 0.0f32);
     let facing = facing_from_forward(transform.forward());
-    let cursor = if fly.captured { "captured" } else { "released" };
+    let cursor = if ctrl.captured { "captured" } else { "released" };
 
     let mut lines = vec![
         "Stagcrest Debug  [F3]".to_string(),

@@ -4,7 +4,7 @@ use stagcrest_protocol::BlockPos;
 
 use crate::chunk_streaming::BiomeGridCache;
 use crate::game::ModContext;
-use crate::game_session::GameCamera;
+use crate::player::{player_eye_position, LocalPlayer};
 use crate::world_replica::WorldReplica;
 
 const SUBMERSION_LERP_SPEED: f32 = 4.0;
@@ -47,18 +47,18 @@ pub fn update_player_environment(
     mod_ctx: Option<Res<ModContext>>,
     world: Option<Res<WorldReplica>>,
     biome_cache: Option<Res<BiomeGridCache>>,
-    camera: Query<&Transform, With<GameCamera>>,
+    player: Query<&Transform, With<LocalPlayer>>,
     mut env: ResMut<PlayerEnvironment>,
 ) {
-    let Ok(transform) = camera.single() else {
+    let Ok(player_tf) = player.single() else {
         return;
     };
 
-    let pos = transform.translation;
+    let eye = player_eye_position(player_tf.translation);
     let eye_block = BlockPos::new(
-        pos.x.floor() as i32,
-        pos.y.floor() as i32,
-        pos.z.floor() as i32,
+        eye.x.floor() as i32,
+        eye.y.floor() as i32,
+        eye.z.floor() as i32,
     );
     env.eye_block = eye_block;
 
